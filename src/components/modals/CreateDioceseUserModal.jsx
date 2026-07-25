@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { Button } from '@/components/ui/button';
 import Input from '@/components/ui/Input';
-import Select from '@/components/ui/Select';
-import { useAppData } from '@/context/AppDataContext';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select';import { useAppData } from '@/context/AppDataContext';
 import { useToast } from '@/components/ui/use-toast';
 
 const CreateDioceseUserModal = ({ isOpen, onClose, onSuccess }) => {
