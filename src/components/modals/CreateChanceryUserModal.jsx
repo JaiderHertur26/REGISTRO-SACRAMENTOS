@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { Button } from '@/components/ui/button';
 import Input from '@/components/ui/Input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { useAppData } from '@/context/AppDataContext';
 import { useToast } from '@/components/ui/use-toast';
 
