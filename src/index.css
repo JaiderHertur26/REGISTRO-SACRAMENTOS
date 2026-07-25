@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-[#111111];
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply text-[#111111] font-semibold tracking-tight;
+  }
+
+  p, span, label, td, th {
+    @apply text-[#111111];
+  }
+
+  /* Form Elements - Ensure high contrast */
+  input, textarea, select {
+    @apply bg-white text-[#111111] border-gray-300 placeholder:text-gray-500;
+  }
+
+  input:focus, textarea:focus, select:focus {
+    @apply ring-2 ring-[#D4AF37] border-transparent outline-none;
+  }
+
+  /* Table Styles */
+  th {
+    @apply font-bold text-[#111111] bg-gray-100;
+  }
+
+  td {
+    @apply border-b border-gray-100;
+  }
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
+
+/* --- PRINT MEDIA STYLES --- */
+@media print {
+  /* Configure Page Size - Letter */
+  @page {
+    size: letter; /* 8.5in x 11in */
+    margin: 0mm;  /* Remove default margins completely */
+  }
+
+  /* Reset Body and HTML for full page printing */
+  html, body {
+    width: 8.5in;
+    height: 11in;
+    margin: 0 !important;
+    padding: 0 !important;
+    background-color: white !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    overflow: hidden !important; /* Prevent scrollbars from printing */
+  }
+
+  /* Hide all non-printable UI elements globally */
+  nav, 
+  aside, 
+  header, 
+  footer, 
+  button,
+  .no-print,
+  .sidebar-container, 
+  [role="dialog"],
+  [class*="DashboardLayout"] > div:first-child { /* Targets sidebar typically */
+    display: none !important;
+  }
+
+  /* Force display of the print-specific container */
+  .print\:block {
+    display: block !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 9999;
+  }
+
+  /* Explicitly hide the regular content wrapper */
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Prevent page breaks inside the main ticket container */
+  .print\:block > div {
+    page-break-inside: avoid !important;
+    page-break-after: avoid !important;
+  }
+  
+  /* Ensure text colors are black for printing */
+  * {
+    color: #000 !important;
+    text-shadow: none !important;
+  }
+}
