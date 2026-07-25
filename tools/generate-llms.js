@@ -81,8 +81,24 @@ function extractRoutes(appJsxPath) {
   }
 }
 
-function findReactFiles(dir) {
-  return fs.readdirSync(dir).map(item => path.join(dir, item));
+// ESTA ES LA FUNCIÓN CORREGIDA
+function findReactFiles(dir, fileList = []) {
+  const items = fs.readdirSync(dir);
+
+  for (const item of items) {
+    const fullPath = path.join(dir, item);
+    const stat = fs.statSync(fullPath);
+
+    if (stat.isDirectory()) {
+      // Si es una carpeta, aplicamos recursividad para entrar en ella
+      findReactFiles(fullPath, fileList);
+    } else if (fullPath.endsWith('.jsx') || fullPath.endsWith('.js')) {
+      // Si es un archivo de React, lo agregamos a la lista
+      fileList.push(fullPath);
+    }
+  }
+
+  return fileList;
 }
 
 function extractHelmetData(content, filePath, routes) {
@@ -155,6 +171,7 @@ function main() {
     pages = pages.filter(Boolean);
   } else {
     const routes = extractRoutes(appJsxPath);
+    // Ahora findReactFiles devolverá TODAS las rutas de archivos reales
     const reactFiles = findReactFiles(pagesDir);
 
     pages = reactFiles
@@ -166,7 +183,6 @@ function main() {
     console.error('❌ No pages with Helmet components found!');
     process.exit(1);
   }
-
 
   const llmsTxtContent = generateLlmsTxt(pages);
   const outputPath = path.join(process.cwd(), 'public', 'llms.txt');
