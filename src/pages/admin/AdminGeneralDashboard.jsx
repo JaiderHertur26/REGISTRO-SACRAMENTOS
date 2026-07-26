@@ -39,6 +39,7 @@ const AdminGeneralDashboard = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [pendingDioceses, setPendingDioceses] = useState([]);
 
+  // --- OBTENCIÓN DE TOKENS (CON MANEJO DE ERRORES MEJORADO) ---
   useEffect(() => {
       const fetchPendingTokens = async () => {
           try {
@@ -47,9 +48,10 @@ const AdminGeneralDashboard = () => {
                   .select('*')
                   .eq('type', 'DIOCESE');
                   
+              // Si la tabla no existe o hay error, salimos silenciosamente en lugar de romper
               if (error) throw error;
               
-              if (tokens) {
+              if (tokens && Array.isArray(tokens)) {
                   const formattedTokens = tokens.map(item => ({
                       id: item.id,
                       token: item.token,
@@ -59,23 +61,25 @@ const AdminGeneralDashboard = () => {
                   setPendingDioceses(formattedTokens);
               }
           } catch (error) {
-              console.error("Error cargando tokens:", error);
+              console.warn("Advertencia de Red (Tokens):", error.message || error);
           }
       };
       fetchPendingTokens();
   }, []);
 
+  // 🚀 FIX CRÍTICO: Reemplazo de path '#' por '/admin/dashboard'
   const menuItems = [
-    { label: 'Dashboard', path: '#', icon: LayoutDashboard, onClick: () => setActiveSection('dashboard') },
-    { label: 'Copia de Seguridad Universal', path: '#', icon: Database, onClick: () => setActiveSection('backup') },
+    { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard, onClick: () => setActiveSection('dashboard') },
+    { label: 'Copia de Seguridad Universal', path: '/admin/dashboard', icon: Database, onClick: () => setActiveSection('backup') },
     { label: 'Diócesis/Arquidiócesis', path: '/admin/dioceses', icon: Church },
     { label: 'Ajustes', path: '/admin/settings', icon: SettingsIcon },
   ];
 
-  const safeDioceses = data.dioceses || [];
-  const safeUsers = data.users || [];
-  const safeParishes = data.parishes || [];
-  const safeSacraments = data.sacraments || [];
+  // Prevención de valores nulos (Failsafe)
+  const safeDioceses = data?.dioceses || [];
+  const safeUsers = data?.users || [];
+  const safeParishes = data?.parishes || [];
+  const safeSacraments = data?.sacraments || [];
 
   const stats = [
     { label: 'Diócesis Activas', value: safeDioceses.length, icon: Church, color: 'bg-blue-600', text: 'text-blue-700' },
@@ -85,7 +89,7 @@ const AdminGeneralDashboard = () => {
   ];
 
   const filteredDioceses = safeDioceses.filter(d => 
-    d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (d.name && d.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (d.city && d.city.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
@@ -96,7 +100,7 @@ const AdminGeneralDashboard = () => {
         if (typeof adminUser.username === 'object' && adminUser.username !== null) {
             displayUsername = adminUser.username.name || adminUser.username.username || 'Usuario';
         } else {
-            displayUsername = adminUser.username || adminUser.email;
+            displayUsername = adminUser.username || adminUser.email || 'Usuario';
         }
     }
     return { ...diocese, username: displayUsername, userId: adminUser ? adminUser.id : null };
@@ -120,6 +124,7 @@ const AdminGeneralDashboard = () => {
     }
   };
 
+  // --- GENERACIÓN DE TOKENS Y ALMACENAMIENTO EN SUPABASE ---
   const handleGenerateToken = async (e) => {
       e.preventDefault();
       setIsGenerating(true);
@@ -146,7 +151,7 @@ const AdminGeneralDashboard = () => {
                   token: newToken,
                   type: 'DIOCESE',
                   payload: payloadData,
-                  created_by: user.id
+                  created_by: user?.id || null
               }])
               .select()
               .single();
@@ -165,8 +170,9 @@ const AdminGeneralDashboard = () => {
           toast({ title: "Código Creado", description: "Guardado exitosamente en la nube.", variant: "success" });
 
       } catch (error) {
-          console.error("Error guardando token en la nube:", error);
-          toast({ title: "Error", description: "No se pudo conectar con el servidor.", variant: "destructive" });
+          console.error("Fallo detallado de Supabase:", error);
+          const errorMsg = error.message || error.details || "Verifique que la tabla 'pending_tokens' exista en la base de datos.";
+          toast({ title: "Error en la Nube", description: errorMsg, variant: "destructive" });
       } finally {
           setIsGenerating(false);
       }
@@ -192,8 +198,8 @@ const AdminGeneralDashboard = () => {
               setPendingDioceses(prev => prev.filter(d => d.id !== id));
               toast({ title: "Revocado", description: "El código ha sido eliminado de la nube.", variant: "success" });
           } catch (error) {
-              console.error("Error borrando token:", error);
-              toast({ title: "Error", description: "No se pudo borrar de la nube.", variant: "destructive" });
+              const errorMsg = error.message || "No se pudo borrar de la nube.";
+              toast({ title: "Error", description: errorMsg, variant: "destructive" });
           }
       }
   };
