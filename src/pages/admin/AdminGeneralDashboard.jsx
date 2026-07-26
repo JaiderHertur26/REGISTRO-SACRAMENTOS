@@ -39,7 +39,9 @@ const AdminGeneralDashboard = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [pendingDioceses, setPendingDioceses] = useState([]);
 
-  // --- OBTENCIÓN DE TOKENS (CON MANEJO DE ERRORES MEJORADO) ---
+  // =========================================================================
+  // 1. CARGA DE TOKENS DESDE SUPABASE
+  // =========================================================================
   useEffect(() => {
       const fetchPendingTokens = async () => {
           try {
@@ -48,7 +50,6 @@ const AdminGeneralDashboard = () => {
                   .select('*')
                   .eq('type', 'DIOCESE');
                   
-              // Si la tabla no existe o hay error, salimos silenciosamente en lugar de romper
               if (error) throw error;
               
               if (tokens && Array.isArray(tokens)) {
@@ -61,21 +62,49 @@ const AdminGeneralDashboard = () => {
                   setPendingDioceses(formattedTokens);
               }
           } catch (error) {
-              console.warn("Advertencia de Red (Tokens):", error.message || error);
+              console.warn("Advertencia de red (Tokens):", error.message || error);
           }
       };
       fetchPendingTokens();
   }, []);
 
-  // 🚀 FIX CRÍTICO: Reemplazo de path '#' por '/admin/dashboard'
+  // =========================================================================
+  // 2. MENÚ DE NAVEGACIÓN BLINDADO
+  // =========================================================================
   const menuItems = [
-    { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard, onClick: () => setActiveSection('dashboard') },
-    { label: 'Copia de Seguridad Universal', path: '/admin/dashboard', icon: Database, onClick: () => setActiveSection('backup') },
+    { 
+        label: 'Dashboard', 
+        path: '/admin/dashboard', 
+        icon: LayoutDashboard, 
+        onClick: (e) => { 
+            // Bloqueamos cualquier redirección nativa del navegador
+            if (e && e.preventDefault) e.preventDefault();
+            if (e && e.stopPropagation) e.stopPropagation();
+            
+            // Si ya estamos en dashboard, NO HACE NADA. Si no, cambia la vista.
+            if (activeSection !== 'dashboard') {
+                setActiveSection('dashboard'); 
+            }
+        } 
+    },
+    { 
+        label: 'Copia de Seguridad Universal', 
+        path: '/admin/dashboard', 
+        icon: Database, 
+        onClick: (e) => { 
+            if (e && e.preventDefault) e.preventDefault();
+            if (e && e.stopPropagation) e.stopPropagation();
+            
+            if (activeSection !== 'backup') {
+                setActiveSection('backup'); 
+            }
+        } 
+    },
     { label: 'Diócesis/Arquidiócesis', path: '/admin/dioceses', icon: Church },
     { label: 'Ajustes', path: '/admin/settings', icon: SettingsIcon },
   ];
 
-  // Prevención de valores nulos (Failsafe)
+  // Prevención de valores nulos
   const safeDioceses = data?.dioceses || [];
   const safeUsers = data?.users || [];
   const safeParishes = data?.parishes || [];
@@ -124,7 +153,9 @@ const AdminGeneralDashboard = () => {
     }
   };
 
-  // --- GENERACIÓN DE TOKENS Y ALMACENAMIENTO EN SUPABASE ---
+  // =========================================================================
+  // 3. GENERACIÓN DE TOKENS
+  // =========================================================================
   const handleGenerateToken = async (e) => {
       e.preventDefault();
       setIsGenerating(true);
@@ -170,9 +201,9 @@ const AdminGeneralDashboard = () => {
           toast({ title: "Código Creado", description: "Guardado exitosamente en la nube.", variant: "success" });
 
       } catch (error) {
-          console.error("Fallo detallado de Supabase:", error);
-          const errorMsg = error.message || error.details || "Verifique que la tabla 'pending_tokens' exista en la base de datos.";
-          toast({ title: "Error en la Nube", description: errorMsg, variant: "destructive" });
+          console.error("Fallo Detallado de Supabase:", error);
+          const errorMsg = error.message || error.details || "Verifique su conexión a la base de datos.";
+          toast({ title: "Fallo de Base de Datos", description: errorMsg, variant: "destructive" });
       } finally {
           setIsGenerating(false);
       }
@@ -250,7 +281,10 @@ const AdminGeneralDashboard = () => {
             <Button 
               variant="outline" 
               className="md:hidden flex items-center gap-2 border-blue-200 text-blue-700 bg-blue-50 rounded-2xl h-12"
-              onClick={() => setActiveSection('backup')}
+              onClick={(e) => { 
+                  if(e && e.preventDefault) e.preventDefault(); 
+                  setActiveSection('backup'); 
+              }}
             >
               <Database className="w-4 h-4" /> Gestión de Backups
             </Button>
@@ -330,6 +364,46 @@ const AdminGeneralDashboard = () => {
             
             <Table columns={columnsDioceses} data={dioceseTableData} className="border-none" />
           </div>
+        </motion.div>
+      )}
+
+      {/* VISTA DE COPIA DE SEGURIDAD UNIVERSAL */}
+      {activeSection === 'backup' && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
+            <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div>
+                    <h1 className="text-3xl font-black text-gray-900 tracking-tight flex items-center gap-3">
+                        <Database className="w-8 h-8 text-[#4B7BA7]" /> 
+                        Centro de Respaldo Global
+                    </h1>
+                    <p className="text-gray-500 mt-1 font-bold text-xs uppercase tracking-widest">
+                        Gestión y exportación de datos de todo el sistema
+                    </p>
+                </div>
+                <Button 
+                    variant="outline" 
+                    className="flex items-center gap-2 border-gray-200 text-gray-700 bg-white rounded-2xl h-12 hover:bg-gray-50"
+                    onClick={(e) => {
+                        if(e && e.preventDefault) e.preventDefault();
+                        setActiveSection('dashboard');
+                    }}
+                >
+                    <LayoutDashboard className="w-4 h-4" /> Volver al Dashboard
+                </Button>
+            </div>
+
+            <div className="bg-white rounded-[2.5rem] p-10 border border-gray-100 shadow-sm">
+                <div className="text-center py-16">
+                    <Database className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <h3 className="text-lg font-black text-gray-800 uppercase tracking-widest">Gestor de Backups</h3>
+                    <p className="text-gray-500 text-sm mt-2 max-w-md mx-auto">
+                        Aquí puedes descargar un respaldo completo de la base de datos de Supabase.
+                    </p>
+                    <Button className="mt-8 bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-8 py-6 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-900/10">
+                        Descargar Backup
+                    </Button>
+                </div>
+            </div>
         </motion.div>
       )}
 
