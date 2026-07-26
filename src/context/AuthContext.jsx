@@ -10,7 +10,6 @@ export const AuthProvider = ({ children }) => {
     const [profile, setProfile] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
-    const { toast } = useToast();
 
     useEffect(() => {
         const initSession = async () => {
@@ -23,18 +22,13 @@ export const AuthProvider = ({ children }) => {
                     setIsLoading(false);
                 }
             } catch (error) {
-                console.error("Error comprobando sesión:", error);
                 setIsLoading(false);
             }
         };
-
         initSession();
 
         const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-            if (event === 'SIGNED_IN' && session) {
-                setUser(session.user);
-                await loadUserProfile(session.user.id);
-            } else if (event === 'SIGNED_OUT') {
+            if (event === 'SIGNED_OUT') {
                 setUser(null);
                 setProfile(null);
                 setIsAuthenticated(false);
@@ -49,11 +43,9 @@ export const AuthProvider = ({ children }) => {
         try {
             const { data, error } = await supabase
                 .from('user_profiles')
-                .select('*, parishes(name)')
+                .select('*')
                 .eq('auth_user_id', authUserId)
                 .single();
-
-            if (error) throw error;
 
             if (data) {
                 setProfile(data);
@@ -61,7 +53,6 @@ export const AuthProvider = ({ children }) => {
                 localStorage.setItem('sacraments_user_profile', JSON.stringify(data));
             }
         } catch (error) {
-            console.warn("Buscando pase offline...");
             const cachedProfile = localStorage.getItem('sacraments_user_profile');
             if (cachedProfile) {
                 setProfile(JSON.parse(cachedProfile));
@@ -74,37 +65,42 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    // EL LOGIN AHORA DEVUELVE EL ROL DE INMEDIATO
     const login = async (email, password) => {
         try {
             const { data, error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) throw error;
-            return { success: true, user: data.user };
+            
+            const { data: prof } = await supabase.from('user_profiles').select('*').eq('auth_user_id', data.user.id).single();
+            
+            if(prof) {
+                setProfile(prof);
+                setIsAuthenticated(true);
+                localStorage.setItem('sacraments_user_profile', JSON.stringify(prof));
+                return { success: true, role: prof.role };
+            }
+            return { success: true, role: 'unknown' };
         } catch (error) {
-            return { success: false, error: "Credenciales incorrectas o sin conexión a internet." };
+            return { success: false, error: "Credenciales incorrectas." };
         }
     };
 
     const logout = async () => {
         await supabase.auth.signOut();
-        toast({ title: "Sesión cerrada", description: "Has salido de forma segura." });
+        window.location.href = '/login'; 
     };
 
     return (
         <AuthContext.Provider value={{
-            user,
-            profile,
-            isAuthenticated,
-            isLoading,
+            user, profile, isAuthenticated, isLoading,
             role: profile?.role || null,
             parishId: profile?.parish_id || null,
-            parishName: profile?.parishes?.name || 'Administración Central',
-            login,
-            logout
+            login, logout
         }}>
             {isLoading ? (
                 <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50">
                     <Loader2 className="w-12 h-12 text-[#D4AF37] animate-spin mb-4" />
-                    <p className="text-slate-500 font-medium uppercase tracking-widest text-sm">Verificando Credenciales...</p>
+                    <p className="text-slate-500 font-medium uppercase tracking-widest text-sm">Abriendo Bóveda Segura...</p>
                 </div>
             ) : children}
         </AuthContext.Provider>
