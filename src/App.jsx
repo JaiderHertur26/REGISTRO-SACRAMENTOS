@@ -30,6 +30,7 @@ import { AppDataProvider } from '@/context/AppDataContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import ScrollToTop from '@/components/ScrollToTop';
 import { Toaster } from '@/components/ui/toaster';
+import GlobalSyncIndicator from '@/components/GlobalSyncIndicator'; // <-- MOTOR OFFLINE-FIRST INTEGRADO
 
 import useSupabaseInit from '@/hooks/useSupabaseInit';
 
@@ -290,6 +291,7 @@ const AppContent = () => {
             </Routes>
 
             <Toaster />
+            <GlobalSyncIndicator />
         </>
     );
 };

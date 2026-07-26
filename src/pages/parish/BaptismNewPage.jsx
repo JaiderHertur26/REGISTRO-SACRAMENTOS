@@ -13,10 +13,13 @@ import BaptismTicket from '@/components/BaptismTicket';
 import CityAutocomplete from '@/components/CityAutocomplete';
 import useParroquiaFromMisDatos from '@/hooks/useParroquiaFromMisDatos';
 import { generateUUID } from '@/utils/supabaseHelpers';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 IMPORTACIÓN CLAVE
+import { supabase } from '@/lib/supabaseClient'; 
+
+// 🚀 IMPORTACIONES DEL NUEVO MOTOR OFFLINE-FIRST
+import { saveToLocalMirror, addToSyncQueue } from '@/lib/offlineDatabase';
 
 const BaptismNewPage = () => {
-    const { user } = useAuth();
+    const { user, profile } = useAuth(); // Usamos profile para mayor seguridad
     const { getMisDatosList, getCiudadesList } = useAppData();
     const navigate = useNavigate();
     const { toast } = useToast();
@@ -27,7 +30,7 @@ const BaptismNewPage = () => {
     const [ticketData, setTicketData] = useState(null);
     const [parishInfo, setParishInfo] = useState(null); 
     const [ciudades, setCiudades] = useState([]); 
-    const [fullParamsCache, setFullParamsCache] = useState(null); // 🚀 Guardamos el objeto completo para actualizarlo luego
+    const [fullParamsCache, setFullParamsCache] = useState(null); 
 
     const initialFormData = {
         numeroRegistro: '', Libro: '', folio: '', numero: '',
@@ -53,11 +56,13 @@ const BaptismNewPage = () => {
         }
     }, [parishNameFromMisDatos]);
 
-    // --- 2. CARGA DE DATOS DESDE SUPABASE ---
+    // --- 2. CARGA DE DATOS ---
     useEffect(() => {
         const loadInitialData = async () => {
-            if (user?.parishId) {
-                const entityId = user.parishId;
+            // Usamos parishId del profile o de user para mantener compatibilidad
+            const entityId = profile?.parish_id || user?.parishId; 
+            
+            if (entityId) {
                 const misDatos = getMisDatosList(entityId);
                 
                 if (misDatos?.length > 0) {
@@ -74,7 +79,7 @@ const BaptismNewPage = () => {
                     }
                 }
 
-                const contextId = user.dioceseId || entityId;
+                const contextId = user?.dioceseId || entityId;
                 const listaCiudadesRaw = getCiudadesList(contextId) || [];
                 setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
                 
@@ -85,7 +90,6 @@ const BaptismNewPage = () => {
                     if (active) setFormData(prev => ({ ...prev, ministro: `${active.nombre} ${active.apellido || ''}`.trim().toUpperCase() }));
                 }
 
-                // 🚀 CARGA DE PARÁMETROS DESDE SUPABASE EN VEZ DE LOCALSTORAGE
                 try {
                     const { data, error } = await supabase
                         .from('parish_parameters')
@@ -96,7 +100,7 @@ const BaptismNewPage = () => {
                     if (error && error.code !== 'PGRST116') throw error;
 
                     if (data && data.bautizos_params) {
-                        setFullParamsCache(data.bautizos_params); // Guardamos la config para poder actualizarla
+                        setFullParamsCache(data.bautizos_params);
                         
                         setFormData(prev => ({
                             ...prev,
@@ -113,7 +117,7 @@ const BaptismNewPage = () => {
         };
 
         loadInitialData();
-    }, [user, getMisDatosList, getCiudadesList]);
+    }, [user, profile, getMisDatosList, getCiudadesList]);
 
     // --- 3. MANEJADORES DE ENTRADA ---
     const handleChange = (e) => {
@@ -125,19 +129,15 @@ const BaptismNewPage = () => {
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
 
-    // 🚀 FIX CRÍTICO: Maneja tanto el evento de escritura como la selección de la lista
     const handleCityChange = (data) => {
         let value = "";
         
-        // Si data es un evento de input estándar
         if (data && data.target) {
             value = data.target.value;
         } 
-        // Si data es un string (viene de la selección del Autocomplete)
         else if (typeof data === 'string') {
             value = data;
         }
-        // Si data es un objeto (formato antiguo)
         else if (data && data.nombre) {
             value = data.nombre;
         }
@@ -148,30 +148,33 @@ const BaptismNewPage = () => {
         }));
     };
 
-    // --- 4. ENVÍO ---    
+    // --- 4. ENVÍO BLINDADO OFFLINE-FIRST ---  
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setIsSubmitting(true);
+        
         try {
-            const entityId = user.parishId;
-            const storageKey = `pendingBaptisms_${entityId}`;
+            const entityId = profile?.parish_id || user?.parishId;
+            const newRecordId = generateUUID();
             
-            const existing = JSON.parse(localStorage.getItem(storageKey) || '[]');
-            
-            const registroCrudo = {
+            // Construimos el Payload exacto como lo espera Supabase
+            const registroAEnviar = {
                 ...formData,
-                id: generateUUID(),
+                id: newRecordId,
                 parishId: entityId,
                 status: 'pending',
                 creadoPorDecreto: false,
                 createdAt: new Date().toISOString()
             };
 
-            const updated = [...existing, registroCrudo];
-            localStorage.setItem(storageKey, JSON.stringify(updated));
+            // 🛡️ PASO 1: Guardar en la Bóveda Local Inmediatamente (IndexedDB)
+            await saveToLocalMirror('baptisms', registroAEnviar);
 
-            // 🚀 INCREMENTO DEL PARÁMETRO DIRECTO A SUPABASE
+            // 🛡️ PASO 2: Agregar a la cola para sincronización en segundo plano
+            await addToSyncQueue('baptisms', 'INSERT', registroAEnviar);
+
+            // 🛡️ PASO 3: Actualizar el correlativo (Parámetros) tanto en Nube como Local
             if (fullParamsCache && fullParamsCache.numeroRegistroActual) {
                 const currentNum = parseInt(fullParamsCache.numeroRegistroActual, 10) || 0;
                 const nextNum = String(currentNum + 1).padStart(6, '0');
@@ -181,24 +184,29 @@ const BaptismNewPage = () => {
                     numeroRegistroActual: nextNum 
                 };
                 
-                // Actualizar en la nube
-                await supabase
-                    .from('parish_parameters')
-                    .update({ bautizos_params: updatedParams })
-                    .eq('parish_id', entityId);
+                // Actualizamos estado en pantalla
+                setFullParamsCache(updatedParams);
+                
+                // Lo enviamos a la cola para que Supabase se actualice cuando haya internet
+                await addToSyncQueue('parish_parameters', 'UPDATE', {
+                    parish_id: entityId,
+                    bautizos_params: updatedParams
+                });
 
-                console.log("📈 Correlativo incrementado a:", nextNum);
+                console.log("📈 Correlativo enviado a cola de sincronización:", nextNum);
             }
             
-            await new Promise(resolve => setTimeout(resolve, 600));
-            setTicketData(registroCrudo);
+            await new Promise(resolve => setTimeout(resolve, 600)); // Animación suave
+            
+            setTicketData(registroAEnviar);
             setIsSuccess(true);
-            toast({ title: "Borrador Creado", className: "bg-blue-50 text-blue-900 border-blue-200" });
+            toast({ title: "Guardado ⚡", description: "Borrador almacenado en la bóveda local.", className: "bg-blue-50 text-blue-900 border-blue-200" });
+            
             setTimeout(() => window.print(), 500);
 
         } catch (error) {
-            console.error("Error al guardar:", error);
-            toast({ title: "Error al guardar el documento", variant: "destructive" });
+            console.error("Error crítico al guardar:", error);
+            toast({ title: "Error al guardar el documento", description: "Intente nuevamente.", variant: "destructive" });
         } finally {
             setIsSubmitting(false);
         }
@@ -217,7 +225,7 @@ const BaptismNewPage = () => {
                 <div className="print:hidden max-w-xl mx-auto bg-white p-12 rounded-[3rem] shadow-xl border border-gray-100 text-center mt-12 animate-in fade-in duration-500">
                     <div className="w-24 h-24 bg-green-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border border-green-100"><CheckCircle className="w-12 h-12 text-green-500" /></div>
                     <h2 className="text-3xl font-black text-gray-900 mb-3 tracking-tighter uppercase">Borrador Guardado</h2>
-                    <p className="text-gray-500 mb-10 text-sm font-medium leading-relaxed">Documento guardado. Puede imprimir la boleta ahora.</p>
+                    <p className="text-gray-500 mb-10 text-sm font-medium leading-relaxed">Documento guardado localmente. La sincronización se hará en segundo plano.</p>
                     <div className="grid grid-cols-2 gap-4">
                         <Button onClick={() => window.location.reload()} variant="outline" className="py-7 rounded-2xl border-gray-200 text-gray-50 font-black uppercase text-[10px] hover:bg-gray-50">Nueva Inscripción</Button>
                         <Button onClick={() => navigate('/parroquia/bautismo/sentar-registros')} className="py-7 rounded-2xl bg-[#4B7BA7] text-white font-black uppercase text-[10px] shadow-xl shadow-blue-900/20">Sentar Libros</Button>
@@ -237,7 +245,7 @@ const BaptismNewPage = () => {
                     <div className="mb-10 flex flex-col md:flex-row justify-between items-end gap-6">
                         <div>
                             <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif uppercase">Inscripción Previa</h1>
-                            <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest">Borrador local con pre-asignación</p>
+                            <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest">Borrador Seguro con Auto-Sincronización</p>
                         </div>
                         <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-full w-12 h-12 p-0 bg-white border border-gray-200 text-gray-400 hover:text-gray-900 hover:bg-gray-100 shadow-sm transition-all"><X className="w-5 h-5"/></Button>
                     </div>

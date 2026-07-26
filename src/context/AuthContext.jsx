@@ -1,143 +1,125 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient'; // <-- Asegúrate de que esta ruta coincida con donde creaste el cliente
-import { logAuthEvent } from '@/utils/authLogger';
-import { ROLE_TYPES } from '@/config/supabaseConfig';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/components/ui/use-toast';
 
-const AuthContext = createContext(null);
+const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+    const [user, setUser] = useState(null);
+    const [profile, setProfile] = useState(null);
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const { toast } = useToast();
 
-    // Helper para estructurar el usuario y traducir de Supabase (snake_case) a React (camelCase)
-    const sanitizeUser = (u) => {
-        if (!u) return null;
-        return {
-            ...u,
-            username: u.username || '',
-            role: u.role || '',
-
-            // Mapeo crucial de IDs
-            parishId: u.parish_id || u.parishId || null,
-            dioceseId: u.diocese_id || u.dioceseId || null,
-            chanceryId: u.chancery_id || u.chanceryId || null,
-
-            // Nombres
-            parishName: u.parish_name || u.parishName || '',
-            dioceseName: u.diocese_name || u.dioceseName || '',
-            chancelleryName: u.chancellery_name || u.chancelleryName || ''
+    useEffect(() => {
+        // 1. INICIALIZAR SESIÓN (Soporta Offline gracias al caché interno de Supabase)
+        const initSession = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                
+                if (session?.user) {
+                    setUser(session.user);
+                    await loadUserProfile(session.user.id);
+                } else {
+                    // Limpieza de seguridad si no hay sesión activa
+                    localStorage.removeItem('sacraments_user_profile');
+                }
+            } catch (error) {
+                console.error("Error comprobando sesión:", error);
+            } finally {
+                setIsLoading(false);
+            }
         };
+
+        initSession();
+
+        // 2. ESCUCHAR CAMBIOS EN TIEMPO REAL (Login/Logout)
+        const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (event === 'SIGNED_IN' && session) {
+                setUser(session.user);
+                await loadUserProfile(session.user.id);
+            } else if (event === 'SIGNED_OUT') {
+                setUser(null);
+                setProfile(null);
+                setIsAuthenticated(false);
+                localStorage.removeItem('sacraments_user_profile');
+            }
+        });
+
+        return () => {
+            authListener.subscription.unsubscribe();
+        };
+    }, []);
+
+    // 3. CARGAR PERFIL CON SOPORTE OFFLINE
+    const loadUserProfile = async (authUserId) => {
+        try {
+            // Intentamos traer los permisos frescos desde la nube
+            const { data, error } = await supabase
+                .from('user_profiles')
+                .select('*, parishes(name)') // Traemos también el nombre de su parroquia
+                .eq('auth_user_id', authUserId)
+                .single();
+
+            if (error) throw error;
+
+            if (data) {
+                setProfile(data);
+                setIsAuthenticated(true);
+                // CACHÉ OFFLINE: Guardamos el pase de acceso para cuando no haya internet
+                localStorage.setItem('sacraments_user_profile', JSON.stringify(data));
+            }
+        } catch (error) {
+            console.warn("Nube inaccesible. Activando Modo Offline de Autenticación 🛡️");
+            // PLAN B: MODO OFFLINE (Buscamos la tarjeta de acceso local)
+            const cachedProfile = localStorage.getItem('sacraments_user_profile');
+            if (cachedProfile) {
+                setProfile(JSON.parse(cachedProfile));
+                setIsAuthenticated(true);
+            } else {
+                setIsAuthenticated(false); // Si no hay caché, no puede entrar offline
+            }
+        }
     };
 
-  /* =========================
-     LOAD SESSION (Mantiene sesión al recargar)
-  ========================= */
-  useEffect(() => {
-    const storedUser = localStorage.getItem('currentUser');
-    if (storedUser) {
-      try {
-        const parsedUser = JSON.parse(storedUser);
-        if (parsedUser) {
-            const sanitizedUser = sanitizeUser(parsedUser);
-            setUser(sanitizedUser);
-            logAuthEvent(sanitizedUser, 'SESSION_RESTORED');
+    const login = async (email, password) => {
+        try {
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+
+            if (error) throw error;
+            
+            toast({ title: "Acceso concedido", description: "Bienvenido al sistema de Sacramentos." });
+            return { success: true };
+        } catch (error) {
+            toast({ variant: "destructive", title: "Error de acceso", description: "Credenciales incorrectas o estás sin conexión en tu primer intento." });
+            return { success: false, error };
         }
-      } catch {
-        localStorage.removeItem('currentUser');
-      }
-    }
-    setLoading(false);
-  }, []);
+    };
 
-  /* =========================
-     LOGIN (¡CONECTADO A SUPABASE!)
-  ========================= */
-  const login = async (username, password) => {
-    try {
-      console.log('☁️ Consultando a Supabase para login:', username);
-      const input = username.toLowerCase().trim();
+    const logout = async () => {
+        await supabase.auth.signOut();
+        toast({ title: "Sesión cerrada", description: "Has salido del sistema de forma segura." });
+    };
 
-      // 1. Ir a la nube y buscar coincidencia por correo o usuario
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .or(`username.eq.${input},email.eq.${input}`)
-        .eq('password', password)
-        .single(); // Exigimos que traiga solo un resultado
-
-      // 2. Manejo de errores o credenciales inválidas
-      if (error || !data) {
-        console.warn('❌ Credenciales inválidas o no encontradas en la nube');
-        return { success: false, error: 'Usuario o contraseña incorrectos' };
-      }
-
-      // 3. ¡Éxito! Guardar en el estado local
-      const sanitizedUser = sanitizeUser(data);
-      setUser(sanitizedUser);
-      localStorage.setItem('currentUser', JSON.stringify(sanitizedUser)); // Mantenemos caché local
-      
-      logAuthEvent(sanitizedUser, 'LOGIN_SUCCESS');
-
-      return {
-        success: true,
-        user: sanitizedUser,
-        redirectPath: getRedirectPath(sanitizedUser.role)
-      };
-
-    } catch (err) {
-      console.error('🔥 Error en servidor:', err);
-      return {
-        success: false,
-        error: err?.message || 'Error conectando con el servidor en la nube'
-      };
-    }
-  };
-
-  /* =========================
-     LOGOUT
-  ========================= */
-  const logout = () => {
-    if (user) {
-      logAuthEvent(user, 'LOGOUT');
-    }
-    setUser(null);
-    localStorage.removeItem('currentUser');
-  };
-
-  const isAuthenticated = () => !!user;
-
-  /* =========================
-     ROUTING BY ROLE
-  ========================= */
-  const getRedirectPath = (role) => {
-    const roleStr = String(role || '');
-    switch (roleStr) {
-      case ROLE_TYPES.ADMIN_GENERAL: return '/admin/dashboard';
-      case ROLE_TYPES.DIOCESE: return '/diocese/dashboard';
-      case ROLE_TYPES.PARISH: return '/parish/dashboard';
-      case ROLE_TYPES.CHANCERY: return '/chancery/dashboard';
-      default: return '/';
-    }
-  };
-
-  const hasRole = (allowedRoles) => {
-    if (!user) return false;
-    const userRole = String(user.role || '');
-    const rolesArray = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
-    return rolesArray.includes(userRole);
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, login, logout, loading, isAuthenticated, getRedirectPath, hasRole }}>
-      {children}
-    </AuthContext.Provider>
-  );
+    return (
+        <AuthContext.Provider value={{
+            user,
+            profile,
+            isAuthenticated,
+            isLoading,
+            role: profile?.role || null, // Ej: 'SuperAdmin', 'Canciller', 'Secretaria'
+            parishId: profile?.parish_id || null, // Fundamental para asociar las actas
+            parishName: profile?.parishes?.name || 'Administración Central',
+            login,
+            logout
+        }}>
+            {/* Solo renderizamos la App cuando ya sabemos quién es el usuario */}
+            {!isLoading && children}
+        </AuthContext.Provider>
+    );
 };
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth debe usarse dentro de AuthProvider');
-  }
-  return context;
-};
+export const useAuth = () => useContext(AuthContext);
