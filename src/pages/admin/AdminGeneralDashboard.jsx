@@ -6,7 +6,7 @@ import Table from '@/components/ui/Table';
 import { Button } from '@/components/ui/button';
 import Modal from '@/components/ui/Modal';
 import { 
-    Church, Users, FileText, LayoutDashboard, Database, 
+    Church, Users, User, FileText, LayoutDashboard, Database, 
     Plus, Search, Edit, Trash2, Settings as SettingsIcon, 
     Eye, ShieldCheck, CheckCircle2, Copy, Activity, MapPin, 
     Map, Landmark 
