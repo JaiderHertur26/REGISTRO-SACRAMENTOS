@@ -14,6 +14,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import ScrollToTop from '@/components/ScrollToTop';
 import { Toaster } from '@/components/ui/toaster';
 import GlobalSyncIndicator from '@/components/GlobalSyncIndicator'; 
+
 import useSupabaseInit from '@/hooks/useSupabaseInit';
 
 /* =========================
@@ -22,7 +23,6 @@ import useSupabaseInit from '@/hooks/useSupabaseInit';
 import PublicSearchPage from '@/pages/PublicSearchPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 import CommunicationsPage from '@/pages/CommunicationsPage';
-// 🚀 FIX: AÑADIDA LA IMPORTACIÓN DE LOGIN PAGE
 import LoginPage from '@/pages/LoginPage'; 
 
 /* =========================
@@ -141,30 +141,28 @@ const AppContent = () => {
             <Routes>
                 {/* -------- PUBLIC -------- */}
                 <Route path="/" element={<PublicSearchPage />} />
-                
-                {/* 🚀 FIX: AÑADIDA LA RUTA DEL LOGIN AQUÍ */}
                 <Route path="/login" element={<LoginPage />} />
 
                 {/* -------- DEBUG -------- */}
                 <Route path="/debug-auth" element={<ProtectedRoute><DebugAuthPage /></ProtectedRoute>} />
 
-                {/* -------- ADMIN -------- */}
+                {/* -------- ADMIN (SUPER ADMIN) -------- */}
                 <Route
                     path="/admin/dashboard"
                     element={
-                        <ProtectedRoute requiredRole="admin_general">
+                        <ProtectedRoute requiredRole="SuperAdmin">
                             <AdminGeneralDashboard />
                         </ProtectedRoute>
                     }
                 />
-                <Route path="/admin/dioceses" element={<ProtectedRoute requiredRole="admin_general"><DioceseListPage /></ProtectedRoute>} />
-                <Route path="/admin/archdioceses" element={<ProtectedRoute requiredRole="admin_general"><ArchdioceseListPage /></ProtectedRoute>} />
-                <Route path="/admin/users" element={<ProtectedRoute requiredRole="admin_general"><UserListPage /></ProtectedRoute>} />
-                <Route path="/admin/settings" element={<ProtectedRoute requiredRole="admin_general"><SettingsPage /></ProtectedRoute>} />
+                <Route path="/admin/dioceses" element={<ProtectedRoute requiredRole="SuperAdmin"><DioceseListPage /></ProtectedRoute>} />
+                <Route path="/admin/archdioceses" element={<ProtectedRoute requiredRole="SuperAdmin"><ArchdioceseListPage /></ProtectedRoute>} />
+                <Route path="/admin/users" element={<ProtectedRoute requiredRole="SuperAdmin"><UserListPage /></ProtectedRoute>} />
+                <Route path="/admin/settings" element={<ProtectedRoute requiredRole="SuperAdmin"><SettingsPage /></ProtectedRoute>} />
                 <Route
                     path="/admin/users/diocese"
                     element={
-                        <ProtectedRoute requiredRole="admin_general">
+                        <ProtectedRoute requiredRole="SuperAdmin">
                             <UserManagementPage roleToManage="diocese" title="Gestión de Usuarios Diocesanos" />
                         </ProtectedRoute>
                     }

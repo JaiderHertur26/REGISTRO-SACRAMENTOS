@@ -17,13 +17,13 @@ const LoginPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Redirección Inteligente: Apenas detecte el rol, te manda al panel correcto
+  // 🚀 Redirección Inteligente adaptada a SuperAdmin
   useEffect(() => {
       if (isAuthenticated && profile) {
           logAuthEvent(profile, 'LOGIN_SUCCESS');
           toast({ title: "Bienvenido", description: "Inicio de sesión exitoso.", variant: "success" });
 
-          if (profile.role === 'admin_general') navigate('/admin/dashboard');
+          if (profile.role === 'SuperAdmin') navigate('/admin/dashboard'); // <-- FIX AQUÍ
           else if (profile.role === 'diocese') navigate('/diocese/dashboard');
           else if (profile.role === 'chancery') navigate('/chancery/dashboard');
           else if (profile.role === 'parish') navigate('/parish/dashboard');
@@ -35,7 +35,6 @@ const LoginPage = () => {
     e.preventDefault();
     setLoading(true);
 
-    // FIX: Ahora esperamos a Supabase (await) y usamos email
     const result = await login(email, password);
     
     if (!result.success) {
@@ -46,7 +45,6 @@ const LoginPage = () => {
       });
       setLoading(false);
     }
-    // Si es success, no hacemos nada más, el useEffect de arriba toma el control y redirige.
   };
 
   return (
@@ -111,15 +109,6 @@ const LoginPage = () => {
                 {loading ? 'Validando credenciales...' : 'Iniciar Sesión'}
               </Button>
             </form>
-
-            <div className="mt-8 pt-6 border-t border-gray-100">
-               <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <p className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wide">Usuario Administrador Creado:</p>
-                  <div className="space-y-1 text-xs text-gray-700">
-                    <p>Usa el <span className="font-bold text-[#111111]">correo</span> que registraste en Supabase y tu <span className="font-bold text-[#111111]">contraseña</span>.</p>
-                  </div>
-               </div>
-            </div>
           </div>
         </motion.div>
       </div>
