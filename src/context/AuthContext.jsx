@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useToast } from '@/components/ui/use-toast';
+import { Loader2 } from 'lucide-react';
 
 const AuthContext = createContext();
 
@@ -12,28 +13,23 @@ export const AuthProvider = ({ children }) => {
     const { toast } = useToast();
 
     useEffect(() => {
-        // 1. INICIALIZAR SESIÓN (Soporta Offline gracias al caché interno de Supabase)
         const initSession = async () => {
             try {
                 const { data: { session } } = await supabase.auth.getSession();
-                
                 if (session?.user) {
                     setUser(session.user);
                     await loadUserProfile(session.user.id);
                 } else {
-                    // Limpieza de seguridad si no hay sesión activa
-                    localStorage.removeItem('sacraments_user_profile');
+                    setIsLoading(false);
                 }
             } catch (error) {
                 console.error("Error comprobando sesión:", error);
-            } finally {
                 setIsLoading(false);
             }
         };
 
         initSession();
 
-        // 2. ESCUCHAR CAMBIOS EN TIEMPO REAL (Login/Logout)
         const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
             if (event === 'SIGNED_IN' && session) {
                 setUser(session.user);
@@ -46,18 +42,14 @@ export const AuthProvider = ({ children }) => {
             }
         });
 
-        return () => {
-            authListener.subscription.unsubscribe();
-        };
+        return () => authListener.subscription.unsubscribe();
     }, []);
 
-    // 3. CARGAR PERFIL CON SOPORTE OFFLINE
     const loadUserProfile = async (authUserId) => {
         try {
-            // Intentamos traer los permisos frescos desde la nube
             const { data, error } = await supabase
                 .from('user_profiles')
-                .select('*, parishes(name)') // Traemos también el nombre de su parroquia
+                .select('*, parishes(name)')
                 .eq('auth_user_id', authUserId)
                 .single();
 
@@ -66,42 +58,35 @@ export const AuthProvider = ({ children }) => {
             if (data) {
                 setProfile(data);
                 setIsAuthenticated(true);
-                // CACHÉ OFFLINE: Guardamos el pase de acceso para cuando no haya internet
                 localStorage.setItem('sacraments_user_profile', JSON.stringify(data));
             }
         } catch (error) {
-            console.warn("Nube inaccesible. Activando Modo Offline de Autenticación 🛡️");
-            // PLAN B: MODO OFFLINE (Buscamos la tarjeta de acceso local)
+            console.warn("Buscando pase offline...");
             const cachedProfile = localStorage.getItem('sacraments_user_profile');
             if (cachedProfile) {
                 setProfile(JSON.parse(cachedProfile));
                 setIsAuthenticated(true);
             } else {
-                setIsAuthenticated(false); // Si no hay caché, no puede entrar offline
+                setIsAuthenticated(false);
             }
+        } finally {
+            setIsLoading(false);
         }
     };
 
     const login = async (email, password) => {
         try {
-            const { data, error } = await supabase.auth.signInWithPassword({
-                email,
-                password,
-            });
-
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) throw error;
-            
-            toast({ title: "Acceso concedido", description: "Bienvenido al sistema de Sacramentos." });
-            return { success: true };
+            return { success: true, user: data.user };
         } catch (error) {
-            toast({ variant: "destructive", title: "Error de acceso", description: "Credenciales incorrectas o estás sin conexión en tu primer intento." });
-            return { success: false, error };
+            return { success: false, error: "Credenciales incorrectas o sin conexión a internet." };
         }
     };
 
     const logout = async () => {
         await supabase.auth.signOut();
-        toast({ title: "Sesión cerrada", description: "Has salido del sistema de forma segura." });
+        toast({ title: "Sesión cerrada", description: "Has salido de forma segura." });
     };
 
     return (
@@ -110,14 +95,18 @@ export const AuthProvider = ({ children }) => {
             profile,
             isAuthenticated,
             isLoading,
-            role: profile?.role || null, // Ej: 'SuperAdmin', 'Canciller', 'Secretaria'
-            parishId: profile?.parish_id || null, // Fundamental para asociar las actas
+            role: profile?.role || null,
+            parishId: profile?.parish_id || null,
             parishName: profile?.parishes?.name || 'Administración Central',
             login,
             logout
         }}>
-            {/* Solo renderizamos la App cuando ya sabemos quién es el usuario */}
-            {!isLoading && children}
+            {isLoading ? (
+                <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50">
+                    <Loader2 className="w-12 h-12 text-[#D4AF37] animate-spin mb-4" />
+                    <p className="text-slate-500 font-medium uppercase tracking-widest text-sm">Verificando Credenciales...</p>
+                </div>
+            ) : children}
         </AuthContext.Provider>
     );
 };

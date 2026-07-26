@@ -2,23 +2,6 @@
   ========================================================================
   APP CONFIGURATION & ROUTING STRUCTURE
   ========================================================================
-  This file serves as the main entry point and routing configuration for the application.
-  
-  Sections Overview:
-  1. PUBLIC PAGES: Accessible without authentication (Search, Login).
-  2. ADMIN PAGES: Global platform administration and diocese management.
-  3. DIOCESE PAGES: Bishop/Chancery level management of parishes.
-  4. PARISH PAGES: General parish dashboard and settings.
-  5. BAPTISM: End-to-end management of baptism records and related decrees.
-  6. CONFIRMATION: End-to-end management of confirmation records.
-  7. MATRIMONIO: End-to-end management of marriage records.
-  8. DECREES (CORRECTION & REPLACEMENT): Management of sacramental corrections/replacements.
-  9. ANNULMENT (PARISH): Parish-level views for annulment concepts.
-  10. ANNULMENT (CHANCERY): Chancery-level management for annulment concepts.
-  11. MARRIAGE ANNULMENT (NULIDAD MATRIMONIAL): Specific workflows for marriage annulments.
-  12. OTHER SACRAMENTS: Shared/dynamic pages for remaining sacraments.
-  13. CHANCERY: Main chancery dashboard and generalized tools.
-  ========================================================================
 */
 
 import React from 'react';
@@ -30,8 +13,7 @@ import { AppDataProvider } from '@/context/AppDataContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import ScrollToTop from '@/components/ScrollToTop';
 import { Toaster } from '@/components/ui/toaster';
-import GlobalSyncIndicator from '@/components/GlobalSyncIndicator'; // <-- MOTOR OFFLINE-FIRST INTEGRADO
-
+import GlobalSyncIndicator from '@/components/GlobalSyncIndicator'; 
 import useSupabaseInit from '@/hooks/useSupabaseInit';
 
 /* =========================
@@ -40,6 +22,8 @@ import useSupabaseInit from '@/hooks/useSupabaseInit';
 import PublicSearchPage from '@/pages/PublicSearchPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 import CommunicationsPage from '@/pages/CommunicationsPage';
+// 🚀 FIX: AÑADIDA LA IMPORTACIÓN DE LOGIN PAGE
+import LoginPage from '@/pages/LoginPage'; 
 
 /* =========================
    ADMIN PAGES
@@ -157,6 +141,9 @@ const AppContent = () => {
             <Routes>
                 {/* -------- PUBLIC -------- */}
                 <Route path="/" element={<PublicSearchPage />} />
+                
+                {/* 🚀 FIX: AÑADIDA LA RUTA DEL LOGIN AQUÍ */}
+                <Route path="/login" element={<LoginPage />} />
 
                 {/* -------- DEBUG -------- */}
                 <Route path="/debug-auth" element={<ProtectedRoute><DebugAuthPage /></ProtectedRoute>} />
