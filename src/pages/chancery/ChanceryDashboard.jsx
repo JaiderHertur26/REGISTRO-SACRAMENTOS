@@ -10,15 +10,15 @@ import {
     ScrollText, Mail, LayoutDashboard, Database, 
     AlertCircle, FileCheck, CheckCircle, Download, 
     FileText, Settings, Building, MapPin, Phone, 
-    User as UserIcon, Info, Loader2, ShieldCheck,
-    Zap, FileStack, ChevronRight, History, AtSign
+    Info, Loader2, ShieldCheck,
+    Zap, FileStack, ChevronRight, AtSign
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { generateBackup } from '@/lib/backupHelpers';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 IMPORTACIÓN NECESARIA
+import { supabase } from '@/lib/supabaseClient';
 
 const ChanceryDashboard = () => {
     const { 
@@ -31,14 +31,11 @@ const ChanceryDashboard = () => {
     const navigate = useNavigate();
 
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [isSyncing, setIsSyncing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
-    // 🚀 ESTADOS PARA ESTADÍSTICAS GLOBALES DESDE SUPABASE
     const [globalCorrectionsCount, setGlobalCorrectionsCount] = useState(0);
     const [globalReplacementsCount, setGlobalReplacementsCount] = useState(0);
 
-    // --- ESTADO PARA "MIS DATOS" (IDENTIDAD DE CANCILLERÍA) ---
     const [misDatosForm, setMisDatosForm] = useState({
         id: null,
         nombreCancilleria: '',
@@ -50,7 +47,6 @@ const ChanceryDashboard = () => {
         email: ''
     });
 
-    // Carga de la Identidad de Cancillería
     useEffect(() => {
         if (!user?.chanceryId) return;
         const records = getMisDatosList(user.chanceryId);
@@ -69,7 +65,6 @@ const ChanceryDashboard = () => {
         }
     }, [user, isSettingsOpen, getMisDatosList]);
 
-    // 🚀 CARGAR ESTADÍSTICAS GLOBALES DE DECRETOS DESDE SUPABASE
     useEffect(() => {
         const fetchGlobalDecreesStats = async () => {
             let targetDioceseId = user?.dioceseId || user?.diocese_id;
@@ -82,7 +77,6 @@ const ChanceryDashboard = () => {
             if (!targetDioceseId) return;
 
             try {
-                // 1. Obtener todas las parroquias de la Diócesis
                 const { data: parishesData } = await supabase
                     .from('parishes')
                     .select('id')
@@ -92,7 +86,6 @@ const ChanceryDashboard = () => {
 
                 if (parishIds.length === 0) return;
 
-                // 2. Contar Decretos de Corrección
                 const { count: correctionsCount, error: corrError } = await supabase
                     .from('decretos')
                     .select('*', { count: 'exact', head: true })
@@ -101,7 +94,6 @@ const ChanceryDashboard = () => {
 
                 if (!corrError) setGlobalCorrectionsCount(correctionsCount || 0);
 
-                // 3. Contar Decretos de Reposición (Supuesto tipo 'reposicion')
                 const { count: replacementsCount, error: repError } = await supabase
                     .from('decretos')
                     .select('*', { count: 'exact', head: true })
@@ -118,9 +110,6 @@ const ChanceryDashboard = () => {
         fetchGlobalDecreesStats();
     }, [user]);
 
-    // =========================================================================
-    // 📊 MOTOR DE ESTADÍSTICAS DIOCESANAS (Sacramentos Pendientes)
-    // =========================================================================
     const dioceseStats = useMemo(() => {
         const parishes = data.parishes.filter(p => p.dioceseId === user?.dioceseId);
         
@@ -143,9 +132,6 @@ const ChanceryDashboard = () => {
         };
     }, [data.parishes, data.communications, user?.dioceseId, getBaptisms, getConfirmations, getMatrimonios]);
 
-    // =========================================================================
-    // 💾 GESTIÓN DE IDENTIDAD LEGAL
-    // =========================================================================
     const handleSaveSettings = async (e) => {
         e.preventDefault();
         setIsSaving(true);
@@ -177,7 +163,6 @@ const ChanceryDashboard = () => {
     const statsCards = [
         { label: 'Pendientes', value: dioceseStats.pendingCount, icon: AlertCircle, color: 'text-orange-600', bg: 'bg-orange-50' },
         { label: 'Comunicaciones', value: dioceseStats.communicationsCount, icon: Mail, color: 'text-blue-600', bg: 'bg-blue-50' },
-        // 🚀 INYECTAMOS EL CONTEO GLOBAL DE LA BASE DE DATOS
         { label: 'D. Corrección', value: globalCorrectionsCount, icon: FileText, color: 'text-purple-600', bg: 'bg-purple-50' },
         { label: 'D. Reposición', value: globalReplacementsCount, icon: ScrollText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     ];
@@ -187,14 +172,13 @@ const ChanceryDashboard = () => {
       { header: 'Apellidos', render: (row) => <span className="font-bold text-gray-700">{row.apellidos || row.lastName || (row.esposo ? row.esposo.apellidos : '---')}</span> },
       { header: 'Tipo', render: (row) => <span className="font-black text-[10px] uppercase tracking-widest text-[#4B7BA7] bg-blue-50 px-3 py-1 rounded-full">{row.type}</span> },
       { header: 'Fecha', render: (row) => <span className="text-gray-500 text-xs font-bold">{row.fechaSacramento || row.sacramentDate || row.fechaMatrimonio || '---'}</span> },
-      { header: 'Acción', render: () => <Button size="sm" variant="outline" className="text-[10px] font-black uppercase tracking-widest">Revisar</Button> }
+      { header: 'Acción', render: () => <Button size="sm" variant="outline" className="text-[10px] font-black uppercase tracking-widest hover:bg-blue-50 hover:text-[#4B7BA7]" onClick={() => navigate('/chancery/pending')}>Revisar</Button> }
     ];
 
     return (
         <DashboardLayout entityName={`Cancillería • ${user?.dioceseName}`}>
             <div className="max-w-7xl mx-auto pb-20">
                 
-                {/* CABECERA */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
                     <div>
                         <div className="flex items-center gap-3 mb-2 text-[#4B7BA7]">
@@ -216,7 +200,6 @@ const ChanceryDashboard = () => {
                     </div>
                 </div>
 
-                {/* TARJETAS DE ESTADÍSTICAS */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
                     {statsCards.map((stat, idx) => (
                         <motion.div 
@@ -236,8 +219,6 @@ const ChanceryDashboard = () => {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
-                    
-                    {/* ACCIONES DE GESTIÓN */}
                     <div className="bg-white rounded-[2.5rem] p-10 border border-gray-100 shadow-sm space-y-8">
                         <div className="flex items-center gap-3">
                             <div className="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-900/10"><Zap className="w-5 h-5"/></div>
@@ -250,7 +231,6 @@ const ChanceryDashboard = () => {
                         </div>
                     </div>
 
-                    {/* ACCESO RÁPIDO A DECRETOS */}
                     <div className="bg-white rounded-[2.5rem] p-10 border border-gray-100 shadow-sm">
                         <div className="flex items-center gap-3 mb-8">
                             <div className="bg-amber-500 p-2 rounded-xl text-white shadow-lg shadow-amber-900/10"><FileStack className="w-5 h-5"/></div>
@@ -282,7 +262,6 @@ const ChanceryDashboard = () => {
                     </div>
                 </div>
 
-                {/* TABLA DE REVISIÓN */}
                 <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
                     <div className="px-10 py-8 bg-gray-50/50 border-b border-gray-100 flex items-center justify-between">
                         <div>
@@ -304,7 +283,6 @@ const ChanceryDashboard = () => {
                 </div>
             </div>
 
-            {/* --- MODAL DE IDENTIDAD DE CANCILLERÍA --- */}
             <Modal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} title="Configuración de Identidad Legal">
                 <form onSubmit={handleSaveSettings} className="p-4 space-y-8 max-w-2xl">
                     <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 flex gap-4">
@@ -348,7 +326,6 @@ const ChanceryDashboard = () => {
                             <Input value={misDatosForm.telefono} onChange={e => setMisDatosForm({...misDatosForm, telefono: e.target.value})} className="py-6 font-mono" />
                         </div>
 
-                        {/* 🚀 NUEVO CAMPO DE CORREO ELECTRÓNICO */}
                         <div className="md:col-span-2 space-y-1">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Correo Electrónico Oficial</label>
                             <div className="relative group">
@@ -370,7 +347,6 @@ const ChanceryDashboard = () => {
     );
 };
 
-// --- COMPONENTE AUXILIAR ---
 const ChanceryActionButton = ({ label, icon: Icon, color, onClick }) => (
     <button 
         onClick={onClick}

@@ -14,13 +14,12 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { generateBackup } from '@/lib/backupHelpers';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 const ParishDashboard = () => {
   const { data, getConfirmations, getMatrimonios, getMisDatosList } = useAppData();
   const { user } = useAuth();
-  const { toast } = useToast();
   const navigate = useNavigate();
 
   const [recentRecords, setRecentRecords] = useState([]);
@@ -29,28 +28,22 @@ const ParishDashboard = () => {
   const [hasPending, setHasPending] = useState(false);
   const [nombreParroquia, setNombreParroquia] = useState('Cargando Parroquia...');
 
-  // =========================================================================
-  // 🧠 MOTOR DE OBTENCIÓN DEL NOMBRE REAL DE LA PARROQUIA
-  // =========================================================================
   useEffect(() => {
       const fetchParishName = async () => {
           if (!user) return;
 
-          // 1. Intentamos sacar el nombre desde los datos configurados en "Mis Datos"
           const misDatos = getMisDatosList(user.parishId || user.parish_id);
           if (misDatos && misDatos.length > 0 && misDatos[0].nombre) {
               setNombreParroquia(misDatos[0].nombre.toUpperCase());
               return;
           }
 
-          // 2. Si no, usamos el nombre que viene en la sesión del usuario
           const sessionName = user.parishName || user.parish_name || user.dioceseName || user.diocese_name;
           if (sessionName) {
               setNombreParroquia(sessionName.toUpperCase());
               return;
           }
 
-          // 3. Como último recurso, si tenemos el ID, consultamos Supabase directamente
           const pId = user.parishId || user.parish_id;
           if (pId) {
               try {
@@ -76,10 +69,6 @@ const ParishDashboard = () => {
   }, [user, getMisDatosList]);
 
 
-  // =========================================================================
-  // 🧠 MOTOR DE SINCRONIZACIÓN Y DATOS
-  // =========================================================================
-  
   const parseSortDate = (dateStr) => {
     if (!dateStr) return 0;
     if (String(dateStr).match(/^\d{4}-\d{2}-\d{2}/)) return new Date(dateStr.split('T')[0]).getTime();
@@ -95,7 +84,6 @@ const ParishDashboard = () => {
     setIsSyncing(true);
 
     try {
-        // 1. FETCH CLOUD DATA (Bautizos)
         const { data: bCloud, error } = await supabase
             .from('baptisms')
             .select('id, raw_data, status')
@@ -104,16 +92,13 @@ const ParishDashboard = () => {
         
         const bSeated = error ? [] : bCloud.map(r => ({ ...r.raw_data, id: r.id, status: r.status }));
 
-        // 2. FETCH LOCAL DATA (Confirmaciones y Matrimonios)
         const cSeated = getConfirmations(user.parishId) || [];
         const mSeated = getMatrimonios(user.parishId) || [];
 
-        // 3. FETCH PENDING (Borradores en LocalStorage)
         const bPending = JSON.parse(localStorage.getItem(`pendingBaptisms_${user.parishId}`) || '[]');
         const cPending = JSON.parse(localStorage.getItem(`pendingConfirmations_${user.parishId}`) || '[]');
         const mPending = JSON.parse(localStorage.getItem(`pendingMatrimonios_${user.parishId}`) || '[]');
 
-        // 4. CÁLCULO DE ESTADÍSTICAS
         setStats({
           baptisms: bSeated.length,
           confirmations: cSeated.length,
@@ -124,7 +109,6 @@ const ParishDashboard = () => {
         const pendingTotal = bPending.length + cPending.length + mPending.length;
         setHasPending(pendingTotal > 0);
 
-        // 5. NORMALIZACIÓN DE REGISTROS PARA LA TABLA
         const mapRecord = (r, type, label, isPending) => {
             let nombres = r.firstName || r.nombres;
             let apellidos = r.lastName || r.apellidos;
@@ -154,7 +138,6 @@ const ParishDashboard = () => {
             ...mSeated.map(r => mapRecord(r, 'marriage', 'Matrimonio', false))
         ];
 
-        // Ordenar: Pendientes arriba, luego por fecha descendente
         allRecords.sort((a, b) => {
             if (a.isPending && !b.isPending) return -1;
             if (!a.isPending && b.isPending) return 1;
@@ -175,10 +158,6 @@ const ParishDashboard = () => {
     return () => window.removeEventListener('storage', updateDashboardData);
   }, [updateDashboardData]);
 
-  // =========================================================================
-  // 🎨 CONFIGURACIÓN VISUAL
-  // =========================================================================
-  
   const statsCards = [
     { label: 'Bautizos', value: stats.baptisms, icon: Church, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Confirmaciones', value: stats.confirmations, icon: ScrollText, color: 'text-purple-600', bg: 'bg-purple-50' },
@@ -230,7 +209,6 @@ const ParishDashboard = () => {
     <DashboardLayout entityName={nombreParroquia}>
       <div className="max-w-7xl mx-auto pb-12">
         
-        {/* CABECERA DINÁMICA */}
         <div className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div>
                 <div className="flex items-center gap-3 mb-2 text-[#4B7BA7]">
@@ -260,7 +238,6 @@ const ParishDashboard = () => {
             </div>
         </div>
 
-        {/* TARJETAS DE ESTADÍSTICAS */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
             {statsCards.map((stat, idx) => (
                 <motion.div 
@@ -282,7 +259,6 @@ const ParishDashboard = () => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* ACCIONES RÁPIDAS (IZQUIERDA) */}
             <div className="lg:col-span-1 space-y-6">
                 <div className="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm">
                     <h2 className="text-xs font-black text-gray-400 uppercase tracking-[0.3em] mb-8 flex items-center gap-2">
@@ -305,7 +281,6 @@ const ParishDashboard = () => {
                 </div>
             </div>
 
-            {/* TABLA DE ACTIVIDAD (DERECHA) */}
             <div className="lg:col-span-2">
                 <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden h-full flex flex-col">
                     <div className="px-10 py-8 border-b border-gray-50 flex items-center justify-between bg-gray-50/50">
@@ -335,8 +310,6 @@ const ParishDashboard = () => {
     </DashboardLayout>
   );
 };
-
-// --- COMPONENTES AUXILIARES ---
 
 const QuickActionButton = ({ color, label, onClick }) => (
     <button 
