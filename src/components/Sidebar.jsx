@@ -13,7 +13,7 @@ import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 
 // =========================================================================
-// 🧩 COMPONENTE: ITEM INDIVIDUAL BLINDADO
+// 🧩 COMPONENTE: ITEM INDIVIDUAL (Totalmente Blindado)
 // =========================================================================
 const SidebarItem = ({ item, isActive, isChild = false, badgeCount }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -103,7 +103,11 @@ const SidebarItem = ({ item, isActive, isChild = false, badgeCount }) => {
     <Link
       to={item.path || '#'}
       onClick={(e) => {
-          // 🚀 FIX: Si el ítem trae una función onClick personalizada, la ejecuta
+          // 🚀 FIX: Si el botón apunta a la pantalla en la que ya estás, bloqueamos el clic por completo.
+          if (item.path === location.pathname) {
+              e.preventDefault();
+          }
+          // Si el botón tiene una función interna (ej. cambiar a pestaña Backup), la ejecuta.
           if (item.onClick) {
               item.onClick(e);
           }
@@ -143,18 +147,17 @@ const SidebarItem = ({ item, isActive, isChild = false, badgeCount }) => {
 // =========================================================================
 // 🏛️ COMPONENTE PRINCIPAL: SIDEBAR
 // =========================================================================
-// 🚀 FIX: Ahora el Sidebar recibe "menuItems" inyectado desde los Dashboards
 const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems }) => {
   const location = useLocation();
-  const { user } = useAuth();
+  // 🚀 FIX: Extraemos "profile" directamente de la fuente de la verdad para no depender de props externas
+  const { user, profile } = useAuth(); 
   const { getParishNotifications, matrimonialNotificationAvisos } = useAppData();
   
   const [notificationCount, setNotificationCount] = useState(0);
   const [avisosCount, setAvisosCount] = useState(0);
 
-  const safeRole = typeof role === 'object' && role !== null 
-    ? (role.role || role.name || '') 
-    : String(role || '');
+  // 🚀 FIX: Construcción de un "Rol Seguro" blindado contra fallos de props
+  const safeRole = profile?.role || (typeof role === 'object' && role !== null ? (role.role || role.name) : role) || '';
 
   useEffect(() => {
     if (safeRole === ROLE_TYPES.PARISH && user?.parishId) {
@@ -167,7 +170,7 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
 
   // --- ESTRUCTURA DE MENÚS DINÁMICOS ---
   const getMenuItems = () => {
-    // 🚀 FIX CRÍTICO: Reconocimiento explícito del rol SuperAdmin
+    // Reconocimiento explícito del rol maestro
     if (safeRole === ROLE_TYPES.ADMIN_GENERAL || safeRole === 'SuperAdmin') {
         return [
             { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
@@ -267,11 +270,11 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
             { label: 'Comunicaciones', path: '/communications', icon: Users }
         ];
     }
-    // Fallback de emergencia
-    return [{ label: 'Dashboard', path: '/login', icon: LayoutDashboard }];
+    
+    // 🚀 FIX: Fallback seguro que NO te expulsa al login, se queda en la ruta actual.
+    return [{ label: 'Dashboard', path: location.pathname, icon: LayoutDashboard }];
   };
 
-  // 🚀 FIX: Si el Dashboard manda un menú personalizado, lo usamos; si no, usamos el automático
   const finalMenuItems = externalMenuItems && externalMenuItems.length > 0 ? externalMenuItems : getMenuItems();
 
   return (
@@ -286,6 +289,7 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
       )}>
         <div className="flex flex-col h-full">
           
+          {/* HEADER DEL LOGO */}
           <div className="h-24 flex items-center px-8 border-b border-slate-50 bg-white shrink-0">
             <div className="w-10 h-10 bg-[#4B7BA7] rounded-2xl flex items-center justify-center mr-4 shadow-lg shadow-blue-900/20 rotate-3 transition-transform hover:rotate-0">
               <Landmark className="w-6 h-6 text-white -rotate-3 transition-transform hover:rotate-0" />
@@ -299,10 +303,11 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
             </button>
           </div>
 
+          {/* LISTA DE NAVEGACIÓN */}
           <div className="flex-1 overflow-y-auto py-8 px-5 custom-scrollbar bg-white">
             <p className="text-[9px] font-black text-gray-300 uppercase tracking-[0.3em] mb-6 px-4">Centro de Operaciones</p>
             {finalMenuItems.map((item, idx) => {
-              // Verificación precisa para marcar el botón actual como Activo
+              // Verificación estricta para marcar el botón actual como Activo
               const isActive = location.pathname === item.path || 
                                (item.children && item.children.some(c => location.pathname.startsWith(c.path))) ||
                                (item.label === 'Dashboard' && location.pathname.includes('/admin/dashboard'));
@@ -318,6 +323,7 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
             })}
           </div>
 
+          {/* FOOTER: USUARIO Y CIERRE */}
           <div className="p-6 bg-slate-50/50 border-t border-gray-100 shrink-0">
             <div className="bg-white p-4 rounded-[1.5rem] border border-gray-100 shadow-sm mb-4">
                 <div className="flex items-center gap-3">
