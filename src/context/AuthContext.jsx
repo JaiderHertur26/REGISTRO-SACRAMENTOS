@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { useToast } from '@/components/ui/use-toast';
 import { Loader2 } from 'lucide-react';
 
 const AuthContext = createContext();
@@ -65,7 +64,6 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    // EL LOGIN AHORA DEVUELVE EL ROL DE INMEDIATO
     const login = async (email, password) => {
         try {
             const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -85,9 +83,10 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    // 🚀 FIX: Ahora cierra sesión y te lleva a la pantalla PÚBLICA PRINCIPAL (PublicSearchPage)
     const logout = async () => {
         await supabase.auth.signOut();
-        window.location.href = '/login'; 
+        window.location.href = '/'; 
     };
 
     return (
@@ -98,9 +97,9 @@ export const AuthProvider = ({ children }) => {
             login, logout
         }}>
             {isLoading ? (
-                <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50">
+                <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50 z-50 fixed top-0 left-0">
                     <Loader2 className="w-12 h-12 text-[#D4AF37] animate-spin mb-4" />
-                    <p className="text-slate-500 font-medium uppercase tracking-widest text-sm">Abriendo Bóveda Segura...</p>
+                    <p className="text-slate-500 font-black uppercase tracking-widest text-sm">Abriendo Bóveda Segura...</p>
                 </div>
             ) : children}
         </AuthContext.Provider>
