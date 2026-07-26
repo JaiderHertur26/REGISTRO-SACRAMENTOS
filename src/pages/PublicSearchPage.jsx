@@ -96,23 +96,38 @@ const PublicSearchPage = () => {
   ];
 
   // =========================================================================
-  // 🔐 LÓGICA DE AUTENTICACIÓN
+  // 🔐 LÓGICA DE AUTENTICACIÓN (REPARADA CON FUERZA BRUTA)
   // =========================================================================
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginLoading(true);
     setLoginError('');
 
+    // Ajuste importante: Si pusiste el correo en tu Supabase, puedes usar el correo directo
     const result = await login(credentials.username.trim().toLowerCase(), credentials.password);
 
     if (result?.success) {
-      toast({ title: "Acceso Concedido", description: "Sincronizando entorno seguro..." });
-      setCredentials({ username: '', password: '' });
-      navigate(result.redirectPath);
+      toast({ title: "Acceso Concedido", description: "Iniciando panel...", variant: "success" });
+      
+      // 🚀 ENRUTAMIENTO DE FUERZA BRUTA
+      const rol = result.role;
+      if (rol === 'SuperAdmin') {
+          window.location.href = '/admin/dashboard';
+      } else if (rol === 'diocese') {
+          window.location.href = '/diocese/dashboard';
+      } else if (rol === 'chancery') {
+          window.location.href = '/chancery/dashboard';
+      } else if (rol === 'parish') {
+          window.location.href = '/parish/dashboard';
+      } else {
+          // Si el rol falla, forzamos la recarga al menos para limpiar caché
+          window.location.href = '/admin/dashboard'; 
+      }
+      
     } else {
       setLoginError(result?.error || "Usuario o contraseña incorrectos");
+      setLoginLoading(false);
     }
-    setLoginLoading(false);
   };
 
   const handleForgot = (e) => {
@@ -202,8 +217,10 @@ const PublicSearchPage = () => {
 
       toast({ title: "¡Entorno Activado!", description: "Iniciando sesión..." });
       
-      const autoLoginResult = await login(tokenToFind, regData.password);
-      if (autoLoginResult && autoLoginResult.success) navigate(autoLoginResult.redirectPath);
+      const autoLoginResult = await login(emailToSave, regData.password); // <-- Usamos email
+      if (autoLoginResult && autoLoginResult.success) {
+           window.location.href = '/parish/dashboard'; // Fallback
+      }
 
     } catch (err) {
       toast({ title: "Fallo en Activación", description: err.message, variant: "destructive" });
@@ -406,7 +423,6 @@ const PublicSearchPage = () => {
   );
 
   return (
-    // 🚀 AJUSTE RESPONSIVO: min-h-screen para móviles, y lg:h-screen lg:overflow-hidden para escritorio
     <div className="min-h-screen lg:h-screen w-full bg-slate-50 flex flex-col lg:flex-row lg:overflow-hidden font-sans">
       <Helmet><title>Consulta y Acceso | Eclesia Digital</title></Helmet>
 
