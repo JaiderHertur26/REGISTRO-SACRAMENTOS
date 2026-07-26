@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CloudOff, RefreshCw, CloudRight } from 'lucide-react';
+import { CloudOff, RefreshCw, CheckCircle } from 'lucide-react'; // 🚀 CAMBIO AQUÍ: Usamos CheckCircle
 import { useSyncEngine } from '@/hooks/useSyncEngine';
 
 const GlobalSyncIndicator = () => {
@@ -54,7 +54,7 @@ const GlobalSyncIndicator = () => {
                         transition={{ duration: 0.5, delay: 2 }} // Desaparece tras 2 segundos
                         className="bg-emerald-600 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium border border-emerald-700"
                     >
-                        <CloudRight className="w-4 h-4" />
+                        <CheckCircle className="w-4 h-4" /> {/* 🚀 CAMBIO AQUÍ */}
                         <span>Nube al día</span>
                     </motion.div>
                 )}
