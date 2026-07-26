@@ -9,7 +9,7 @@ import {
     Church, Users, User, FileText, LayoutDashboard, Database, 
     Plus, Search, Edit, Trash2, Settings as SettingsIcon, 
     Eye, ShieldCheck, CheckCircle2, Copy, Activity, MapPin, 
-    Map, Landmark 
+    Map, Landmark, Download
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import EditDioceseArchdioceseModal from '@/components/modals/EditDioceseArchdioceseModal';
@@ -17,6 +17,7 @@ import DetailsModal from '@/components/modals/DetailsModal';
 import { ROLE_TYPES } from '@/config/supabaseConfig';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabaseClient';
+import { generateBackup } from '@/lib/backupHelpers'; 
 
 const AdminGeneralDashboard = () => {
   const { data, deleteDioceseArchdiocese } = useAppData();
@@ -27,8 +28,6 @@ const AdminGeneralDashboard = () => {
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [selectedDiocese, setSelectedDiocese] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  
-  const [activeSection, setActiveSection] = useState('dashboard');
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [envFormData, setEnvFormData] = useState({ 
@@ -72,34 +71,7 @@ const AdminGeneralDashboard = () => {
   // 2. MENÚ DE NAVEGACIÓN BLINDADO
   // =========================================================================
   const menuItems = [
-    { 
-        label: 'Dashboard', 
-        path: '/admin/dashboard', 
-        icon: LayoutDashboard, 
-        onClick: (e) => { 
-            // Bloqueamos cualquier redirección nativa del navegador
-            if (e && e.preventDefault) e.preventDefault();
-            if (e && e.stopPropagation) e.stopPropagation();
-            
-            // Si ya estamos en dashboard, NO HACE NADA. Si no, cambia la vista.
-            if (activeSection !== 'dashboard') {
-                setActiveSection('dashboard'); 
-            }
-        } 
-    },
-    { 
-        label: 'Copia de Seguridad Universal', 
-        path: '/admin/dashboard', 
-        icon: Database, 
-        onClick: (e) => { 
-            if (e && e.preventDefault) e.preventDefault();
-            if (e && e.stopPropagation) e.stopPropagation();
-            
-            if (activeSection !== 'backup') {
-                setActiveSection('backup'); 
-            }
-        } 
-    },
+    { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { label: 'Diócesis/Arquidiócesis', path: '/admin/dioceses', icon: Church },
     { label: 'Ajustes', path: '/admin/settings', icon: SettingsIcon },
   ];
@@ -154,7 +126,7 @@ const AdminGeneralDashboard = () => {
   };
 
   // =========================================================================
-  // 3. GENERACIÓN DE TOKENS
+  // 3. GENERACIÓN DE TOKENS (CON MANEJO ESTRICTO DE ERRORES)
   // =========================================================================
   const handleGenerateToken = async (e) => {
       e.preventDefault();
@@ -187,7 +159,7 @@ const AdminGeneralDashboard = () => {
               .select()
               .single();
 
-          if (error) throw error;
+          if (error) throw error; 
 
           const newEnv = {
               id: savedToken.id,
@@ -202,7 +174,7 @@ const AdminGeneralDashboard = () => {
 
       } catch (error) {
           console.error("Fallo Detallado de Supabase:", error);
-          const errorMsg = error.message || error.details || "Verifique su conexión a la base de datos.";
+          const errorMsg = error.message || error.details || "Verifique que la tabla 'pending_tokens' exista y esté configurada correctamente.";
           toast({ title: "Fallo de Base de Datos", description: errorMsg, variant: "destructive" });
       } finally {
           setIsGenerating(false);
@@ -267,145 +239,103 @@ const AdminGeneralDashboard = () => {
 
   return (
     <DashboardLayout menuItems={menuItems} entityName="Administración General">
-      
-      {activeSection === 'dashboard' && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          
-          <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3 tracking-tight">
-                 <ShieldCheck className="w-8 h-8 text-[#D4AF37]" /> Panel Root
-              </h1>
-              <p className="text-gray-500 mt-1 uppercase text-xs font-bold tracking-widest">Control Maestro Global del Sistema</p>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        
+        {/* CABECERA Y BOTÓN DE BACKUP INTEGRADO */}
+        <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3 tracking-tight">
+               <ShieldCheck className="w-8 h-8 text-[#D4AF37]" /> Panel Root
+            </h1>
+            <p className="text-gray-500 mt-1 uppercase text-xs font-bold tracking-widest">Control Maestro Global del Sistema</p>
+          </div>
+          <Button 
+            variant="outline" 
+            onClick={() => {
+                toast({ title: 'Generando Backup', description: 'La descarga comenzará automáticamente.' });
+                generateBackup(data, user);
+            }}
+            className="gap-2 border-gray-200 text-gray-700 bg-white rounded-2xl h-12 px-6 hover:bg-gray-50 shadow-sm"
+          >
+            <Download className="w-4 h-4 text-blue-600" /> Exportar Backup Total
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+          {stats.map((stat, idx) => (
+            <div key={idx} className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100 hover:shadow-lg transition-all flex items-center gap-5">
+              <div className={`p-4 rounded-2xl ${stat.color} bg-opacity-10 shadow-inner`}>
+                <stat.icon className={`w-7 h-7 ${stat.text}`} />
+              </div>
+              <div>
+                <p className="text-3xl font-black text-gray-900 tracking-tighter">{stat.value}</p>
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">{stat.label}</p>
+              </div>
             </div>
-            <Button 
-              variant="outline" 
-              className="md:hidden flex items-center gap-2 border-blue-200 text-blue-700 bg-blue-50 rounded-2xl h-12"
-              onClick={(e) => { 
-                  if(e && e.preventDefault) e.preventDefault(); 
-                  setActiveSection('backup'); 
-              }}
-            >
-              <Database className="w-4 h-4" /> Gestión de Backups
-            </Button>
-          </div>
+          ))}
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-            {stats.map((stat, idx) => (
-              <div key={idx} className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100 hover:shadow-lg transition-all flex items-center gap-5">
-                <div className={`p-4 rounded-2xl ${stat.color} bg-opacity-10 shadow-inner`}>
-                  <stat.icon className={`w-7 h-7 ${stat.text}`} />
-                </div>
-                <div>
-                  <p className="text-3xl font-black text-gray-900 tracking-tighter">{stat.value}</p>
-                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">{stat.label}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {pendingDioceses.length > 0 && (
-              <div className="mb-10 border border-amber-200 bg-amber-50/40 rounded-[2rem] overflow-hidden shadow-sm">
-                  <div className="bg-amber-100/60 p-6 border-b border-amber-200 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                          <Activity className="w-5 h-5 text-amber-700" />
-                          <h3 className="font-black text-amber-900 uppercase tracking-widest text-xs">Nuevas Jurisdicciones - En la Nube</h3>
-                      </div>
-                  </div>
-                  <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {pendingDioceses.map(env => (
-                          <div key={env.id} className="bg-white p-6 rounded-[1.5rem] border border-amber-200 shadow-sm relative group">
-                              <span className={`absolute top-4 right-8 text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${env.type === 'archdiocese' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
-                                  {env.type === 'archdiocese' ? 'Arqui.' : 'Diócesis'}
-                              </span>
-                              <h4 className="font-black text-gray-900 pr-16 truncate text-lg tracking-tight">{env.name}</h4>
-                              <p className="text-xs text-gray-500 mb-5 font-medium mt-1">{env.city} • Creado: {env.date}</p>
-                              <div className="bg-gray-50 p-3 rounded-xl border border-dashed border-gray-300 flex justify-between items-center">
-                                  <code className="text-base font-black text-[#4B7BA7] tracking-wider">{env.token}</code>
-                                  <button onClick={() => copyToClipboard(env.token)} className="text-gray-400 hover:text-[#D4AF37] transition-colors" title="Copiar">
-                                      <Copy className="w-5 h-5" />
-                                  </button>
-                              </div>
-                              <button 
-                                  onClick={() => handleDeletePending(env.id)}
-                                  className="absolute top-4 right-4 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                  <Trash2 className="w-4 h-4" />
-                              </button>
-                          </div>
-                      ))}
-                  </div>
-              </div>
-          )}
-
-          <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-8">
-            <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-6">
-                <div>
-                    <h3 className="font-black text-gray-900 text-xl tracking-tight">Jurisdicciones Activas</h3>
-                    <p className="text-xs text-gray-500 font-medium uppercase tracking-widest mt-1">Diócesis y Arquidiócesis vinculadas a un usuario en el sistema.</p>
-                </div>
-                
-                <div className="flex flex-1 md:flex-none gap-4 w-full md:w-auto">
-                    <div className="relative w-full md:w-72">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                        <input 
-                            type="text" 
-                            placeholder="Buscar Diócesis..." 
-                            className="w-full pl-11 pr-4 py-3 border border-gray-200 bg-gray-50 rounded-2xl text-sm focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#D4AF37] transition-all font-medium"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
+        {pendingDioceses.length > 0 && (
+            <div className="mb-10 border border-amber-200 bg-amber-50/40 rounded-[2rem] overflow-hidden shadow-sm">
+                <div className="bg-amber-100/60 p-6 border-b border-amber-200 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <Activity className="w-5 h-5 text-amber-700" />
+                        <h3 className="font-black text-amber-900 uppercase tracking-widest text-xs">Nuevas Jurisdicciones - En la Nube</h3>
                     </div>
-                    <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2 bg-[#D4AF37] hover:bg-[#C4A027] text-[#111111] font-black uppercase tracking-widest text-[10px] whitespace-nowrap shadow-xl shadow-yellow-900/10 px-6 py-6 rounded-2xl">
-                        <Plus className="w-4 h-4" /> Crear Entorno
-                    </Button>
+                </div>
+                <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {pendingDioceses.map(env => (
+                        <div key={env.id} className="bg-white p-6 rounded-[1.5rem] border border-amber-200 shadow-sm relative group">
+                            <span className={`absolute top-4 right-8 text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${env.type === 'archdiocese' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
+                                {env.type === 'archdiocese' ? 'Arqui.' : 'Diócesis'}
+                            </span>
+                            <h4 className="font-black text-gray-900 pr-16 truncate text-lg tracking-tight">{env.name}</h4>
+                            <p className="text-xs text-gray-500 mb-5 font-medium mt-1">{env.city} • Creado: {env.date}</p>
+                            <div className="bg-gray-50 p-3 rounded-xl border border-dashed border-gray-300 flex justify-between items-center">
+                                <code className="text-base font-black text-[#4B7BA7] tracking-wider">{env.token}</code>
+                                <button onClick={() => copyToClipboard(env.token)} className="text-gray-400 hover:text-[#D4AF37] transition-colors" title="Copiar">
+                                    <Copy className="w-5 h-5" />
+                                </button>
+                            </div>
+                            <button 
+                                onClick={() => handleDeletePending(env.id)}
+                                className="absolute top-4 right-4 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                            </button>
+                        </div>
+                    ))}
                 </div>
             </div>
-            
-            <Table columns={columnsDioceses} data={dioceseTableData} className="border-none" />
+        )}
+
+        <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-8">
+          <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-6">
+              <div>
+                  <h3 className="font-black text-gray-900 text-xl tracking-tight">Jurisdicciones Activas</h3>
+                  <p className="text-xs text-gray-500 font-medium uppercase tracking-widest mt-1">Diócesis y Arquidiócesis vinculadas a un usuario en el sistema.</p>
+              </div>
+              
+              <div className="flex flex-1 md:flex-none gap-4 w-full md:w-auto">
+                  <div className="relative w-full md:w-72">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input 
+                          type="text" 
+                          placeholder="Buscar Diócesis..." 
+                          className="w-full pl-11 pr-4 py-3 border border-gray-200 bg-gray-50 rounded-2xl text-sm focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#D4AF37] transition-all font-medium"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                      />
+                  </div>
+                  <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2 bg-[#D4AF37] hover:bg-[#C4A027] text-[#111111] font-black uppercase tracking-widest text-[10px] whitespace-nowrap shadow-xl shadow-yellow-900/10 px-6 py-6 rounded-2xl">
+                      <Plus className="w-4 h-4" /> Crear Entorno
+                  </Button>
+              </div>
           </div>
-        </motion.div>
-      )}
-
-      {/* VISTA DE COPIA DE SEGURIDAD UNIVERSAL */}
-      {activeSection === 'backup' && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
-            <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
-                <div>
-                    <h1 className="text-3xl font-black text-gray-900 tracking-tight flex items-center gap-3">
-                        <Database className="w-8 h-8 text-[#4B7BA7]" /> 
-                        Centro de Respaldo Global
-                    </h1>
-                    <p className="text-gray-500 mt-1 font-bold text-xs uppercase tracking-widest">
-                        Gestión y exportación de datos de todo el sistema
-                    </p>
-                </div>
-                <Button 
-                    variant="outline" 
-                    className="flex items-center gap-2 border-gray-200 text-gray-700 bg-white rounded-2xl h-12 hover:bg-gray-50"
-                    onClick={(e) => {
-                        if(e && e.preventDefault) e.preventDefault();
-                        setActiveSection('dashboard');
-                    }}
-                >
-                    <LayoutDashboard className="w-4 h-4" /> Volver al Dashboard
-                </Button>
-            </div>
-
-            <div className="bg-white rounded-[2.5rem] p-10 border border-gray-100 shadow-sm">
-                <div className="text-center py-16">
-                    <Database className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <h3 className="text-lg font-black text-gray-800 uppercase tracking-widest">Gestor de Backups</h3>
-                    <p className="text-gray-500 text-sm mt-2 max-w-md mx-auto">
-                        Aquí puedes descargar un respaldo completo de la base de datos de Supabase.
-                    </p>
-                    <Button className="mt-8 bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-8 py-6 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-900/10">
-                        Descargar Backup
-                    </Button>
-                </div>
-            </div>
-        </motion.div>
-      )}
+          
+          <Table columns={columnsDioceses} data={dioceseTableData} className="border-none" />
+        </div>
+      </motion.div>
 
       <Modal 
           isOpen={isCreateModalOpen} 
