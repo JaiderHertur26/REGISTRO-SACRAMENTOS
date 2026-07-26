@@ -6,21 +6,18 @@ import { Button } from '@/components/ui/button';
 import { 
     Search, Church, Calendar, BookOpen, Lock, 
     User, AlertCircle, Info, Mail, ShieldCheck, 
-    ArrowLeft, KeyRound, Loader2, CheckCircle2,
-    Globe, Landmark, MapPin
+    ArrowLeft, KeyRound, Loader2, Globe, MapPin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/components/ui/use-toast';
 import { ROLE_TYPES } from '@/config/supabaseConfig';
 import { supabase } from '@/lib/supabaseClient';
-import { cn } from '@/lib/utils';
 
 const PublicSearchPage = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // --- ESTADOS DE VISTA Y CARGA ---
   const [authView, setAuthView] = useState('login'); 
   const [searchLoading, setSearchLoading] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -28,12 +25,10 @@ const PublicSearchPage = () => {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
 
-  // --- ESTADOS DE BASE DE DATOS (NUBE) ---
   const [publicDioceses, setPublicDioceses] = useState([]);
   const [publicParishes, setPublicParishes] = useState([]);
   const [publicMisDatos, setPublicMisDatos] = useState([]); 
 
-  // --- ESTADOS DE FORMULARIO ---
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [regData, setRegData] = useState({ token: '', email: '', password: '', confirmPassword: '' });
   const [forgotData, setForgotData] = useState({ username: '' });
@@ -42,9 +37,6 @@ const PublicSearchPage = () => {
   const [results, setResults] = useState(null);
   const [filteredParishes, setFilteredParishes] = useState([]);
 
-  // =========================================================================
-  // 🌍 CARGA ESTRUCTURAL DESDE SUPABASE AL INICIAR
-  // =========================================================================
   useEffect(() => {
       const fetchPublicEntities = async () => {
           try {
@@ -58,21 +50,16 @@ const PublicSearchPage = () => {
               if (misRes.data) setPublicMisDatos(misRes.data);
               
               if (parRes.data) {
-                  const mappedParishes = parRes.data.map(p => ({
-                      ...p,
-                      dioceseId: p.diocese_id 
-                  }));
+                  const mappedParishes = parRes.data.map(p => ({ ...p, dioceseId: p.diocese_id }));
                   setPublicParishes(mappedParishes);
               }
           } catch (error) {
               console.error("Error cargando entidades desde Supabase:", error);
           }
       };
-
       fetchPublicEntities();
   }, []);
 
-  // --- FILTRADO DE PARROQUIAS DINÁMICO ---
   useEffect(() => {
     if (searchParams.dioceseId === 'all') {
       const validParishes = publicParishes.filter(p => p.dioceseId !== null && p.dioceseId !== undefined);
@@ -85,9 +72,7 @@ const PublicSearchPage = () => {
     }
   }, [searchParams.dioceseId, publicParishes]);
 
-  const dioceseOptions = useMemo(() => {
-    return [{ id: 'all', name: 'TODAS LAS DIÓCESIS' }, ...publicDioceses];
-  }, [publicDioceses]);
+  const dioceseOptions = useMemo(() => [{ id: 'all', name: 'TODAS LAS DIÓCESIS' }, ...publicDioceses], [publicDioceses]);
 
   const sacramentOptions = [
     { value: 'baptism', label: 'BAUTISMO' },
@@ -96,34 +81,24 @@ const PublicSearchPage = () => {
   ];
 
   // =========================================================================
-  // 🔐 LÓGICA DE AUTENTICACIÓN (REPARADA CON FUERZA BRUTA)
+  // 🔐 LOGIN CON REDIRECCIÓN DE FUERZA BRUTA
   // =========================================================================
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginLoading(true);
     setLoginError('');
 
-    // Ajuste importante: Si pusiste el correo en tu Supabase, puedes usar el correo directo
     const result = await login(credentials.username.trim().toLowerCase(), credentials.password);
 
     if (result?.success) {
       toast({ title: "Acceso Concedido", description: "Iniciando panel...", variant: "success" });
       
-      // 🚀 ENRUTAMIENTO DE FUERZA BRUTA
       const rol = result.role;
-      if (rol === 'SuperAdmin') {
-          window.location.href = '/admin/dashboard';
-      } else if (rol === 'diocese') {
-          window.location.href = '/diocese/dashboard';
-      } else if (rol === 'chancery') {
-          window.location.href = '/chancery/dashboard';
-      } else if (rol === 'parish') {
-          window.location.href = '/parish/dashboard';
-      } else {
-          // Si el rol falla, forzamos la recarga al menos para limpiar caché
-          window.location.href = '/admin/dashboard'; 
-      }
-      
+      if (rol === 'SuperAdmin' || rol === 'admin_general') window.location.href = '/admin/dashboard';
+      else if (rol === 'diocese') window.location.href = '/diocese/dashboard';
+      else if (rol === 'chancery') window.location.href = '/chancery/dashboard';
+      else if (rol === 'parish') window.location.href = '/parish/dashboard';
+      else window.location.href = '/'; 
     } else {
       setLoginError(result?.error || "Usuario o contraseña incorrectos");
       setLoginLoading(false);
@@ -139,16 +114,12 @@ const PublicSearchPage = () => {
       setForgotLoading(false);
       setForgotData({ username: '' });
       setAuthView('login');
-      toast({ 
-          title: "Solicitud Procesada", 
-          description: "Si el usuario existe en nuestro sistema, recibirá un enlace de recuperación en su correo electrónico.",
-          duration: 5000 
-      });
+      toast({ title: "Solicitud Procesada", description: "Revise su bandeja de correo electrónico.", duration: 5000 });
     }, 1500);
   };
 
   // =========================================================================
-  // 🚀 LÓGICA DE ACTIVACIÓN 
+  // 🚀 ACTIVACIÓN DE ENTORNOS (BLINDADO CON SUPABASE AUTH)
   // =========================================================================
   const handleRegister = async (e) => {
     e.preventDefault();
@@ -162,13 +133,14 @@ const PublicSearchPage = () => {
       const tokenToFind = regData.token.trim();
       const emailToSave = regData.email.trim().toLowerCase();
 
+      // 1. Buscamos el token en Supabase
       const { data: tokenRecord, error: tokenErr } = await supabase
         .from('pending_tokens')
         .select('*')
         .eq('token', tokenToFind)
         .single();
 
-      if (tokenErr || !tokenRecord) throw new Error("El código no existe o ya fue usado.");
+      if (tokenErr || !tokenRecord) throw new Error("El código de activación no existe o ya fue utilizado.");
 
       const payload = tokenRecord.payload;
       let roleType = ROLE_TYPES.PARISH;
@@ -176,13 +148,19 @@ const PublicSearchPage = () => {
       let assignedParishId = null;
       let assignedChanceryId = null;
 
+      // 2. Creamos la Entidad correspondiente según el Tipo de Token
       if (tokenRecord.type === 'DIOCESE') {
         roleType = ROLE_TYPES.DIOCESE;
         const { data: newDiocese, error: dErr } = await supabase.from('dioceses').insert([{
-            name: payload.name, type: payload.type || 'diocese', city: payload.city, bishop: payload.bishop,
-            auxiliary_bishop: payload.auxiliaryBishop, provincia_eclesiastica: payload.provinciaEclesiastica,
+            name: payload.name, 
+            type: payload.type || 'diocese', 
+            city: payload.city, 
+            bishop: payload.bishop,
+            auxiliary_bishop: payload.auxiliaryBishop, 
+            provincia_eclesiastica: payload.provinciaEclesiastica,
             jurisdiccion_eclesiastica: payload.jurisdiccionEclesiastica
         }]).select().single();
+        
         if (dErr) throw dErr;
         assignedDioceseId = newDiocese.id;
 
@@ -193,6 +171,7 @@ const PublicSearchPage = () => {
             diocese_id: payload.dioceseId, name: payload.name, city: payload.city, parroco: payload.priest,
             vicary_id: payload.vicaryId, decanate_id: payload.decanateId
         }]).select().single();
+        
         if (pErr) throw pErr;
         assignedParishId = newParish.id;
 
@@ -202,24 +181,51 @@ const PublicSearchPage = () => {
         const { data: newChancery, error: cErr } = await supabase.from('chancelleries').insert([{
             diocese_id: payload.dioceseId, name: payload.name, city: payload.city
         }]).select().single();
+        
         if (cErr) throw cErr;
         assignedChanceryId = newChancery.id;
       }
 
-      const { error: uErr } = await supabase.from('users').insert([{
-          username: tokenToFind, email: emailToSave, password: regData.password,
-          role: roleType, diocese_id: assignedDioceseId, parish_id: assignedParishId, 
-          chancery_id: assignedChanceryId, status: 'ACTIVE'
-      }]);
-      if (uErr) throw uErr;
+      // 3. Creamos el Usuario en el Búnker de Supabase Auth
+      const { data: authData, error: authErr } = await supabase.auth.signUp({
+          email: emailToSave,
+          password: regData.password,
+      });
 
+      if (authErr) throw authErr;
+      if (!authData.user) throw new Error("No se pudo crear el usuario en el sistema de seguridad.");
+
+      // 4. Creamos el perfil público vinculado al Auth
+      const { error: profErr } = await supabase.from('user_profiles').insert([{
+          auth_user_id: authData.user.id,
+          email: emailToSave,
+          username: tokenToFind, 
+          role: roleType,
+          diocese_id: assignedDioceseId,
+          parish_id: assignedParishId,
+          chancery_id: assignedChanceryId,
+          status: 'ACTIVE'
+      }]);
+
+      if (profErr) throw profErr;
+
+      // 5. Destruimos el Token para que nadie más lo use
       await supabase.from('pending_tokens').delete().eq('id', tokenRecord.id);
 
-      toast({ title: "¡Entorno Activado!", description: "Iniciando sesión..." });
+      toast({ title: "¡Entorno Activado!", description: "Configurando bóveda segura...", variant: "success" });
       
-      const autoLoginResult = await login(emailToSave, regData.password); // <-- Usamos email
+      // 6. Iniciamos sesión automáticamente y enrutamos
+      const autoLoginResult = await login(emailToSave, regData.password);
+      
       if (autoLoginResult && autoLoginResult.success) {
-           window.location.href = '/parish/dashboard'; // Fallback
+          const rol = autoLoginResult.role;
+          if (rol === 'diocese') window.location.href = '/diocese/dashboard';
+          else if (rol === 'chancery') window.location.href = '/chancery/dashboard';
+          else if (rol === 'parish') window.location.href = '/parish/dashboard';
+          else window.location.href = '/'; 
+      } else {
+          toast({ title: "Registro Exitoso", description: "Por favor, inicia sesión con tus nuevas credenciales." });
+          setAuthView('login');
       }
 
     } catch (err) {
@@ -230,7 +236,7 @@ const PublicSearchPage = () => {
   };
 
   // =========================================================================
-  // 🚀 CONSULTA EN TIEMPO REAL A SUPABASE
+  // 🚀 CONSULTA PÚBLICA DE ACTAS
   // =========================================================================
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -306,7 +312,6 @@ const PublicSearchPage = () => {
                 if (!parish) return;
 
                 if (matchesSearch(record, searchParams, sacType)) {
-                    
                     let parishAddress = 'Dirección no registrada';
                     const misDatosMatch = publicMisDatos.find(md => md.entity_id === parish.id);
                     if (misDatosMatch) {
@@ -360,10 +365,10 @@ const PublicSearchPage = () => {
   const renderLogin = () => (
     <motion.form key="login" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} onSubmit={handleLogin} className="space-y-5">
         <div className="space-y-1">
-            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Identificación / Email</label>
+            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Email Registrado</label>
             <div className="relative group">
                 <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-300 group-focus-within:text-[#4B7BA7] transition-colors" />
-                <input type="text" required value={credentials.username} onChange={e => setCredentials({...credentials, username: e.target.value})} className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl outline-none focus:bg-white focus:ring-4 focus:ring-blue-500/5 transition-all font-bold text-gray-700" placeholder="Usuario asignado" />
+                <input type="email" required value={credentials.username} onChange={e => setCredentials({...credentials, username: e.target.value})} className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl outline-none focus:bg-white focus:ring-4 focus:ring-blue-500/5 transition-all font-bold text-gray-700" placeholder="admin@ejemplo.com" />
             </div>
         </div>
         <div className="space-y-1">
@@ -390,17 +395,17 @@ const PublicSearchPage = () => {
     <motion.form key="reg" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} onSubmit={handleRegister} className="space-y-4">
         <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 flex gap-3 mb-2 text-blue-800 text-[10px] font-bold uppercase leading-tight">
             <ShieldCheck className="w-5 h-5 shrink-0" />
-            Usa el código proporcionado por su Obispo/Arzobispo para habilitar tu despacho.
+            Usa el código de activación para habilitar tu despacho. El email que coloques será tu nuevo usuario.
         </div>
-        <input type="text" required placeholder="CÓDIGO DE ACTIVACIÓN" value={regData.token} onChange={e => setRegData({...regData, token: e.target.value})} className="w-full px-4 py-4 bg-gray-50 rounded-2xl text-xs font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-blue-500/20" />
-        <input type="email" required placeholder="EMAIL DE CONTACTO" value={regData.email} onChange={e => setRegData({...regData, email: e.target.value})} className="w-full px-4 py-4 bg-gray-50 rounded-2xl text-xs font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-blue-500/20" />
+        <input type="text" required placeholder="CÓDIGO DE ACTIVACIÓN" value={regData.token} onChange={e => setRegData({...regData, token: e.target.value})} className="w-full px-4 py-4 bg-gray-50 rounded-2xl text-xs font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-[#D4AF37]" />
+        <input type="email" required placeholder="NUEVO EMAIL DE ACCESO" value={regData.email} onChange={e => setRegData({...regData, email: e.target.value})} className="w-full px-4 py-4 bg-gray-50 rounded-2xl text-xs font-black tracking-widest outline-none focus:ring-2 focus:ring-[#D4AF37]" />
         <div className="grid grid-cols-2 gap-3">
-            <input type="password" required placeholder="CLAVE" value={regData.password} onChange={e => setRegData({...regData, password: e.target.value})} className="w-full px-4 py-4 bg-gray-50 rounded-2xl text-xs font-black outline-none" />
-            <input type="password" required placeholder="REPETIR" value={regData.confirmPassword} onChange={e => setRegData({...regData, confirmPassword: e.target.value})} className="w-full px-4 py-4 bg-gray-50 rounded-2xl text-xs font-black outline-none" />
+            <input type="password" required placeholder="CLAVE" value={regData.password} onChange={e => setRegData({...regData, password: e.target.value})} className="w-full px-4 py-4 bg-gray-50 rounded-2xl text-xs font-black outline-none focus:ring-2 focus:ring-[#D4AF37]" />
+            <input type="password" required placeholder="REPETIR" value={regData.confirmPassword} onChange={e => setRegData({...regData, confirmPassword: e.target.value})} className="w-full px-4 py-4 bg-gray-50 rounded-2xl text-xs font-black outline-none focus:ring-2 focus:ring-[#D4AF37]" />
         </div>
         <div className="flex gap-2 pt-2">
             <Button type="button" onClick={() => setAuthView('login')} variant="ghost" className="rounded-2xl px-4 font-black uppercase text-[10px]"><ArrowLeft className="w-5 h-5"/></Button>
-            <Button disabled={regLoading} className="flex-1 py-7 rounded-2xl bg-[#4B7BA7] text-white font-black uppercase tracking-widest text-[10px]">
+            <Button disabled={regLoading} className="flex-1 py-7 rounded-2xl bg-[#4B7BA7] hover:bg-[#3A6286] text-white font-black uppercase tracking-widest text-[10px]">
                 {regLoading ? <Loader2 className="animate-spin w-4 h-4" /> : 'Activar Entorno'}
             </Button>
         </div>
@@ -411,13 +416,13 @@ const PublicSearchPage = () => {
     <motion.form key="forgot" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} onSubmit={handleForgot} className="space-y-4 text-center">
         <div className="bg-amber-50 p-6 rounded-3xl border border-amber-100 inline-block mb-4"><KeyRound className="w-8 h-8 text-amber-600" /></div>
         <h3 className="text-sm font-black text-gray-800 uppercase tracking-widest">Recuperar Acceso</h3>
-        <p className="text-[11px] text-gray-400 uppercase font-bold tracking-tight mb-4">Ingresa tu usuario o correo para recibir un enlace seguro.</p>
-        <input type="text" required placeholder="USUARIO O EMAIL" value={forgotData.username} onChange={e => setForgotData({username: e.target.value})} className="w-full px-4 py-4 bg-gray-50 rounded-2xl text-xs font-black uppercase tracking-widest outline-none" />
+        <p className="text-[11px] text-gray-400 uppercase font-bold tracking-tight mb-4">Ingresa tu email para recibir un enlace seguro.</p>
+        <input type="email" required placeholder="EMAIL REGISTRADO" value={forgotData.username} onChange={e => setForgotData({username: e.target.value})} className="w-full px-4 py-4 bg-gray-50 rounded-2xl text-xs font-black tracking-widest outline-none focus:ring-2 focus:ring-[#D4AF37]" />
         <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 flex gap-2 text-left">
           <Info className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
-          <p className="text-[10px] text-gray-600"><strong>¿Problemas urgentes?</strong> Su Obispo/Arzobispo puede asignarle una contraseña temporal.</p>
+          <p className="text-[10px] text-gray-600"><strong>¿Problemas urgentes?</strong> Su superior jerárquico puede asignarle una contraseña temporal.</p>
         </div>
-        <Button disabled={forgotLoading} className="w-full py-7 rounded-2xl bg-amber-500 text-white font-black uppercase text-[10px]">{forgotLoading ? <Loader2 className="animate-spin w-4 h-4" /> : 'Enviar Instrucciones'}</Button>
+        <Button disabled={forgotLoading} className="w-full py-7 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-black uppercase text-[10px]">{forgotLoading ? <Loader2 className="animate-spin w-4 h-4 mx-auto" /> : 'Enviar Instrucciones'}</Button>
         <button type="button" onClick={() => setAuthView('login')} className="text-[10px] font-black text-gray-400 uppercase tracking-widest hover:underline mt-4 block mx-auto">Volver al inicio</button>
     </motion.form>
   );
@@ -426,7 +431,7 @@ const PublicSearchPage = () => {
     <div className="min-h-screen lg:h-screen w-full bg-slate-50 flex flex-col lg:flex-row lg:overflow-hidden font-sans">
       <Helmet><title>Consulta y Acceso | Eclesia Digital</title></Helmet>
 
-      {/* 🚀 PANEL LATERAL (LOGIN) */}
+      {/* PANEL LATERAL (LOGIN) */}
       <aside className="w-full lg:w-[450px] bg-white lg:border-r border-b lg:border-b-0 border-gray-100 flex flex-col p-8 lg:p-10 shadow-2xl relative z-20 shrink-0 lg:overflow-y-auto">
         <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full py-10">
             <div className="text-center mb-12">
@@ -445,7 +450,7 @@ const PublicSearchPage = () => {
         </div>
       </aside>
 
-      {/* 🚀 PANEL PRINCIPAL (BÚSQUEDA PÚBLICA) */}
+      {/* PANEL PRINCIPAL (BÚSQUEDA PÚBLICA) */}
       <main className="flex-1 w-full h-full overflow-y-auto bg-[#4B7BA7]/5 p-6 lg:p-16 custom-scrollbar scroll-smooth">
         <div className="max-w-5xl mx-auto">
             <header className="mb-8 lg:mb-12">
@@ -461,41 +466,41 @@ const PublicSearchPage = () => {
                 <form onSubmit={handleSearch} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Diócesis <span className="text-red-500">*</span></label>
-                        <select required value={searchParams.dioceseId} onChange={e => setSearchParams({...searchParams, dioceseId: e.target.value, parishId: ''})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none">
+                        <select required value={searchParams.dioceseId} onChange={e => setSearchParams({...searchParams, dioceseId: e.target.value, parishId: ''})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#D4AF37]">
                             <option value="">SELECCIONE...</option>
                             {dioceseOptions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                         </select>
                     </div>
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Parroquia</label>
-                        <select disabled={!searchParams.dioceseId} value={searchParams.parishId} onChange={e => setSearchParams({...searchParams, parishId: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none disabled:opacity-30">
+                        <select disabled={!searchParams.dioceseId} value={searchParams.parishId} onChange={e => setSearchParams({...searchParams, parishId: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none disabled:opacity-30 focus:ring-2 focus:ring-[#D4AF37]">
                             <option value="all">TODAS LAS PARROQUIAS</option>
                             {filteredParishes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                     </div>
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Tipo de Acta</label>
-                        <select value={searchParams.sacramentType} onChange={e => setSearchParams({...searchParams, sacramentType: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none">
+                        <select value={searchParams.sacramentType} onChange={e => setSearchParams({...searchParams, sacramentType: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#D4AF37]">
                             <option value="">TODOS</option>
                             {sacramentOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
                     </div>
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nombres</label>
-                        <input type="text" value={searchParams.firstName} onChange={e => setSearchParams({...searchParams, firstName: e.target.value})} placeholder="EJ: PEDRO" className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none uppercase" />
+                        <input type="text" value={searchParams.firstName} onChange={e => setSearchParams({...searchParams, firstName: e.target.value})} placeholder="EJ: PEDRO" className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none uppercase focus:ring-2 focus:ring-[#D4AF37]" />
                     </div>
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Apellidos</label>
-                        <input type="text" value={searchParams.lastName} onChange={e => setSearchParams({...searchParams, lastName: e.target.value})} placeholder="EJ: ROJAS" className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none uppercase" />
+                        <input type="text" value={searchParams.lastName} onChange={e => setSearchParams({...searchParams, lastName: e.target.value})} placeholder="EJ: ROJAS" className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none uppercase focus:ring-2 focus:ring-[#D4AF37]" />
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                         <div className="space-y-2">
                           <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Desde</label>
-                          <input type="date" value={searchParams.dateStart} onChange={e => setSearchParams({...searchParams, dateStart: e.target.value})} className="w-full h-12 lg:h-14 px-2 bg-gray-50 border-none rounded-2xl font-bold text-[10px] outline-none" />
+                          <input type="date" value={searchParams.dateStart} onChange={e => setSearchParams({...searchParams, dateStart: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-[10px] outline-none focus:ring-2 focus:ring-[#D4AF37]" />
                         </div>
                         <div className="space-y-2">
                           <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Hasta</label>
-                          <input type="date" value={searchParams.dateEnd} onChange={e => setSearchParams({...searchParams, dateEnd: e.target.value})} className="w-full h-12 lg:h-14 px-2 bg-gray-50 border-none rounded-2xl font-bold text-[10px] outline-none" />
+                          <input type="date" value={searchParams.dateEnd} onChange={e => setSearchParams({...searchParams, dateEnd: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-[10px] outline-none focus:ring-2 focus:ring-[#D4AF37]" />
                         </div>
                     </div>
                     <div className="lg:col-span-3 flex justify-end pt-2 lg:pt-4">
