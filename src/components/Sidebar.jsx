@@ -13,14 +13,13 @@ import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 
 // =========================================================================
-// 🧩 COMPONENTE: ITEM INDIVIDUAL (Mantiene recursión y lógica de insignias)
+// 🧩 COMPONENTE: ITEM INDIVIDUAL BLINDADO
 // =========================================================================
 const SidebarItem = ({ item, isActive, isChild = false, badgeCount }) => {
   const [isOpen, setIsOpen] = useState(false);
   const hasChildren = item.children && item.children.length > 0;
   const location = useLocation();
 
-  // Lógica de extracción de etiqueta segura (Código 1)
   const getSafeLabel = (lbl) => {
       if (typeof lbl === 'string') return lbl;
       if (typeof lbl === 'object' && lbl !== null) {
@@ -31,7 +30,6 @@ const SidebarItem = ({ item, isActive, isChild = false, badgeCount }) => {
   };
   const label = getSafeLabel(item.label);
 
-  // Auto-expandir si el usuario está dentro de una ruta hija
   useEffect(() => {
     if (hasChildren) {
       const childActive = item.children.some(child => location.pathname.startsWith(child.path));
@@ -103,7 +101,13 @@ const SidebarItem = ({ item, isActive, isChild = false, badgeCount }) => {
 
   return (
     <Link
-      to={item.path}
+      to={item.path || '#'}
+      onClick={(e) => {
+          // 🚀 FIX: Si el ítem trae una función onClick personalizada, la ejecuta
+          if (item.onClick) {
+              item.onClick(e);
+          }
+      }}
       className={cn(
         "flex items-center justify-between py-3 px-4 mb-2 rounded-2xl transition-all duration-300 group",
         isActive 
@@ -139,7 +143,8 @@ const SidebarItem = ({ item, isActive, isChild = false, badgeCount }) => {
 // =========================================================================
 // 🏛️ COMPONENTE PRINCIPAL: SIDEBAR
 // =========================================================================
-const Sidebar = ({ isOpen, onClose, onLogout, role }) => {
+// 🚀 FIX: Ahora el Sidebar recibe "menuItems" inyectado desde los Dashboards
+const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems }) => {
   const location = useLocation();
   const { user } = useAuth();
   const { getParishNotifications, matrimonialNotificationAvisos } = useAppData();
@@ -147,7 +152,6 @@ const Sidebar = ({ isOpen, onClose, onLogout, role }) => {
   const [notificationCount, setNotificationCount] = useState(0);
   const [avisosCount, setAvisosCount] = useState(0);
 
-  // Lógica de Rol Blindada (Código 1)
   const safeRole = typeof role === 'object' && role !== null 
     ? (role.role || role.name || '') 
     : String(role || '');
@@ -155,19 +159,16 @@ const Sidebar = ({ isOpen, onClose, onLogout, role }) => {
   useEffect(() => {
     if (safeRole === ROLE_TYPES.PARISH && user?.parishId) {
         const notifications = getParishNotifications(user.parishId);
-        
-        // Filtramos solo las 'unread'
-        const unreadCount = notifications.filter(notif => notif.status === 'unread').length;
-        setNotificationCount(unreadCount);
-        
+        setNotificationCount(notifications.length);
         const pendingAvisos = (matrimonialNotificationAvisos || []).filter(a => a.status === 'pendiente');
         setAvisosCount(pendingAvisos.length);
     }
   }, [location, getParishNotifications, matrimonialNotificationAvisos, user, safeRole]);
 
-  // --- ESTRUCTURA DE MENÚS DINÁMICOS (Restaurada de Código 1) ---
+  // --- ESTRUCTURA DE MENÚS DINÁMICOS ---
   const getMenuItems = () => {
-    if (safeRole === ROLE_TYPES.ADMIN_GENERAL) {
+    // 🚀 FIX CRÍTICO: Reconocimiento explícito del rol SuperAdmin
+    if (safeRole === ROLE_TYPES.ADMIN_GENERAL || safeRole === 'SuperAdmin') {
         return [
             { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
             { label: 'Diócesis/Arquidiócesis', path: '/admin/dioceses', icon: Church },
@@ -266,10 +267,12 @@ const Sidebar = ({ isOpen, onClose, onLogout, role }) => {
             { label: 'Comunicaciones', path: '/communications', icon: Users }
         ];
     }
-    return [{ label: 'Dashboard', path: '/', icon: LayoutDashboard }];
+    // Fallback de emergencia
+    return [{ label: 'Dashboard', path: '/login', icon: LayoutDashboard }];
   };
 
-  const menuItems = getMenuItems();
+  // 🚀 FIX: Si el Dashboard manda un menú personalizado, lo usamos; si no, usamos el automático
+  const finalMenuItems = externalMenuItems && externalMenuItems.length > 0 ? externalMenuItems : getMenuItems();
 
   return (
     <>
@@ -283,7 +286,6 @@ const Sidebar = ({ isOpen, onClose, onLogout, role }) => {
       )}>
         <div className="flex flex-col h-full">
           
-          {/* HEADER DEL LOGO */}
           <div className="h-24 flex items-center px-8 border-b border-slate-50 bg-white shrink-0">
             <div className="w-10 h-10 bg-[#4B7BA7] rounded-2xl flex items-center justify-center mr-4 shadow-lg shadow-blue-900/20 rotate-3 transition-transform hover:rotate-0">
               <Landmark className="w-6 h-6 text-white -rotate-3 transition-transform hover:rotate-0" />
@@ -297,31 +299,35 @@ const Sidebar = ({ isOpen, onClose, onLogout, role }) => {
             </button>
           </div>
 
-          {/* LISTA DE NAVEGACIÓN */}
           <div className="flex-1 overflow-y-auto py-8 px-5 custom-scrollbar bg-white">
             <p className="text-[9px] font-black text-gray-300 uppercase tracking-[0.3em] mb-6 px-4">Centro de Operaciones</p>
-            {menuItems.map((item, idx) => (
-              <SidebarItem 
-                key={idx} 
-                item={item} 
-                isActive={location.pathname === item.path || (item.children && item.children.some(c => location.pathname.startsWith(c.path)))}
-                badgeCount={item.badgeCount}
-              />
-            ))}
+            {finalMenuItems.map((item, idx) => {
+              // Verificación precisa para marcar el botón actual como Activo
+              const isActive = location.pathname === item.path || 
+                               (item.children && item.children.some(c => location.pathname.startsWith(c.path))) ||
+                               (item.label === 'Dashboard' && location.pathname.includes('/admin/dashboard'));
+
+              return (
+                <SidebarItem 
+                  key={idx} 
+                  item={item} 
+                  isActive={isActive}
+                  badgeCount={item.badgeCount}
+                />
+              );
+            })}
           </div>
 
-          {/* FOOTER: USUARIO Y CIERRE */}
           <div className="p-6 bg-slate-50/50 border-t border-gray-100 shrink-0">
             <div className="bg-white p-4 rounded-[1.5rem] border border-gray-100 shadow-sm mb-4">
                 <div className="flex items-center gap-3">
-                    {/* 🚀 AQUÍ AÑADIMOS shrink-0 AL CONTENEDOR DEL CÍRCULO */}
-                    <div className="w-10 h-10 shrink-0 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600 font-black text-xs uppercase">
-                        {user?.username?.substring(0, 2)}
+                    <div className="w-10 h-10 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600 font-black text-xs uppercase">
+                        {user?.email?.substring(0, 2) || user?.username?.substring(0, 2) || 'AD'}
                     </div>
                     <div className="flex flex-col overflow-hidden">
-                        <span className="text-[10px] font-black text-gray-900 uppercase truncate leading-none mb-1">{user?.username}</span>
+                        <span className="text-[10px] font-black text-gray-900 uppercase truncate leading-none mb-1">{user?.username || user?.email?.split('@')[0]}</span>
                         <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter truncate">
-                            {safeRole === ROLE_TYPES.ADMIN_GENERAL ? 'Súper Administrador' :
+                            {safeRole === ROLE_TYPES.ADMIN_GENERAL || safeRole === 'SuperAdmin' ? 'Súper Administrador' :
                              safeRole === ROLE_TYPES.DIOCESE ? (user?.dioceseName || 'Gestión Diocesana') :
                              safeRole === ROLE_TYPES.CHANCERY ? 'Cancillería' : 
                              (user?.parishName || 'Despacho Parroquial')}
