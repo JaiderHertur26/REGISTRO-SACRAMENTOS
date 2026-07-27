@@ -6,12 +6,14 @@ const DetailsModal = ({ isOpen, onClose, data }) => {
   if (!data) return null;
 
   // Adaptadores para mapear los datos que vienen desde Supabase (formato snake_case) 
-  // o desde el estado local anterior (formato camelCase)
   const provincia = data.provincia_eclesiastica || data.ecclesiasticalProvince || data.provinciaEclesiastica || 'No registrada';
   const jurisdiccion = data.jurisdiccion_eclesiastica || data.jurisdiction || data.jurisdiccionEclesiastica || 'No registrada';
   const obispo = data.bishop || 'No registrado';
   const auxiliar = data.auxiliary_bishop || data.auxiliaryBishop || 'N/A';
   const adminUser = data.username && data.username !== 'Sin asignar' ? data.username : 'No asignado';
+  
+  // 🚀 FIX: Generamos un Código de Sistema único tomando el primer bloque del UUID de Supabase
+  const systemCode = data.id ? data.id.split('-')[0].toUpperCase() : (data.codigo || data.code || 'No asignado');
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Detalles de Diócesis/Arquidiócesis">
@@ -54,9 +56,9 @@ const DetailsModal = ({ isOpen, onClose, data }) => {
         <div className="border-t border-gray-100 pt-4">
            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Código de Diócesis</label>
-              <p className="text-gray-900 font-mono font-bold bg-gray-50 px-2 py-1 rounded border border-gray-200 inline-block">
-                {data.codigo || data.code || 'No asignado'}
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Código de Sistema (ID)</label>
+              <p className="text-gray-900 font-mono font-bold bg-gray-50 px-2 py-1 rounded border border-gray-200 inline-block tracking-widest">
+                {systemCode}
               </p>
             </div>
             <div>
