@@ -37,6 +37,9 @@ const DioceseEcclesiasticalPage = () => {
   
   const [selectedItem, setSelectedItem] = useState(null);
   
+  // 🚀 NUEVO: Estado seguro para guardar el ID de la diócesis
+  const [currentDioceseId, setCurrentDioceseId] = useState(null);
+  
   const [realDioceseName, setRealDioceseName] = useState('Cargando Jurisdicción...');
   const [realChancery, setRealChancery] = useState(null);
   const [realVicaries, setRealVicaries] = useState([]);
@@ -52,33 +55,57 @@ const DioceseEcclesiasticalPage = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [pendingEnvs, setPendingEnvs] = useState([]);
 
-  // Adaptador Universal
-  const currentDioceseId = user?.diocese_id || user?.dioceseId;
-
   useEffect(() => {
-      if (!currentDioceseId) {
-          setLoadingStructure(false);
-          return;
-      }
-
       const fetchRealStructure = async () => {
+          if (!user) return;
+          setLoadingStructure(true);
+
           try {
-              const { data: dioData } = await supabase.from('dioceses').select('name').eq('id', currentDioceseId).single();
+              // 1. RASTREADOR: Buscar el ID real de la diócesis en Supabase
+              let activeDioceseId = user.diocese_id || user.dioceseId;
+              
+              if (!activeDioceseId && user.email) {
+                  const { data: profile } = await supabase
+                      .from('user_profiles')
+                      .select('diocese_id')
+                      .eq('email', user.email)
+                      .single();
+                  
+                  if (profile && profile.diocese_id) {
+                      activeDioceseId = profile.diocese_id;
+                  }
+              }
+
+              if (!activeDioceseId) {
+                  console.error("No se detectó la jurisdicción. Verifica la tabla user_profiles.");
+                  setLoadingStructure(false);
+                  return;
+              }
+
+              // Guardamos el ID en el estado seguro para pasarlo a los modales
+              setCurrentDioceseId(activeDioceseId);
+
+              // 2. Descargamos Nombre
+              const { data: dioData } = await supabase.from('dioceses').select('name').eq('id', activeDioceseId).single();
               if (dioData) setRealDioceseName(dioData.name);
 
-              const chanRes = await supabase.from('chancelleries').select('*').eq('diocese_id', currentDioceseId);
+              // 3. Descargamos Cancillería
+              const chanRes = await supabase.from('chancelleries').select('*').eq('diocese_id', activeDioceseId);
               if (chanRes.data && chanRes.data.length > 0) {
                   setRealChancery(chanRes.data[0]);
                   setChancellor(chanRes.data[0]); 
               }
 
-              const vicRes = await supabase.from('vicarias').select('*').eq('diocese_id', currentDioceseId);
+              // 4. Descargamos Vicarías
+              const vicRes = await supabase.from('vicarias').select('*').eq('diocese_id', activeDioceseId);
               if (vicRes.data) setRealVicaries(vicRes.data);
 
-              const decRes = await supabase.from('decanatos').select('*');
+              // 5. Descargamos Decanatos
+              const decRes = await supabase.from('decanatos').select('*').eq('diocese_id', activeDioceseId);
               if (decRes.data) setRealDeaneries(decRes.data);
 
-              const parRes = await supabase.from('parishes').select('*').eq('diocese_id', currentDioceseId);
+              // 6. Descargamos Parroquias
+              const parRes = await supabase.from('parishes').select('*').eq('diocese_id', activeDioceseId);
               if (parRes.data) setRealParishes(parRes.data);
 
           } catch (error) {
@@ -89,6 +116,7 @@ const DioceseEcclesiasticalPage = () => {
       };
 
       const fetchPendingTokens = async () => {
+          if (!user) return;
           try {
               const { data: tokens, error } = await supabase.from('pending_tokens').select('*').eq('created_by', user.id); 
               if (error) throw error;
@@ -106,7 +134,7 @@ const DioceseEcclesiasticalPage = () => {
 
       fetchRealStructure();
       fetchPendingTokens();
-  }, [user, currentDioceseId]);
+  }, [user]);
 
   if (loading || loadingStructure) {
     return (
@@ -399,13 +427,13 @@ const DioceseEcclesiasticalPage = () => {
             </AnimatePresence>
 
             <div className="space-y-8 mt-8">
-            {vicaries.length === 0 ? (
+            {realVicaries.length === 0 ? (
                 <div className="bg-white p-20 rounded-[2.5rem] border border-dashed border-slate-200 text-center text-slate-500 shadow-sm">
                     <Network className="w-16 h-16 text-slate-300 mx-auto mb-4" />
                     <p className="font-black text-slate-500 uppercase tracking-widest text-xs">No hay vicarías registradas. Comienza creando una estructura eclesiástica.</p>
                 </div>
             ) : (
-                vicaries.map(vicary => {
+                realVicaries.map(vicary => {
                     const vicaryDeaneries = getDeaneries(vicary.id);
                     const directParishes = getDirectParishes(vicary.id);
                     const hasContent = vicaryDeaneries.length > 0 || directParishes.length > 0;
@@ -585,7 +613,7 @@ const DioceseEcclesiasticalPage = () => {
             </div>
         </Modal>
 
-        {/* 🚀 Pasamos el currentDioceseId a los modales */}
+        {/* 🚀 Pasamos el ID a los modales */}
         {modals.createVicary && <CreateVicaryModal isOpen={modals.createVicary} onClose={() => closeModal('createVicary')} dioceseId={currentDioceseId} />}
         {modals.createDecanate && <CreateDecanateModal isOpen={modals.createDecanate} onClose={() => closeModal('createDecanate')} dioceseId={currentDioceseId} />}
         {modals.editParish && <EditParishModal isOpen={modals.editParish} onClose={() => closeModal('editParish')} parish={selectedItem} />}
