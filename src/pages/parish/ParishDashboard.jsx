@@ -18,7 +18,7 @@ import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 const ParishDashboard = () => {
-  const { data, getMisDatosList } = useAppData();
+  const { data } = useAppData();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -27,46 +27,56 @@ const ParishDashboard = () => {
   const [isSyncing, setIsSyncing] = useState(true);
   const [stats, setStats] = useState({ baptisms: 0, confirmations: 0, marriages: 0, total: 0 });
   const [hasPending, setHasPending] = useState(false);
-  const [nombreParroquia, setNombreParroquia] = useState('Cargando Parroquia...');
+  
+  // Estados Cloud-Native
+  const [currentParishId, setCurrentParishId] = useState(null);
+  const [nombreParroquia, setNombreParroquia] = useState(''); // Lo dejamos en blanco para que no se vea feo mientras carga
 
-  // 🚀 ADAPTADOR UNIVERSAL (Cierra la grieta de IDs nulos)
-  const currentParishId = user?.parish_id || user?.parishId;
-
-  // 1. OBTENER NOMBRE REAL DE LA PARROQUIA
+  // 1. RASTREADOR: OBTENER ID REAL Y NOMBRE DE LA PARROQUIA
   useEffect(() => {
-      const fetchParishName = async () => {
-          if (!currentParishId) return;
+      const initializeParish = async () => {
+          if (!user) return;
 
-          // Intento rápido desde caché
-          const misDatos = getMisDatosList(currentParishId);
-          if (misDatos && misDatos.length > 0 && misDatos[0].nombre) {
-              setNombreParroquia(misDatos[0].nombre.toUpperCase());
+          // Buscamos el ID real directo en la base de datos
+          let pId = user.parish_id || user.parishId;
+          
+          if (!pId && user.email) {
+              const { data: profile } = await supabase
+                  .from('user_profiles')
+                  .select('parish_id')
+                  .eq('email', user.email)
+                  .single();
+              if (profile) pId = profile.parish_id;
+          }
+
+          if (!pId) {
+              setNombreParroquia('PARROQUIA NO ASIGNADA');
+              setIsSyncing(false);
               return;
           }
 
-          // Intento seguro desde la Nube (Supabase)
+          setCurrentParishId(pId);
+
+          // Descargar nombre real desde la tabla parishes
           try {
               const { data: pData } = await supabase
                   .from('parishes')
                   .select('name')
-                  .eq('id', currentParishId)
+                  .eq('id', pId)
                   .single();
               
               if (pData && pData.name) {
                   setNombreParroquia(pData.name.toUpperCase());
-                  return;
+              } else {
+                  setNombreParroquia('PARROQUIA');
               }
           } catch (e) {
-              console.warn("Sincronización menor: Leyendo nombre desde sesión.");
+              setNombreParroquia('PARROQUIA');
           }
-
-          // Fallback final
-          const sessionName = user?.parishName || user?.parish_name || user?.dioceseName;
-          setNombreParroquia((sessionName || 'PARROQUIA').toUpperCase());
       };
 
-      fetchParishName();
-  }, [user, currentParishId, getMisDatosList]);
+      initializeParish();
+  }, [user]);
 
   // 2. BLINDAJE DE FECHAS (Evita que un borrador sin fecha rompa la tabla)
   const parseSortDate = (dateStr) => {
@@ -97,7 +107,7 @@ const ParishDashboard = () => {
         const cSeated = cRes.error ? [] : cRes.data.map(r => ({ ...r.raw_data, id: r.id, status: r.status, createdAt: r.created_at }));
         const mSeated = mRes.error ? [] : mRes.data.map(r => ({ ...r.raw_data, id: r.id, status: r.status, createdAt: r.created_at }));
 
-        // Borradores locales (Se mantienen en localStorage hasta ser asentados)
+        // Borradores locales
         const bPending = JSON.parse(localStorage.getItem(`pendingBaptisms_${currentParishId}`) || '[]');
         const cPending = JSON.parse(localStorage.getItem(`pendingConfirmations_${currentParishId}`) || '[]');
         const mPending = JSON.parse(localStorage.getItem(`pendingMatrimonios_${currentParishId}`) || '[]');
@@ -150,7 +160,7 @@ const ParishDashboard = () => {
             return b.sortDate - a.sortDate;
         });
 
-        setRecentRecords(allRecords.slice(0, 10)); // Mostrar los 10 más recientes
+        setRecentRecords(allRecords.slice(0, 10));
     } catch (err) {
         console.error("Dashboard Sync Error:", err);
         toast({ title: 'Aviso', description: 'Trabajando en modo sin conexión.', variant: 'default' });
@@ -159,12 +169,14 @@ const ParishDashboard = () => {
     }
   }, [currentParishId, toast]);
 
-  // Listener para sincronización entre pestañas
+  // Ejecutar sincronización solo cuando ya tenemos el currentParishId
   useEffect(() => {
-    updateDashboardData();
+    if (currentParishId) {
+        updateDashboardData();
+    }
     window.addEventListener('storage', updateDashboardData);
     return () => window.removeEventListener('storage', updateDashboardData);
-  }, [updateDashboardData]);
+  }, [updateDashboardData, currentParishId]);
 
   // Configuración UI de Tarjetas
   const statsCards = [
@@ -228,7 +240,9 @@ const ParishDashboard = () => {
                 </div>
                 <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif">Panel Parroquial</h1>
                 <div className="flex items-center gap-3 mt-3">
-                    <p className="text-gray-500 font-bold uppercase text-[11px] tracking-widest">{nombreParroquia}</p>
+                    <p className="text-gray-500 font-bold uppercase text-[11px] tracking-widest">
+                        {nombreParroquia || <Loader2 className="w-4 h-4 animate-spin text-gray-300" />}
+                    </p>
                     {hasPending && (
                         <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-100 shadow-sm">
                             <AlertCircle className="w-3 h-3 animate-pulse" />
@@ -327,7 +341,7 @@ const ParishDashboard = () => {
   );
 };
 
-// Subcomponente de Botones
+// Subcomponente de Botones Rápidos
 const QuickActionButton = ({ color, label, onClick }) => (
     <button 
         onClick={onClick}
