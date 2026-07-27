@@ -151,15 +151,23 @@ const BD_BautizosPage = () => {
 
     // 🚀 LÓGICA DE ELIMINACIÓN CON REGRESO DE CORRELATIVO EN SUPABASE
     const handleDeleteTemporal = async (id) => {
-        if (!window.confirm("¿Está seguro de eliminar este borrador? El número de registro en parámetros regresará al anterior.")) return;
+        if (!window.confirm("¿Está seguro de eliminar este borrador de la nube? El número de registro regresará al anterior.")) return;
 
         const entityId = user.parishId;
-        const storageKey = `pendingBaptisms_${entityId}`;
 
-        // 1. Eliminar de la lista de borradores locales
-        const stored = JSON.parse(localStorage.getItem(storageKey) || '[]');
-        const updated = stored.filter(r => r.id !== id);
-        localStorage.setItem(storageKey, JSON.stringify(updated));
+        // 1. Eliminar de la tabla temporal en Supabase
+        try {
+            const { error: deleteError } = await supabase
+                .from('pending_baptisms')
+                .delete()
+                .eq('id', id);
+                
+            if (deleteError) throw deleteError;
+        } catch (err) {
+            console.error("Error borrando registro temporal en Supabase:", err);
+            toast({ title: "Error", description: "No se pudo eliminar de la nube.", variant: "destructive" });
+            return;
+        }
 
         // 2. Decrementar el correlativo en parámetros (Supabase)
         try {
@@ -176,29 +184,22 @@ const BD_BautizosPage = () => {
                 const currentNum = parseInt(currentParams.numeroRegistroActual, 10) || 0;
                 const prevNum = Math.max(1, currentNum - 1);
 
-                // Actualizar el número con ceros a la izquierda
                 const updatedParams = {
                     ...currentParams,
                     numeroRegistroActual: String(prevNum).padStart(6, '0')
                 };
 
-                const { error: updateError } = await supabase
-                    .from('parish_parameters')
-                    .update({ bautizos_params: updatedParams })
-                    .eq('parish_id', entityId);
-
-                if (updateError) throw updateError;
+                await supabase.from('parish_parameters').update({ bautizos_params: updatedParams }).eq('parish_id', entityId);
             }
         } catch (error) {
             console.error("Error al restaurar el correlativo en Supabase:", error);
-            // No bloqueamos la UI si Supabase falla temporalmente, ya que el borrador local se borró
         }
 
         // 3. Actualizar UI
-        setRegistrosTemporales(updated.map(p => purificarRegistro(p)));
+        setRegistrosTemporales(prev => prev.filter(r => r.id !== id));
         toast({
             title: "Borrador Eliminado",
-            description: "El correlativo de registro ha regresado al número anterior en la nube.",
+            description: "Eliminado de la nube y correlativo restaurado.",
             className: "bg-amber-50 border-amber-200 text-amber-900"
         });
     };
@@ -207,22 +208,30 @@ const BD_BautizosPage = () => {
         if (!parishId) return;
         setCargando(true);
         try {
+            // 1. Obtener Registros Permanentes
             let query = supabase.from('baptisms').select('*', { count: 'exact' }).eq('parish_id', parishId);
             const { data, count, error } = await query.order('entry_number', { ascending: false }).range((paginaActual - 1) * registrosPorPagina, paginaActual * registrosPorPagina - 1);
             if (error) throw error;
 
             setRegistrosPermanentes(data.map(r => purificarRegistro({
-                ...r.raw_data,
-                id: r.id,
-                status: r.status,
-                tipo_union_padres: r.tipo_union_padres,
-                margin_note: r.margin_note
+                ...r.raw_data, id: r.id, status: r.status, 
+                tipo_union_padres: r.tipo_union_padres, margin_note: r.margin_note
             })));
-
             setTotalRegistros(count || 0);
-            const pendientes = await getPendingBaptisms(parishId);
-            setRegistrosTemporales(pendientes.map(p => purificarRegistro(p)));
-        } catch (err) { console.error(err); } finally { setCargando(false); }
+
+            // 2. Obtener Registros Temporales Directo de Supabase (Nube)
+            const { data: temp_data, error: temp_error } = await supabase
+                .from('pending_baptisms')
+                .select('*')
+                .eq('parish_id', parishId)
+                .order('created_at', { ascending: false });
+                
+            if (!temp_error && temp_data) {
+                setRegistrosTemporales(temp_data.map(r => purificarRegistro({
+                    ...r.raw_data, id: r.id, status: 'pending'
+                })));
+            }
+        } catch (err) { console.error("Error cargando base de datos:", err); } finally { setCargando(false); }
     };
 
     useEffect(() => { fetchData(); }, [parishId, paginaActual]);
