@@ -159,12 +159,19 @@ export const AppDataProvider = ({ children }) => {
           // 5. Sincronización Privada de la Parroquia
           if (entityId) {
               try {
-                  // Bautismos
+                  // Bautismos Permanentes
                   const { data: bData } = await supabase.from('baptisms').select('*').eq('parish_id', entityId);
                   if (bData) {
                       const cloudBaptisms = bData.map(b => ({ ...b.raw_data, id: b.id, status: b.status, marginNote: b.margin_note }));
                       localStorage.setItem(`baptisms_${entityId}`, JSON.stringify(cloudBaptisms));
                       localStorage.setItem(`baptismPartidas_${entityId}`, JSON.stringify(cloudBaptisms));
+                  }
+                  
+                  // Borradores (Bautismos Temporales)
+                  const { data: pbData } = await supabase.from('pending_baptisms').select('*').eq('parish_id', entityId);
+                  if (pbData) {
+                      const cloudPending = pbData.map(pb => ({ ...pb.raw_data, id: pb.id, status: 'pending' }));
+                      localStorage.setItem(`pendingBaptisms_${entityId}`, JSON.stringify(cloudPending));
                   }
 		  
 		  // Confirmaciones (Añadido)
@@ -632,17 +639,39 @@ export const AppDataProvider = ({ children }) => {
   const saveBaptismToSource = async (data, parishId, mode) => {
       const purificado = purificarRegistroBautismo(data);
       const targetParishId = parishId || purificado.parishId;
+      const statusFinal = mode || purificado.status || 'seated';
 
       try {
+          // 🚀 ENRUTADOR: Si es un borrador, viaja a la tabla temporal
+          if (statusFinal === 'pending') {
+              const tempRecord = {
+                  id: purificado.id,
+                  parish_id: targetParishId,
+                  status: 'pending',
+                  raw_data: purificado,
+                  created_at: new Date().toISOString()
+              };
+              
+              const { error } = await supabase.from('pending_baptisms').upsert(tempRecord, { onConflict: 'id' });
+              if (error) throw error;
+
+              const storageKey = `pendingBaptisms_${targetParishId}`;
+              const currentLocal = JSON.parse(localStorage.getItem(storageKey) || '[]');
+              const updatedLocal = [...currentLocal.filter(b => b.id !== purificado.id), purificado];
+              localStorage.setItem(storageKey, JSON.stringify(updatedLocal));
+              window.dispatchEvent(new Event('storage'));
+              return { success: true, id: purificado.id };
+          }
+
+          // 🚀 MODO NORMAL: Si es registro asentado, viaja a la permanente
           const cleanDate = (d) => (d && String(d).trim() !== '' && d !== '---') ? d : null;
 
-          // Mapeo a columnas físicas de Supabase + Cápsula Raw Data
           const dbRecord = {
               id: purificado.id,
               parish_id: targetParishId,
-              book_number: purificado.Libro, // El valor de Libro va a la columna book_number
-              page_number: purificado.folio, // El valor de folio va a la columna page_number
-              entry_number: purificado.numero, // El valor de numero va a la columna entry_number
+              book_number: purificado.Libro, 
+              page_number: purificado.folio, 
+              entry_number: purificado.numero, 
               first_name: purificado.nombres,
               last_name: purificado.apellidos,
               gender: purificado.sexo,
@@ -651,7 +680,7 @@ export const AppDataProvider = ({ children }) => {
               minister: purificado.ministro,
               father_name: purificado.nombrePadre,
               mother_name: purificado.nombreMadre,
-              status: purificado.status,
+              status: statusFinal,
               margin_note: purificado.notaMarginal,
               raw_data: purificado 
           };
@@ -2500,6 +2529,9 @@ export const AppDataProvider = ({ children }) => {
           const { error } = await supabase.from('baptisms').upsert(dbRecord, { onConflict: 'id' });
           if (error) throw error;
 
+          // 🚀 BORRAMOS DE LA TABLA TEMPORAL EN SUPABASE
+          await supabase.from('pending_baptisms').delete().eq('id', originalId);
+
           const newPending = pending.filter(r => r.id !== originalId);
           localStorage.setItem(`pendingBaptisms_${parishId}`, JSON.stringify(newPending));
           
@@ -2585,6 +2617,9 @@ export const AppDataProvider = ({ children }) => {
 
           const { error } = await supabase.from('baptisms').upsert(dbRecords, { onConflict: 'id' });
           if (error) throw error;
+
+          // 🚀 BORRAMOS EL LOTE DE LA TABLA TEMPORAL EN SUPABASE
+          await supabase.from('pending_baptisms').delete().in('id', ids);
 
           params.ordinarioLibro = currentLibro;
           params.ordinarioFolio = currentFolio;
