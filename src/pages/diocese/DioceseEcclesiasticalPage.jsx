@@ -12,12 +12,11 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import Modal from '@/components/ui/Modal';
 import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from '@/lib/utils';
 
 // IMPORTAMOS SUPABASE
 import { supabase } from '@/lib/supabaseClient';
 
-// Modals
+// Modales
 import CreateVicaryModal from '@/components/modals/CreateVicaryModal';
 import CreateDecanateModal from '@/components/modals/CreateDecanateModal';
 import EditParishModal from '@/components/modals/EditParishModal';
@@ -28,7 +27,7 @@ import DetailsModal from '@/components/modals/DetailsModal';
 import ParishDetailsModal from '@/components/modals/ParishDetailsModal';
 
 const DioceseEcclesiasticalPage = () => {
-  const { data, deleteParish, deleteChancellor, deleteVicary, deleteDecanate } = useAppData();
+  const { deleteParish, deleteChancellor, deleteVicary, deleteDecanate } = useAppData();
   const { user, loading } = useAuth();
   const { toast } = useToast();
 
@@ -46,7 +45,7 @@ const DioceseEcclesiasticalPage = () => {
   const [realDeaneries, setRealDeaneries] = useState([]);
   const [realParishes, setRealParishes] = useState([]);
   
-  const [chancellor, setChancellor] = useState(null); // Compatibilidad con el botón
+  const [chancellor, setChancellor] = useState(null);
   const [loadingStructure, setLoadingStructure] = useState(true);
 
   // --- ESTADOS PARA TOKENS ---
@@ -62,14 +61,13 @@ const DioceseEcclesiasticalPage = () => {
           return;
       }
 
-      // 1. CARGAMOS LA ESTRUCTURA REAL DESDE SUPABASE (A PRUEBA DE FALLOS)
       const fetchRealStructure = async () => {
           try {
               // Cancillería
               const chanRes = await supabase.from('chancelleries').select('*').eq('diocese_id', user.dioceseId);
               if (chanRes.data && chanRes.data.length > 0) {
                   setRealChancery(chanRes.data[0]);
-                  setChancellor(chanRes.data[0]); // Deshabilita el botón de crear
+                  setChancellor(chanRes.data[0]); 
               }
 
               // Vicarías
@@ -91,7 +89,6 @@ const DioceseEcclesiasticalPage = () => {
           }
       };
 
-      // 2. CARGAR TOKENS DESDE SUPABASE
       const fetchPendingTokens = async () => {
           try {
               const { data: tokens, error } = await supabase
@@ -103,11 +100,8 @@ const DioceseEcclesiasticalPage = () => {
               
               if (tokens) {
                   const formattedTokens = tokens.map(item => ({
-                      id: item.id,
-                      token: item.token,
-                      type: item.type,
-                      ...item.payload,
-                      date: new Date(item.created_at).toLocaleDateString()
+                      id: item.id, token: item.token, type: item.type,
+                      ...item.payload, date: new Date(item.created_at).toLocaleDateString()
                   }));
                   setPendingEnvs(formattedTokens);
               }
@@ -124,7 +118,7 @@ const DioceseEcclesiasticalPage = () => {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">
         <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-[#4B7BA7] mx-auto mb-4"></div>
+            <Loader2 className="w-12 h-12 text-[#D4AF37] animate-spin mx-auto mb-4" />
             <p className="text-[#4B7BA7] font-black uppercase tracking-widest text-[10px]">Descargando Entidades...</p>
         </div>
       </div>
@@ -136,27 +130,20 @@ const DioceseEcclesiasticalPage = () => {
   const openModal = (name, item = null) => { setSelectedItem(item); setModals(prev => ({ ...prev, [name]: true })); };
   const closeModal = (name) => { setModals(prev => ({ ...prev, [name]: false })); setSelectedItem(null); };
 
-  // --- FILTROS BASADOS EN SUPABASE ---
+  // --- FILTROS ---
   const vicaries = realVicaries;
   const getDeaneries = (vicaryId) => realDeaneries.filter(d => String(d.vicaria_id) === String(vicaryId) || String(d.vicaryId) === String(vicaryId));
   const getParishesByDecanate = (decanateId) => realParishes.filter(p => String(p.decanate_id) === String(decanateId) || String(p.decanateId) === String(decanateId));
-  
-  // Parroquias que SÍ tienen vicaría, pero NO tienen decanato
   const getDirectParishes = (vicaryId) => realParishes.filter(p => 
     (String(p.vicary_id) === String(vicaryId) || String(p.vicaryId) === String(vicaryId)) && 
     (!p.decanate_id && !p.decanateId || String(p.decanate_id) === 'null' || String(p.decanateId) === 'null' || p.decanate_id === '')
   );
-
-  // Parroquias totalmente huérfanas (Sin Vicaría)
-  const unassignedParishes = realParishes.filter(p => 
-    !p.vicary_id && !p.vicaryId && String(p.vicary_id) !== 'null'
-  );
-
+  const unassignedParishes = realParishes.filter(p => !p.vicary_id && !p.vicaryId && String(p.vicary_id) !== 'null');
   const availableDeaneriesForForm = envFormData.vicaryId ? getDeaneries(envFormData.vicaryId) : [];
 
-  // --- HANDLERS DE BORRADO VINCULADOS A NUBE Y ESTADO LOCAL ---
+  // --- HANDLERS DE BORRADO ---
   const handleDeleteParish = async (id) => { 
-      if (confirm('¿Eliminar esta parroquia permanentemente?')) {
+      if (window.confirm('¿Eliminar esta parroquia permanentemente?')) {
           await supabase.from('parishes').delete().eq('id', id);
           setRealParishes(prev => prev.filter(p => p.id !== id));
           if (deleteParish) deleteParish(id);
@@ -164,16 +151,15 @@ const DioceseEcclesiasticalPage = () => {
       }
   };
   const handleDeleteChancellor = async (id) => { 
-      if (confirm('¿Eliminar el canciller permanentemente?')) {
+      if (window.confirm('¿Eliminar el canciller permanentemente?')) {
           await supabase.from('chancelleries').delete().eq('id', id);
-          setRealChancery(null);
-          setChancellor(null);
+          setRealChancery(null); setChancellor(null);
           if (deleteChancellor) deleteChancellor(id);
           toast({ title: "Eliminada", description: "Cancillería eliminada de la nube.", className: "bg-green-50 border-green-200 text-green-700" });
       }
   };
   const handleDeleteVicary = async (id) => { 
-      if (confirm('¿Eliminar esta vicaría permanentemente?')) {
+      if (window.confirm('¿Eliminar esta vicaría permanentemente?')) {
           await supabase.from('vicarias').delete().eq('id', id);
           setRealVicaries(prev => prev.filter(v => v.id !== id));
           if (deleteVicary) deleteVicary(id);
@@ -181,7 +167,7 @@ const DioceseEcclesiasticalPage = () => {
       }
   };
   const handleDeleteDecanate = async (id) => { 
-      if (confirm('¿Eliminar este decanato permanentemente?')) {
+      if (window.confirm('¿Eliminar este decanato permanentemente?')) {
           await supabase.from('decanatos').delete().eq('id', id);
           setRealDeaneries(prev => prev.filter(d => d.id !== id));
           if (deleteDecanate) deleteDecanate(id);
@@ -200,34 +186,21 @@ const DioceseEcclesiasticalPage = () => {
       const newToken = `${prefix}${cleanName}.${randomDigits}`;
 
       const payloadData = {
-          name: envFormData.name,
-          city: envFormData.city,
-          priest: envFormData.priest,
-          vicaryId: envFormData.vicaryId,
-          decanateId: envFormData.decanateId,
-          dioceseId: user.dioceseId 
+          name: envFormData.name, city: envFormData.city, priest: envFormData.priest,
+          vicaryId: envFormData.vicaryId, decanateId: envFormData.decanateId, dioceseId: user.dioceseId 
       };
 
       try {
           const { data: savedToken, error } = await supabase
               .from('pending_tokens')
-              .insert([{
-                  token: newToken,
-                  type: envModal.type,
-                  payload: payloadData,
-                  created_by: user.id
-              }])
-              .select()
-              .single();
+              .insert([{ token: newToken, type: envModal.type, payload: payloadData, created_by: user.id }])
+              .select().single();
 
           if (error) throw error;
 
           const newEnv = {
-              id: savedToken.id,
-              token: savedToken.token,
-              type: savedToken.type,
-              ...savedToken.payload,
-              date: new Date(savedToken.created_at).toLocaleDateString()
+              id: savedToken.id, token: savedToken.token, type: savedToken.type,
+              ...savedToken.payload, date: new Date(savedToken.created_at).toLocaleDateString()
           };
 
           setPendingEnvs(prev => [...prev, newEnv]);
@@ -254,7 +227,7 @@ const DioceseEcclesiasticalPage = () => {
   };
 
   const handleDeletePending = async (id) => {
-      if(confirm("¿Revocar este código de activación permanentemente?")) {
+      if(window.confirm("¿Revocar este código de activación permanentemente?")) {
           try {
               const { error } = await supabase.from('pending_tokens').delete().eq('id', id);
               if (error) throw error;
@@ -320,7 +293,7 @@ const DioceseEcclesiasticalPage = () => {
       <Helmet><title>Estructura Jurisdiccional | Sacramentum</title></Helmet>
 
       <DashboardLayout entityName={user.dioceseName || 'Diócesis'}>
-        <div className="max-w-[1600px] mx-auto space-y-8 pb-20">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[1600px] mx-auto space-y-8 pb-20">
             
             {/* CABECERA */}
             <div className="flex flex-col md:flex-row justify-between items-end gap-4">
@@ -334,23 +307,23 @@ const DioceseEcclesiasticalPage = () => {
                 </div>
             </div>
 
-            {/* BOTONERA DE ACCIONES RÁPIDAS */}
+            {/* BOTONERA DE ACCIONES RÁPIDAS - REDISEÑADA CON PESO VISUAL */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <Button onClick={() => openModal('createVicary')} className="h-16 rounded-2xl bg-white hover:bg-slate-50 text-[#4B7BA7] border border-slate-200 shadow-sm font-black uppercase tracking-widest text-[10px] flex flex-col items-center justify-center gap-1 transition-all active:scale-95">
+                <Button onClick={() => openModal('createVicary')} className="h-16 rounded-2xl bg-slate-800 hover:bg-slate-900 text-white shadow-xl shadow-slate-900/10 font-black uppercase tracking-widest text-[10px] flex flex-col items-center justify-center gap-1 transition-all active:scale-95 border-none">
                     <Network className="w-5 h-5" /> Crear Vicaría
                 </Button>
-                <Button onClick={() => openModal('createDecanate')} className="h-16 rounded-2xl bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm font-black uppercase tracking-widest text-[10px] flex flex-col items-center justify-center gap-1 transition-all active:scale-95">
+                <Button onClick={() => openModal('createDecanate')} className="h-16 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl shadow-indigo-900/10 font-black uppercase tracking-widest text-[10px] flex flex-col items-center justify-center gap-1 transition-all active:scale-95 border-none">
                     <LayoutGrid className="w-5 h-5" /> Crear Decanato
                 </Button>
-                <Button onClick={() => setEnvModal({ isOpen: true, type: 'PARISH' })} className="h-16 rounded-2xl bg-[#4B7BA7] hover:bg-[#3A6286] text-white shadow-xl shadow-blue-900/10 font-black uppercase tracking-widest text-[10px] flex flex-col items-center justify-center gap-1 transition-all active:scale-95">
+                <Button onClick={() => setEnvModal({ isOpen: true, type: 'PARISH' })} className="h-16 rounded-2xl bg-[#4B7BA7] hover:bg-[#3A6286] text-white shadow-xl shadow-blue-900/10 font-black uppercase tracking-widest text-[10px] flex flex-col items-center justify-center gap-1 transition-all active:scale-95 border-none">
                     <Church className="w-5 h-5" /> Crear Parroquia
                 </Button>
-                <Button onClick={() => setEnvModal({ isOpen: true, type: 'CHANCERY' })} disabled={!!chancellor} className="h-16 rounded-2xl bg-gradient-to-r from-[#D4AF37] to-[#B4932A] hover:shadow-lg text-white font-black uppercase tracking-widest text-[10px] flex flex-col items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-50">
+                <Button onClick={() => setEnvModal({ isOpen: true, type: 'CHANCERY' })} disabled={!!chancellor} className="h-16 rounded-2xl bg-[#D4AF37] hover:bg-[#C4A027] text-[#111111] shadow-xl shadow-yellow-900/10 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none font-black uppercase tracking-widest text-[10px] flex flex-col items-center justify-center gap-1 transition-all active:scale-95 border-none">
                     <Building2 className="w-5 h-5" /> {chancellor ? 'Cancillería Activa' : 'Crear Cancillería'}
                 </Button>
             </div>
 
-            {/* 🚀 CANCILLERÍA (Extraída directamente de Supabase) */}
+            {/* 🚀 CANCILLERÍA */}
             {realChancery && (
                 <div className="bg-white rounded-[2.5rem] shadow-xl shadow-yellow-900/5 border border-slate-100 overflow-hidden mb-8">
                     <div className="bg-gradient-to-r from-[#D4AF37] to-[#B4932A] p-6 lg:px-10 flex justify-between items-center">
@@ -442,9 +415,9 @@ const DioceseEcclesiasticalPage = () => {
             </AnimatePresence>
 
             {/* ORGANIGRAMA EXISTENTE */}
-            <div className="space-y-8">
+            <div className="space-y-8 mt-8">
             {vicaries.length === 0 ? (
-                <div className="bg-slate-50 p-20 rounded-[2.5rem] border border-dashed border-slate-300 text-center text-slate-500">
+                <div className="bg-white p-20 rounded-[2.5rem] border border-dashed border-slate-200 text-center text-slate-500 shadow-sm">
                     <Network className="w-16 h-16 text-slate-300 mx-auto mb-4" />
                     <p className="font-black text-slate-500 uppercase tracking-widest text-xs">No hay vicarías registradas. Comienza creando una estructura eclesiástica.</p>
                 </div>
@@ -456,23 +429,22 @@ const DioceseEcclesiasticalPage = () => {
 
                     return (
                         <div key={vicary.id} className="bg-white rounded-[2.5rem] shadow-xl shadow-blue-900/5 border border-slate-100 overflow-hidden">
-                            
                             {/* HEADER VICARÍA */}
-                            <div className="bg-slate-50 p-6 lg:px-10 flex justify-between items-center border-b border-slate-200">
+                            <div className="bg-slate-800 p-6 lg:px-10 flex justify-between items-center border-b border-slate-700">
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-100">
-                                        <Landmark className="w-6 h-6 text-[#D4AF37]" />
+                                    <div className="w-12 h-12 bg-slate-700 rounded-2xl flex items-center justify-center shadow-sm">
+                                        <Network className="w-6 h-6 text-[#D4AF37]" />
                                     </div>
                                     <div>
-                                        <h3 className="font-black text-2xl text-[#111111] uppercase tracking-tighter">{vicary.name}</h3>
-                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mt-1 flex items-center gap-1.5">
+                                        <h3 className="font-black text-2xl text-white uppercase tracking-tighter">{vicary.name}</h3>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1 flex items-center gap-1.5">
                                             <User className="w-3 h-3 text-[#D4AF37]" /> Vicario: {vicary.vicar_name || vicary.vicarioName || 'Sin asignar'}
                                         </p>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <button onClick={() => openModal('editVicary', vicary)} className="p-3 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-600 transition-colors shadow-sm"><Edit className="w-4 h-4" /></button>
-                                    <button onClick={() => handleDeleteVicary(vicary.id)} className="p-3 bg-red-50 hover:bg-red-100 border border-red-100 rounded-xl text-red-600 transition-colors shadow-sm"><Trash2 className="w-4 h-4" /></button>
+                                    <button onClick={() => openModal('editVicary', vicary)} className="p-3 bg-slate-700 hover:bg-slate-600 rounded-xl text-white transition-colors shadow-sm"><Edit className="w-4 h-4" /></button>
+                                    <button onClick={() => handleDeleteVicary(vicary.id)} className="p-3 bg-red-500/20 hover:bg-red-500/40 rounded-xl text-red-300 transition-colors shadow-sm"><Trash2 className="w-4 h-4" /></button>
                                 </div>
                             </div>
 
@@ -482,11 +454,11 @@ const DioceseEcclesiasticalPage = () => {
                                 ) : (
                                     <div className="space-y-10">
                                         {vicaryDeaneries.map(decanate => (
-                                            <div key={decanate.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative ml-4 pl-8 before:absolute before:left-0 before:top-10 before:bottom-10 before:w-1 before:bg-slate-100 before:rounded-full">
+                                            <div key={decanate.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative ml-4 pl-8 before:absolute before:left-0 before:top-10 before:bottom-10 before:w-1 before:bg-slate-100 before:rounded-full hover:border-indigo-100 transition-colors">
                                                 <div className="flex justify-between items-center mb-6">
                                                     <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center">
-                                                            <LayoutGrid className="w-5 h-5 text-slate-600" />
+                                                        <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+                                                            <LayoutGrid className="w-5 h-5 text-indigo-600" />
                                                         </div>
                                                         <div>
                                                             <h4 className="font-black text-slate-800 uppercase tracking-tight text-lg leading-none mb-1">{decanate.name}</h4>
@@ -517,25 +489,14 @@ const DioceseEcclesiasticalPage = () => {
                 })
             )}
             </div>
-        </div>
+        </motion.div>
 
-        {/* =========================================================================
-            MODAL INTELIGENTE DE GENERACIÓN DE TOKENS (NUBE)
-            ========================================================================= */}
-        <Modal 
-            isOpen={envModal.isOpen} 
-            onClose={resetEnvModal} 
-            title={generatedCode ? "¡Código Generado Exitosamente!" : `Crear Entorno de ${envModal.type === 'PARISH' ? 'Parroquia' : 'Cancillería'}`}
-        >
+        {/* MODAL INTELIGENTE DE GENERACIÓN DE TOKENS */}
+        <Modal isOpen={envModal.isOpen} onClose={resetEnvModal} title={generatedCode ? "¡Código Generado Exitosamente!" : `Crear Entorno de ${envModal.type === 'PARISH' ? 'Parroquia' : 'Cancillería'}`}>
             <div className="w-full max-w-md mx-auto p-2">
                 <AnimatePresence mode="wait">
                     {!generatedCode ? (
-                        <motion.form 
-                            key="create"
-                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                            onSubmit={handleGenerateToken} 
-                            className="space-y-4"
-                        >
+                        <motion.form key="create" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onSubmit={handleGenerateToken} className="space-y-4">
                             <div className="space-y-1.5">
                                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nombre Oficial</label>
                                 <input 
@@ -558,7 +519,6 @@ const DioceseEcclesiasticalPage = () => {
                                 />
                             </div>
 
-                            {/* ESTRUCTURA ESPECÍFICA DE PARROQUIAS */}
                             {envModal.type === 'PARISH' && (
                                 <>
                                     <div className="space-y-1.5">
@@ -613,11 +573,7 @@ const DioceseEcclesiasticalPage = () => {
                             </div>
                         </motion.form>
                     ) : (
-                        <motion.div 
-                            key="success"
-                            initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-                            className="py-6 text-center space-y-8"
-                        >
+                        <motion.div key="success" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="py-6 text-center space-y-8">
                             <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto shadow-inner border border-green-200">
                                 <CheckCircle2 className="w-10 h-10 text-green-600" />
                             </div>
@@ -648,7 +604,7 @@ const DioceseEcclesiasticalPage = () => {
             </div>
         </Modal>
 
-        {/* Modales Estructurales (Se mantienen igual) */}
+        {/* Modales Estructurales */}
         {modals.createVicary && <CreateVicaryModal isOpen={modals.createVicary} onClose={() => closeModal('createVicary')} />}
         {modals.createDecanate && <CreateDecanateModal isOpen={modals.createDecanate} onClose={() => closeModal('createDecanate')} />}
         {modals.editParish && <EditParishModal isOpen={modals.editParish} onClose={() => closeModal('editParish')} parish={selectedItem} />}
