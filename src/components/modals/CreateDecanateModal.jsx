@@ -49,7 +49,9 @@ const CreateDecanateModal = ({ isOpen, onClose }) => {
         setFormData({ name: '', decanName: '', vicaryId: '' });
         onClose();
     } catch (error) {
-        toast({ title: "Error", description: "Fallo de conexión.", variant: "destructive" });
+        console.error(error);
+        // Muestra el mensaje exacto de Supabase si falla
+        toast({ title: "Error de Supabase", description: error.message || "No se pudo crear el decanato.", variant: "destructive" });
     } finally {
         setLoading(false);
     }

@@ -33,7 +33,8 @@ const CreateVicaryModal = ({ isOpen, onClose }) => {
       onClose();
     } catch (error) {
       console.error(error);
-      toast({ title: 'Error', description: 'No se pudo crear la vicaría en la nube.', variant: 'destructive' });
+      // Muestra el mensaje exacto de Supabase si falla
+      toast({ title: 'Error de Supabase', description: error.message || 'No se pudo crear la vicaría.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
