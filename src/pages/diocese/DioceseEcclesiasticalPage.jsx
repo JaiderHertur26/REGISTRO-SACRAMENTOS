@@ -13,10 +13,8 @@ import { useToast } from '@/components/ui/use-toast';
 import Modal from '@/components/ui/Modal';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// IMPORTAMOS SUPABASE
 import { supabase } from '@/lib/supabaseClient';
 
-// Modales
 import CreateVicaryModal from '@/components/modals/CreateVicaryModal';
 import CreateDecanateModal from '@/components/modals/CreateDecanateModal';
 import EditParishModal from '@/components/modals/EditParishModal';
@@ -39,7 +37,7 @@ const DioceseEcclesiasticalPage = () => {
   
   const [selectedItem, setSelectedItem] = useState(null);
   
-  // --- ESTADOS REALES DESDE SUPABASE ---
+  const [realDioceseName, setRealDioceseName] = useState('Cargando Jurisdicción...');
   const [realChancery, setRealChancery] = useState(null);
   const [realVicaries, setRealVicaries] = useState([]);
   const [realDeaneries, setRealDeaneries] = useState([]);
@@ -48,38 +46,39 @@ const DioceseEcclesiasticalPage = () => {
   const [chancellor, setChancellor] = useState(null);
   const [loadingStructure, setLoadingStructure] = useState(true);
 
-  // --- ESTADOS PARA TOKENS ---
   const [envModal, setEnvModal] = useState({ isOpen: false, type: 'PARISH' }); 
   const [envFormData, setEnvFormData] = useState({ name: '', city: '', vicaryId: '', decanateId: '', priest: '' });
   const [generatedCode, setGeneratedCode] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [pendingEnvs, setPendingEnvs] = useState([]);
 
+  // Adaptador Universal
+  const currentDioceseId = user?.diocese_id || user?.dioceseId;
+
   useEffect(() => {
-      if (!user?.dioceseId) {
+      if (!currentDioceseId) {
           setLoadingStructure(false);
           return;
       }
 
       const fetchRealStructure = async () => {
           try {
-              // Cancillería
-              const chanRes = await supabase.from('chancelleries').select('*').eq('diocese_id', user.dioceseId);
+              const { data: dioData } = await supabase.from('dioceses').select('name').eq('id', currentDioceseId).single();
+              if (dioData) setRealDioceseName(dioData.name);
+
+              const chanRes = await supabase.from('chancelleries').select('*').eq('diocese_id', currentDioceseId);
               if (chanRes.data && chanRes.data.length > 0) {
                   setRealChancery(chanRes.data[0]);
                   setChancellor(chanRes.data[0]); 
               }
 
-              // Vicarías
-              const vicRes = await supabase.from('vicarias').select('*').eq('diocese_id', user.dioceseId);
+              const vicRes = await supabase.from('vicarias').select('*').eq('diocese_id', currentDioceseId);
               if (vicRes.data) setRealVicaries(vicRes.data);
 
-              // Decanatos
               const decRes = await supabase.from('decanatos').select('*');
               if (decRes.data) setRealDeaneries(decRes.data);
 
-              // Parroquias
-              const parRes = await supabase.from('parishes').select('*').eq('diocese_id', user.dioceseId);
+              const parRes = await supabase.from('parishes').select('*').eq('diocese_id', currentDioceseId);
               if (parRes.data) setRealParishes(parRes.data);
 
           } catch (error) {
@@ -91,13 +90,8 @@ const DioceseEcclesiasticalPage = () => {
 
       const fetchPendingTokens = async () => {
           try {
-              const { data: tokens, error } = await supabase
-                  .from('pending_tokens')
-                  .select('*')
-                  .eq('created_by', user.id); 
-                  
+              const { data: tokens, error } = await supabase.from('pending_tokens').select('*').eq('created_by', user.id); 
               if (error) throw error;
-              
               if (tokens) {
                   const formattedTokens = tokens.map(item => ({
                       id: item.id, token: item.token, type: item.type,
@@ -112,7 +106,7 @@ const DioceseEcclesiasticalPage = () => {
 
       fetchRealStructure();
       fetchPendingTokens();
-  }, [user]);
+  }, [user, currentDioceseId]);
 
   if (loading || loadingStructure) {
     return (
@@ -125,12 +119,9 @@ const DioceseEcclesiasticalPage = () => {
     );
   }
 
-  if (!user) return <div className="flex h-screen items-center justify-center text-red-500 font-bold uppercase">Error de autenticación.</div>;
-
   const openModal = (name, item = null) => { setSelectedItem(item); setModals(prev => ({ ...prev, [name]: true })); };
   const closeModal = (name) => { setModals(prev => ({ ...prev, [name]: false })); setSelectedItem(null); };
 
-  // --- FILTROS ---
   const vicaries = realVicaries;
   const getDeaneries = (vicaryId) => realDeaneries.filter(d => String(d.vicaria_id) === String(vicaryId) || String(d.vicaryId) === String(vicaryId));
   const getParishesByDecanate = (decanateId) => realParishes.filter(p => String(p.decanate_id) === String(decanateId) || String(p.decanateId) === String(decanateId));
@@ -141,7 +132,6 @@ const DioceseEcclesiasticalPage = () => {
   const unassignedParishes = realParishes.filter(p => !p.vicary_id && !p.vicaryId && String(p.vicary_id) !== 'null');
   const availableDeaneriesForForm = envFormData.vicaryId ? getDeaneries(envFormData.vicaryId) : [];
 
-  // --- HANDLERS DE BORRADO ---
   const handleDeleteParish = async (id) => { 
       if (window.confirm('¿Eliminar esta parroquia permanentemente?')) {
           await supabase.from('parishes').delete().eq('id', id);
@@ -175,7 +165,6 @@ const DioceseEcclesiasticalPage = () => {
       }
   };
 
-  // --- GENERACIÓN DE TOKENS EN LA NUBE ---
   const handleGenerateToken = async (e) => {
       e.preventDefault();
       setIsGenerating(true);
@@ -187,7 +176,7 @@ const DioceseEcclesiasticalPage = () => {
 
       const payloadData = {
           name: envFormData.name, city: envFormData.city, priest: envFormData.priest,
-          vicaryId: envFormData.vicaryId, decanateId: envFormData.decanateId, dioceseId: user.dioceseId 
+          vicaryId: envFormData.vicaryId, decanateId: envFormData.decanateId, dioceseId: currentDioceseId 
       };
 
       try {
@@ -292,10 +281,9 @@ const DioceseEcclesiasticalPage = () => {
     <>
       <Helmet><title>Estructura Jurisdiccional | Sacramentum</title></Helmet>
 
-      <DashboardLayout entityName={user.dioceseName || 'Diócesis'}>
+      <DashboardLayout entityName={realDioceseName}>
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[1600px] mx-auto space-y-8 pb-20">
             
-            {/* CABECERA */}
             <div className="flex flex-col md:flex-row justify-between items-end gap-4">
                 <div>
                     <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none flex items-center gap-3">
@@ -307,7 +295,6 @@ const DioceseEcclesiasticalPage = () => {
                 </div>
             </div>
 
-            {/* BOTONERA DE ACCIONES RÁPIDAS - REDISEÑADA CON PESO VISUAL */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <Button onClick={() => openModal('createVicary')} className="h-16 rounded-2xl bg-slate-800 hover:bg-slate-900 text-white shadow-xl shadow-slate-900/10 font-black uppercase tracking-widest text-[10px] flex flex-col items-center justify-center gap-1 transition-all active:scale-95 border-none">
                     <Network className="w-5 h-5" /> Crear Vicaría
@@ -323,7 +310,6 @@ const DioceseEcclesiasticalPage = () => {
                 </Button>
             </div>
 
-            {/* 🚀 CANCILLERÍA */}
             {realChancery && (
                 <div className="bg-white rounded-[2.5rem] shadow-xl shadow-yellow-900/5 border border-slate-100 overflow-hidden mb-8">
                     <div className="bg-gradient-to-r from-[#D4AF37] to-[#B4932A] p-6 lg:px-10 flex justify-between items-center">
@@ -346,7 +332,6 @@ const DioceseEcclesiasticalPage = () => {
                 </div>
             )}
 
-            {/* PARROQUIAS HUÉRFANAS (Sin Vicaría) */}
             {unassignedParishes.length > 0 && (
                 <div className="bg-white rounded-[2.5rem] shadow-xl shadow-blue-900/5 border border-slate-100 overflow-hidden mb-8 p-6 lg:p-10">
                     <div className="flex items-center gap-2 mb-4">
@@ -357,7 +342,6 @@ const DioceseEcclesiasticalPage = () => {
                 </div>
             )}
 
-            {/* ENTORNOS PENDIENTES EN NUBE */}
             <AnimatePresence>
             {pendingEnvs.length > 0 && (
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-amber-50/50 border border-amber-200 rounded-[2.5rem] overflow-hidden shadow-sm">
@@ -414,7 +398,6 @@ const DioceseEcclesiasticalPage = () => {
             )}
             </AnimatePresence>
 
-            {/* ORGANIGRAMA EXISTENTE */}
             <div className="space-y-8 mt-8">
             {vicaries.length === 0 ? (
                 <div className="bg-white p-20 rounded-[2.5rem] border border-dashed border-slate-200 text-center text-slate-500 shadow-sm">
@@ -429,7 +412,6 @@ const DioceseEcclesiasticalPage = () => {
 
                     return (
                         <div key={vicary.id} className="bg-white rounded-[2.5rem] shadow-xl shadow-blue-900/5 border border-slate-100 overflow-hidden">
-                            {/* HEADER VICARÍA */}
                             <div className="bg-slate-800 p-6 lg:px-10 flex justify-between items-center border-b border-slate-700">
                                 <div className="flex items-center gap-4">
                                     <div className="w-12 h-12 bg-slate-700 rounded-2xl flex items-center justify-center shadow-sm">
@@ -491,7 +473,6 @@ const DioceseEcclesiasticalPage = () => {
             </div>
         </motion.div>
 
-        {/* MODAL INTELIGENTE DE GENERACIÓN DE TOKENS */}
         <Modal isOpen={envModal.isOpen} onClose={resetEnvModal} title={generatedCode ? "¡Código Generado Exitosamente!" : `Crear Entorno de ${envModal.type === 'PARISH' ? 'Parroquia' : 'Cancillería'}`}>
             <div className="w-full max-w-md mx-auto p-2">
                 <AnimatePresence mode="wait">
@@ -604,7 +585,6 @@ const DioceseEcclesiasticalPage = () => {
             </div>
         </Modal>
 
-        {/* Modales Estructurales */}
         {modals.createVicary && <CreateVicaryModal isOpen={modals.createVicary} onClose={() => closeModal('createVicary')} />}
         {modals.createDecanate && <CreateDecanateModal isOpen={modals.createDecanate} onClose={() => closeModal('createDecanate')} />}
         {modals.editParish && <EditParishModal isOpen={modals.editParish} onClose={() => closeModal('editParish')} parish={selectedItem} />}

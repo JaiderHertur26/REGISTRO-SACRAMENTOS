@@ -10,15 +10,13 @@ import { generateBackup } from '@/lib/backupHelpers';
 import Modal from '@/components/ui/Modal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabaseClient';
-import { ROLE_TYPES } from '@/config/supabaseConfig';
 
-// Importación de Modales
 import EditParishUserModal from '@/components/modals/EditParishUserModal';
 import EditChanceryUserModal from '@/components/modals/EditChanceryUserModal';
 import ChangePasswordModal from '@/components/modals/ChangePasswordModal';
 
 const DioceseDashboard = () => {
-  const { data } = useAppData(); // Mantenido solo para el backup legacy
+  const { data } = useAppData(); 
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -27,26 +25,34 @@ const DioceseDashboard = () => {
   const [selectedUser, setSelectedUser] = useState(null);
 
   // Estados Cloud-Native
+  const [realDioceseName, setRealDioceseName] = useState('Cargando Jurisdicción...');
   const [stats, setStats] = useState({ envs: 0, parishes: 0, vicariates: 0, sacraments: 0 });
   const [parishUsers, setParishUsers] = useState([]);
   const [chanceryUsers, setChanceryUsers] = useState([]);
   const [pendingEnvironments, setPendingEnvironments] = useState([]);
   
-  // Estado del Generador de Tokens
   const [envFormData, setEnvFormData] = useState({ name: '', city: '', type: 'PARISH' });
   const [generatedCode, setGeneratedCode] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // =========================================================================
-  // 1. MOTOR DE SINCRONIZACIÓN CLOUD-NATIVE (SUPABASE)
-  // =========================================================================
+  // Adaptador Universal
+  const currentDioceseId = user?.diocese_id || user?.dioceseId;
+
   useEffect(() => {
       const fetchDashboardData = async () => {
-          if (!user?.dioceseId) return;
+          if (!currentDioceseId) {
+             setIsLoading(false);
+             return;
+          }
+          
           setIsLoading(true);
 
           try {
-              // 1. Cargar Tokens Pendientes
+              // 1. Obtener Nombre Real de la Diócesis
+              const { data: dioData } = await supabase.from('dioceses').select('name').eq('id', currentDioceseId).single();
+              if (dioData) setRealDioceseName(dioData.name);
+
+              // 2. Cargar Tokens Pendientes
               const { data: tokens } = await supabase.from('pending_tokens').select('*').eq('created_by', user.id);
               if (tokens) {
                   setPendingEnvironments(tokens.map(item => ({
@@ -55,14 +61,14 @@ const DioceseDashboard = () => {
                   })));
               }
 
-              // 2. Cargar Estructura (Parroquias y Vicarías)
-              const { data: parishes } = await supabase.from('parishes').select('*').eq('diocese_id', user.dioceseId);
-              const { count: vCount } = await supabase.from('vicariates').select('*', { count: 'exact', head: true }).eq('diocese_id', user.dioceseId);
+              // 3. Cargar Estructura (Parroquias y Vicarías)
+              const { data: parishes } = await supabase.from('parishes').select('*').eq('diocese_id', currentDioceseId);
+              const { count: vCount } = await supabase.from('vicarias').select('*', { count: 'exact', head: true }).eq('diocese_id', currentDioceseId);
 
-              // 3. Cargar Perfiles de Usuarios de esta Diócesis
-              const { data: profiles } = await supabase.from('user_profiles').select('*').eq('diocese_id', user.dioceseId);
+              // 4. Cargar Perfiles de Usuarios
+              const { data: profiles } = await supabase.from('user_profiles').select('*').eq('diocese_id', currentDioceseId);
 
-              // 4. Calcular Sacramentos (Sumando los registros de las parroquias de esta diócesis)
+              // 5. Calcular Sacramentos 
               let sCount = 0;
               if (parishes && parishes.length > 0) {
                   const pIds = parishes.map(p => p.id);
@@ -75,7 +81,7 @@ const DioceseDashboard = () => {
                   sCount = (bRes.count || 0) + (cRes.count || 0) + (mRes1.count || 0) + (mRes2.count || 0);
               }
 
-              // 5. Mapear Usuarios
+              // 6. Mapear Usuarios
               const pUsers = [];
               const cUsers = [];
               
@@ -107,18 +113,14 @@ const DioceseDashboard = () => {
 
           } catch (error) {
               console.error("Fallo al sincronizar datos:", error);
-              toast({ title: "Error de Red", description: "No se pudieron descargar los datos recientes.", variant: "destructive" });
           } finally {
               setIsLoading(false);
           }
       };
 
       fetchDashboardData();
-  }, [user, toast]);
+  }, [user, currentDioceseId]);
 
-  // =========================================================================
-  // 2. GENERACIÓN DE TOKENS EN LA NUBE
-  // =========================================================================
   const handleCreateEnvironment = async (e) => {
       e.preventDefault();
       setIsGenerating(true);
@@ -133,19 +135,13 @@ const DioceseDashboard = () => {
               name: envFormData.name,
               city: envFormData.city,
               type: envFormData.type,
-              dioceseId: user.dioceseId
+              dioceseId: currentDioceseId
           };
 
           const { data: savedToken, error } = await supabase
               .from('pending_tokens')
-              .insert([{
-                  token: newToken,
-                  type: envFormData.type,
-                  payload: payloadData,
-                  created_by: user.id
-              }])
-              .select()
-              .single();
+              .insert([{ token: newToken, type: envFormData.type, payload: payloadData, created_by: user.id }])
+              .select().single();
 
           if (error) throw error;
 
@@ -159,7 +155,6 @@ const DioceseDashboard = () => {
           toast({ title: "Entorno Creado", description: "Código de activación guardado en la nube.", variant: "success" });
 
       } catch (error) {
-          console.error("Error creando token:", error);
           toast({ title: "Error", description: "Fallo de conexión con la nube.", variant: "destructive" });
       } finally {
           setIsGenerating(false);
@@ -179,9 +174,6 @@ const DioceseDashboard = () => {
       }
   };
 
-  // =========================================================================
-  // 3. ELIMINAR USUARIOS (BORRADO EN SUPABASE)
-  // =========================================================================
   const handleDeleteUser = async (id) => {
     if (window.confirm('¿Está seguro de revocar el acceso a este usuario? Perderá acceso al sistema.')) {
         try {
@@ -198,9 +190,6 @@ const DioceseDashboard = () => {
     }
   };
 
-  // =========================================================================
-  // 4. UTILIDADES Y RENDERIZADO
-  // =========================================================================
   const resetEnvModal = () => {
       setModalState(prev => ({ ...prev, createEnv: false }));
       setGeneratedCode(null);
@@ -256,14 +245,14 @@ const DioceseDashboard = () => {
   ];
 
   return (
-    <DashboardLayout menuItems={menuItems} entityName={user?.dioceseName}>
+    <DashboardLayout menuItems={menuItems} entityName={realDioceseName}>
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pb-10">
-          {/* HEADER */}
+          
           <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <h1 className="text-3xl font-black text-[#2C3E50] tracking-tight">Panel de Gestión Diocesana</h1>
               <p className="text-[#D4AF37] font-black uppercase text-xs tracking-widest mt-1 flex items-center gap-2">
-                  <Church className="w-4 h-4" /> {user?.dioceseName || 'Jurisdicción no identificada'}
+                  <Church className="w-4 h-4" /> {realDioceseName}
               </p>
             </div>
             <Button variant="outline" onClick={() => { generateBackup(data, user); toast({ title: 'Backup Generado', description: 'Descarga en proceso.' }); }} className="gap-2 rounded-2xl h-12 px-6 border-gray-200 text-gray-700 hover:bg-gray-50">
@@ -278,11 +267,7 @@ const DioceseDashboard = () => {
               </div>
           ) : (
               <>
-                  {/* STATS */}
-                  <motion.div 
-                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-                      className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10"
-                  >
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
                     {statCards.map((stat, idx) => (
                       <div key={idx} className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100 hover:shadow-lg transition-all flex items-center gap-5">
                         <div className={`p-4 rounded-2xl ${stat.color} bg-opacity-10 shadow-inner`}>
@@ -296,17 +281,12 @@ const DioceseDashboard = () => {
                     ))}
                   </motion.div>
 
-                  {/* CREADOR DE ENTORNOS */}
-                  <motion.div 
-                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-                      className="bg-white rounded-[2.5rem] shadow-sm border border-blue-100/50 p-8 mb-10 relative overflow-hidden"
-                  >
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white rounded-[2.5rem] shadow-sm border border-blue-100/50 p-8 mb-10 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-64 h-64 bg-[#4B7BA7]/5 rounded-bl-[100%] z-0 pointer-events-none"></div>
                     <div className="relative z-10 flex flex-col md:flex-row justify-between items-center">
                         <div>
                             <h2 className="text-xl font-black text-[#2C3E50] flex items-center gap-3 tracking-tight">
-                                <ShieldCheck className="w-6 h-6 text-[#D4AF37]" />
-                                Asignación de Nuevos Entornos
+                                <ShieldCheck className="w-6 h-6 text-[#D4AF37]" /> Asignación de Nuevos Entornos
                             </h2>
                             <p className="text-sm text-gray-500 font-medium mt-2 max-w-2xl leading-relaxed">
                                 Para dar de alta a una nueva Parroquia o Cancillería, genere un <strong className="text-gray-700">Código de Activación</strong>. 
@@ -326,11 +306,7 @@ const DioceseDashboard = () => {
                     )}
                   </motion.div>
 
-                  {/* TABLAS DE USUARIOS */}
-                  <motion.div 
-                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
-                      className="grid grid-cols-1 lg:grid-cols-2 gap-8"
-                  >
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                       <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-8 flex flex-col h-full">
                         <div className="flex justify-between items-center mb-8">
                             <div>
@@ -373,7 +349,6 @@ const DioceseDashboard = () => {
           )}
       </motion.div>
 
-      {/* MODAL CREADOR DE ENTORNOS */}
       <Modal isOpen={modalState.createEnv} onClose={resetEnvModal} title={generatedCode ? "¡Código Generado!" : "Nuevo Entorno Seguro"}>
         <div className="w-full max-w-md mx-auto p-2">
             <AnimatePresence mode="wait">
@@ -383,49 +358,40 @@ const DioceseDashboard = () => {
                             <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Tipo de Entidad</label>
                             <select 
                                 className="w-full px-4 py-3.5 border border-gray-200 bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#D4AF37] outline-none font-bold text-sm transition-all"
-                                value={envFormData.type}
-                                onChange={(e) => setEnvFormData({...envFormData, type: e.target.value})}
+                                value={envFormData.type} onChange={(e) => setEnvFormData({...envFormData, type: e.target.value})}
                             >
                                 <option value="PARISH">Parroquia</option>
                                 <option value="CHANCERY">Cancillería Diocesana</option>
                             </select>
                         </div>
-
                         <div className="space-y-1">
                             <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Nombre Oficial</label>
                             <div className="relative">
                                 <Church className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                 <input 
-                                    type="text" required
-                                    className="w-full pl-11 pr-4 py-3.5 border border-gray-200 bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#D4AF37] outline-none font-bold text-sm transition-all"
+                                    type="text" required className="w-full pl-11 pr-4 py-3.5 border border-gray-200 bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#D4AF37] outline-none font-bold text-sm transition-all"
                                     placeholder={envFormData.type === 'PARISH' ? "Ej: Parroquia San Judas" : "Ej: Tribunal Eclesiástico"}
-                                    value={envFormData.name}
-                                    onChange={(e) => setEnvFormData({...envFormData, name: e.target.value})}
+                                    value={envFormData.name} onChange={(e) => setEnvFormData({...envFormData, name: e.target.value})}
                                 />
                             </div>
                         </div>
-
                         <div className="space-y-1">
                             <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Ciudad / Municipio</label>
                             <div className="relative">
                                 <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                 <input 
-                                    type="text" required
-                                    className="w-full pl-11 pr-4 py-3.5 border border-gray-200 bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#D4AF37] outline-none font-bold text-sm transition-all"
+                                    type="text" required className="w-full pl-11 pr-4 py-3.5 border border-gray-200 bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#D4AF37] outline-none font-bold text-sm transition-all"
                                     placeholder="Ej: Magangué"
-                                    value={envFormData.city}
-                                    onChange={(e) => setEnvFormData({...envFormData, city: e.target.value})}
+                                    value={envFormData.city} onChange={(e) => setEnvFormData({...envFormData, city: e.target.value})}
                                 />
                             </div>
                         </div>
-
                         <div className="bg-blue-50/60 p-4 rounded-xl border border-blue-100/50 flex gap-3 mt-4">
                             <ShieldCheck className="w-5 h-5 text-[#4B7BA7] shrink-0" />
                             <p className="text-[10px] text-[#4B7BA7] font-bold leading-relaxed tracking-wide">
                                 Al guardar, se creará un <strong className="font-black">Código Único</strong>. El párroco no necesitará que usted le cree una contraseña; él mismo la configurará usando dicho código.
                             </p>
                         </div>
-
                         <div className="pt-6 flex justify-end gap-3 border-t border-gray-100">
                             <Button type="button" variant="outline" onClick={resetEnvModal} className="w-1/3 py-6 rounded-xl font-black uppercase text-[10px] tracking-widest">Cancelar</Button>
                             <Button type="submit" className="w-2/3 py-6 rounded-xl bg-[#4B7BA7] hover:bg-[#3A6286] text-white font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-900/10" disabled={isGenerating}>
@@ -438,23 +404,16 @@ const DioceseDashboard = () => {
                         <div className="w-20 h-20 bg-green-50 rounded-3xl flex items-center justify-center mx-auto border border-green-100">
                             <CheckCircle2 className="w-10 h-10 text-green-500" />
                         </div>
-                        
                         <div>
                             <h3 className="text-2xl font-black text-gray-900 tracking-tight">{envFormData.name}</h3>
                             <p className="text-gray-500 mt-2 text-sm font-medium">El entorno está listo para ser reclamado.</p>
                         </div>
-
                         <div className="bg-gray-50 p-8 rounded-2xl border-2 border-dashed border-[#D4AF37] relative">
                             <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-white px-4 text-[10px] font-black text-[#D4AF37] uppercase tracking-[0.2em] rounded-full border border-[#D4AF37]">
                                 Código de Activación
                             </span>
                             <p className="text-4xl font-mono font-black text-[#2C3E50] tracking-widest">{generatedCode}</p>
                         </div>
-
-                        <p className="text-[11px] text-gray-500 font-bold uppercase tracking-widest">
-                            Copie este código y envíeselo al Párroco.
-                        </p>
-
                         <div className="pt-6 flex flex-col gap-3 border-t border-gray-100">
                             <Button onClick={() => copyToClipboard(generatedCode)} className="w-full py-6 rounded-xl bg-[#D4AF37] hover:bg-[#B4932A] text-gray-900 font-black uppercase tracking-widest text-[10px] shadow-lg">
                                 <Copy className="w-4 h-4 mr-2" /> Copiar Código
@@ -469,11 +428,10 @@ const DioceseDashboard = () => {
         </div>
       </Modal>
 
-      {/* MODALES SECUNDARIOS */}
       {selectedUser && (
         <>
-            <EditParishUserModal isOpen={modalState.editParish} onClose={() => setModalState(prev => ({...prev, editParish: false}))} user={selectedUser} dioceseId={user.dioceseId} onSuccess={() => setSelectedUser(null)} />
-            <EditChanceryUserModal isOpen={modalState.editChancery} onClose={() => setModalState(prev => ({...prev, editChancery: false}))} user={selectedUser} dioceseId={user.dioceseId} onSuccess={() => setSelectedUser(null)} />
+            <EditParishUserModal isOpen={modalState.editParish} onClose={() => setModalState(prev => ({...prev, editParish: false}))} user={selectedUser} dioceseId={currentDioceseId} onSuccess={() => setSelectedUser(null)} />
+            <EditChanceryUserModal isOpen={modalState.editChancery} onClose={() => setModalState(prev => ({...prev, editChancery: false}))} user={selectedUser} dioceseId={currentDioceseId} onSuccess={() => setSelectedUser(null)} />
             <ChangePasswordModal isOpen={modalState.password} onClose={() => setModalState(prev => ({...prev, password: false}))} user={selectedUser} />
         </>
       )}

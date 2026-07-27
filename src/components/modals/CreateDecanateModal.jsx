@@ -15,17 +15,19 @@ const CreateDecanateModal = ({ isOpen, onClose }) => {
 
   const [formData, setFormData] = useState({ name: '', decanName: '', vicaryId: '' });
 
-  // Carga Vicarías directo de Supabase al abrir el modal
+  // Adaptador de compatibilidad
+  const currentDioceseId = user?.diocese_id || user?.dioceseId;
+
   useEffect(() => {
-      if (!isOpen || !user?.dioceseId) return;
+      if (!isOpen || !currentDioceseId) return;
       const fetchVicaries = async () => {
           setFetching(true);
-          const { data } = await supabase.from('vicarias').select('*').eq('diocese_id', user.dioceseId);
+          const { data } = await supabase.from('vicarias').select('*').eq('diocese_id', currentDioceseId);
           if (data) setVicaries(data);
           setFetching(false);
       };
       fetchVicaries();
-  }, [isOpen, user]);
+  }, [isOpen, currentDioceseId]);
 
   const handleSubmit = async (e) => { 
     e.preventDefault();
@@ -40,7 +42,7 @@ const CreateDecanateModal = ({ isOpen, onClose }) => {
             name: formData.name,
             dean_name: formData.decanName,
             vicaria_id: formData.vicaryId,
-            diocese_id: user.dioceseId
+            diocese_id: currentDioceseId
         }]);
         
         if (error) throw error;
@@ -50,7 +52,6 @@ const CreateDecanateModal = ({ isOpen, onClose }) => {
         onClose();
     } catch (error) {
         console.error(error);
-        // Muestra el mensaje exacto de Supabase si falla
         toast({ title: "Error de Supabase", description: error.message || "No se pudo crear el decanato.", variant: "destructive" });
     } finally {
         setLoading(false);

@@ -17,13 +17,20 @@ const CreateVicaryModal = ({ isOpen, onClose }) => {
     e.preventDefault();
     if (!formData.name) return;
 
+    // Adaptador de compatibilidad (Local vs Nube)
+    const currentDioceseId = user?.diocese_id || user?.dioceseId;
+
+    if (!currentDioceseId) {
+        toast({ title: 'Error', description: 'No se detecta la jurisdicción del usuario.', variant: 'destructive' });
+        return;
+    }
+
     setLoading(true);
     try {
-      // Guardado directo en la nube (Supabase)
       const { error } = await supabase.from('vicarias').insert([{
         name: formData.name,
         vicar_name: formData.vicarioName,
-        diocese_id: user.dioceseId
+        diocese_id: currentDioceseId
       }]);
       
       if (error) throw error;
@@ -33,7 +40,6 @@ const CreateVicaryModal = ({ isOpen, onClose }) => {
       onClose();
     } catch (error) {
       console.error(error);
-      // Muestra el mensaje exacto de Supabase si falla
       toast({ title: 'Error de Supabase', description: error.message || 'No se pudo crear la vicaría.', variant: 'destructive' });
     } finally {
       setLoading(false);
