@@ -1,50 +1,98 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
-import { useAppData } from '@/context/AppDataContext';
 import { useAuth } from '@/context/AuthContext';
-import { Church, Users, FileText } from 'lucide-react';
+import { Church, Network, LayoutGrid, Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient';
 
 const DioceseUserDashboard = () => {
-  const { data } = useAppData();
   const { user } = useAuth();
 
-  // Filter stats for this diocese
-  const vicariesCount = (data.vicariates || []).filter(v => v.dioceseId === user.dioceseId).length;
-  // Deaneries are children of Vicaries which belong to Diocese
-  const dioceseVicaryIds = (data.vicariates || []).filter(v => v.dioceseId === user.dioceseId).map(v => v.id);
-  const deaneriesCount = (data.deaneries || []).filter(d => dioceseVicaryIds.includes(d.vicaryId)).length;
-  // Parishes belong to Deaneries (or directly vicaries in some models, but we used decanateId in creation)
-  // Let's assume parishes are linked to the diocese via id or chain. 
-  // In createParish we added dioceseId to the parish object for easier lookup, although relational is via deanery.
-  // Checking createParish... yes, it adds dioceseId.
-  const parishesCount = (data.parishes || []).filter(p => p.dioceseId === user.dioceseId).length;
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({ parishes: 0, vicaries: 0, deaneries: 0 });
+  const [realDioceseName, setRealDioceseName] = useState('Cargando Jurisdicción...');
 
-  const stats = [
-    { label: 'Total Parroquias', value: parishesCount, icon: Church, color: 'bg-blue-600' },
-    { label: 'Total Vicarías', value: vicariesCount, icon: Users, color: 'bg-indigo-600' },
-    { label: 'Total Decanatos', value: deaneriesCount, icon: Users, color: 'bg-purple-600' },
+  useEffect(() => {
+    const fetchDashboardStats = async () => {
+      if (!user) return;
+      
+      // Rastreador: Buscamos el ID real directo en la base de datos
+      let currentDioceseId = user.diocese_id || user.dioceseId;
+      
+      if (!currentDioceseId && user.email) {
+          const { data: profile } = await supabase
+              .from('user_profiles')
+              .select('diocese_id')
+              .eq('email', user.email)
+              .single();
+          if (profile) currentDioceseId = profile.diocese_id;
+      }
+
+      if (!currentDioceseId) {
+          setLoading(false);
+          return;
+      }
+
+      try {
+          // 1. Descargamos el nombre real de la Diócesis
+          const { data: dioData } = await supabase.from('dioceses').select('name').eq('id', currentDioceseId).single();
+          if (dioData) setRealDioceseName(dioData.name);
+
+          // 2. Descargamos los conteos reales desde la nube de Supabase
+          const [parishRes, vicRes, decRes] = await Promise.all([
+              supabase.from('parishes').select('*', { count: 'exact', head: true }).eq('diocese_id', currentDioceseId),
+              supabase.from('vicarias').select('*', { count: 'exact', head: true }).eq('diocese_id', currentDioceseId),
+              supabase.from('decanatos').select('*', { count: 'exact', head: true }).eq('diocese_id', currentDioceseId)
+          ]);
+
+          setStats({
+              parishes: parishRes.count || 0,
+              vicaries: vicRes.count || 0,
+              deaneries: decRes.count || 0
+          });
+
+      } catch (error) {
+          console.error("Error al sincronizar estadísticas:", error);
+      } finally {
+          setLoading(false);
+      }
+    };
+
+    fetchDashboardStats();
+  }, [user]);
+
+  const statCards = [
+    { label: 'Total Parroquias', value: stats.parishes, icon: Church, color: 'bg-[#4B7BA7]', text: 'text-[#4B7BA7]' },
+    { label: 'Total Vicarías', value: stats.vicaries, icon: Network, color: 'bg-slate-800', text: 'text-slate-800' },
+    { label: 'Total Decanatos', value: stats.deaneries, icon: LayoutGrid, color: 'bg-indigo-600', text: 'text-indigo-700' },
   ];
 
   return (
-    <DashboardLayout entityName={user.dioceseName}>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-[#2C3E50]">Panel de Gestión Diocesana</h1>
-        <p className="text-gray-500 mt-1">{user.dioceseName}</p>
+    <DashboardLayout entityName={realDioceseName}>
+      <div className="mb-10">
+        <h1 className="text-3xl font-black text-[#2C3E50] tracking-tight">Panel de Gestión Diocesana</h1>
+        <p className="text-gray-500 mt-2 font-black uppercase tracking-[0.2em] text-[10px]">{realDioceseName}</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {stats.map((stat, idx) => (
-          <div key={idx} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 flex items-center gap-4">
-            <div className={`p-3 rounded-lg ${stat.color} bg-opacity-10`}>
-              <stat.icon className={`w-6 h-6 ${stat.color.replace('bg-', 'text-')}`} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-              <p className="text-sm text-gray-500">{stat.label}</p>
-            </div>
-          </div>
-        ))}
-      </div>
+      {loading ? (
+         <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[2.5rem] shadow-sm border border-gray-100">
+            <Loader2 className="w-10 h-10 text-[#D4AF37] animate-spin mb-4" />
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Sincronizando Bóveda...</p>
+         </div>
+      ) : (
+         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            {statCards.map((stat, idx) => (
+              <div key={idx} className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-gray-100 hover:shadow-lg transition-all flex items-center gap-5">
+                <div className={`p-4 rounded-2xl ${stat.color} bg-opacity-10 shadow-inner`}>
+                  <stat.icon className={`w-8 h-8 ${stat.text}`} />
+                </div>
+                <div>
+                  <p className="text-4xl font-black text-gray-900 tracking-tighter">{stat.value}</p>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">{stat.label}</p>
+                </div>
+              </div>
+            ))}
+         </div>
+      )}
     </DashboardLayout>
   );
 };
