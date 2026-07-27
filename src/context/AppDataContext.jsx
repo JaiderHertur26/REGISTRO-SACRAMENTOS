@@ -2398,7 +2398,7 @@ export const AppDataProvider = ({ children }) => {
         return { valid: true };
     };
   
-  const getPendingBaptisms = async (parishId) => {
+  const getPendingBaptisms = (parishId) => {
       if (!parishId) return [];
       try {
           const raw = localStorage.getItem(`pendingBaptisms_${parishId}`);
@@ -2603,7 +2603,7 @@ export const AppDataProvider = ({ children }) => {
   };
 
   const getConfirmations = (parishId) => JSON.parse(localStorage.getItem(`confirmations_${parishId}`) || '[]');
-  const getPendingConfirmations = async (parishId) => JSON.parse(localStorage.getItem(`pendingConfirmations_${parishId}`) || '[]');
+  const getPendingConfirmations = (parishId) => JSON.parse(localStorage.getItem(`pendingConfirmations_${parishId}`) || '[]');
   
   const saveConfirmationToSource = async (data, parishId, mode) => {
       const storageKey = mode === 'celebrated' ? `confirmations_${parishId}` : `pendingConfirmations_${parishId}`;
@@ -2688,7 +2688,7 @@ export const AppDataProvider = ({ children }) => {
   };
 
   const getMatrimonios = (parishId) => JSON.parse(localStorage.getItem(`matrimonios_${parishId}`) || '[]');
-  const getPendingMatrimonios = async (parishId) => JSON.parse(localStorage.getItem(`pendingMatrimonios_${parishId}`) || '[]');
+  const getPendingMatrimonios = (parishId) => JSON.parse(localStorage.getItem(`pendingMatrimonios_${parishId}`) || '[]');
 
   const saveMatrimonioToSource = async (data, parishId, mode) => {
       const storageKey = mode === 'celebrated' ? `matrimonios_${parishId}` : `pendingMatrimonios_${parishId}`;

@@ -227,9 +227,10 @@ const BaptismNewPage = () => {
                     <h2 className="text-3xl font-black text-gray-900 mb-3 tracking-tighter uppercase">Borrador Guardado</h2>
                     <p className="text-gray-500 mb-10 text-sm font-medium leading-relaxed">Documento guardado localmente. La sincronización se hará en segundo plano.</p>
                     <div className="grid grid-cols-2 gap-4">
-                        <Button onClick={() => window.location.reload()} variant="outline" className="py-7 rounded-2xl border-gray-200 text-gray-50 font-black uppercase text-[10px] hover:bg-gray-50">Nueva Inscripción</Button>
-                        <Button onClick={() => navigate('/parroquia/bautismo/sentar-registros')} className="py-7 rounded-2xl bg-[#4B7BA7] text-white font-black uppercase text-[10px] shadow-xl shadow-blue-900/20">Sentar Libros</Button>
-                    </div>
+    {/* 👇 Aquí cambiamos text-gray-50 por text-slate-700 para que se vea */}
+    <Button onClick={() => window.location.reload()} variant="outline" className="py-7 rounded-2xl border-gray-200 text-slate-700 font-black uppercase text-[10px] hover:bg-slate-50">Nueva Inscripción</Button>
+    <Button onClick={() => navigate('/parroquia/bautismo/sentar-registros')} className="py-7 rounded-2xl bg-[#4B7BA7] text-white font-black uppercase text-[10px] shadow-xl shadow-blue-900/20">Sentar Libros</Button>
+</div>
                 </div>
                 <div className="hidden print:block bg-white">
                      {ticketData && <BaptismTicket baptismData={ticketData} parishInfo={parishInfo} />}
