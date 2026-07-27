@@ -178,7 +178,7 @@ export const AppDataProvider = ({ children }) => {
           const notasConfig = ParamsHelper.obtenerNotasAlMargen(parishId);
           let template = notasConfig.porNotificacionMatrimonial?.textoParaPartidaOriginal || "EL [FECHA_NOTIFICACION], SE RECIBIÓ NOTIFICACIÓN DE MATRIMONIO CELEBRADO EL DÍA [FECHA_MATRIMONIO] EN LA PARROQUIA [PARROQUIA_MATRIMONIO], DIÓCESIS DE [DIOCESIS_MATRIMONIO], CON [NOMBRE_CONYUGE]. REGISTRADO EN EL LIBRO [LIBRO_MAT], FOLIO [FOLIO_MAT], NÚMERO [NUMERO_MAT]. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO. SE EXPIDE EN BARRANQUILLA, ATLÁNTICO - COLOMBIA EL DÍA [FECHA_EXPEDICION].....................................";
           
-          const formatF = (f) => f ? convertDateToSpanishText(f).replace(/^EL\s+/i, '') : '___';
+          const formatF = (f) => f ? f.replace(/^EL\s+/i, '') : '___';
           const conyuge = documentoMatrimonio.tipoFormulario === 'externo' 
              ? (documentoMatrimonio.conyugeNombre || '---') 
              : `${documentoMatrimonio.esposo?.nombres || ''} ${documentoMatrimonio.esposo?.apellidos || ''} Y ${documentoMatrimonio.esposa?.nombres || ''} ${documentoMatrimonio.esposa?.apellidos || ''}`;
@@ -217,11 +217,8 @@ export const AppDataProvider = ({ children }) => {
      return result;
   };
 
-  const getDocumentosParroquia = (parishId) => obtenerDocumentosParroquia(parishId, JSON.parse(localStorage.getItem('matrimonialNotifications') || '[]'));
-  const getParroquiasReceptoras = (parishId) => obtenerParroquiasReceptoras(getDocumentosParroquia(parishId), JSON.parse(localStorage.getItem('parishes') || '[]'));
   const obtenerNotificacionesMatrimoniales = (parishId) => { const res = getAllDocumentos(parishId); return res.success ? res.data : []; };
   const obtenerAvisosNotificacion = (parishId) => { const res = getAllAvisos(parishId); return res.success ? res.data : []; };
-  const getAvisosParroquia = (parishId) => obtenerAvisosParroquia(parishId);
   const cargarAvisosParroquia = (parishId) => { const list = obtenerAvisosParroquia(parishId); setMatrimonialNotificationAvisos(list); return list; };
 
   const marcarAvisoComoVisto = (avisoId, userId) => {
@@ -243,6 +240,9 @@ export const AppDataProvider = ({ children }) => {
       } catch (error) { return { success: false, message: error.message }; }
   };
 
+  // ==========================================================
+  // FUNCIONES DE ESTRUCTURA DIOCESANA (Restauradas)
+  // ==========================================================
   const createVicary = async (vicaryData) => {
       try {
           const { data: newVicary, error } = await supabase.from('vicarias').insert([{ diocese_id: vicaryData.dioceseId, name: vicaryData.name, vicar_name: vicaryData.vicarioName || '' }]).select().single();
@@ -300,91 +300,6 @@ export const AppDataProvider = ({ children }) => {
       const newArchdiocese = { ...archdioceseData, type: 'archdiocese', id: generateUUID(), createdAt: new Date().toISOString() };
       saveData('dioceses', [...current, newArchdiocese]);
       return { success: true, data: newArchdiocese };
-  };
-
-  const createUniversalBackup = async (backupName, backupDescription = '') => {
-    try {
-      const keysToBackup = [
-        'dioceses', 'vicariates', 'deaneries', 'parishes', 
-        'chancelleries', 'sacraments', 'communications', 'catalogs',
-        'diocesis', 'iglesias', 'obispos', 'parrocos', 'ciudades', 'paises', 'parroquias_externas', 'mis_datos',
-        'chancellors', 'users', 'parishNotifications',
-        'matrimonialNotifications', 'matrimonialNotificationAvisos'
-      ];
-      const dynamicKeys = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (
-          key.startsWith('baptisms_') || key.startsWith('confirmations_') || key.startsWith('matrimonios_') ||
-          key.startsWith('pendingBaptisms_') || key.startsWith('pendingConfirmations_') || key.startsWith('pendingMatrimonios_') ||
-          key.startsWith('baptismParameters_') || key.startsWith('confirmationParameters_') || key.startsWith('matrimonioParameters_') ||
-          key.startsWith('baptismCorrections_') || key.startsWith('conceptosAnulacion_') || key.startsWith('notasAlMargen_') ||
-          key.startsWith('decreeReplacements_') || key.startsWith('decreeReplacementBaptism_') || key.startsWith('parrocos_') || key.startsWith('obispos_')
-        ) { dynamicKeys.push(key); }
-      }
-      const allKeys = [...new Set([...keysToBackup, ...dynamicKeys])];
-      const backupPayload = {};
-      let totalRecords = 0;
-      allKeys.forEach(key => {
-        try {
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            backupPayload[key] = parsed;
-            if (Array.isArray(parsed)) totalRecords += parsed.length;
-          }
-        } catch (e) {}
-      });
-      const backupId = generateUUID();
-      const now = new Date().toISOString();
-      const content = { data: backupPayload };
-      const finalBackupObject = {
-        metadata: { id: backupId, name: backupName, description: backupDescription, versionApp: '1.0.0', createdAt: now, totalRegistros: totalRecords, sizeBytes: calculateBackupSize(content) },
-        checksum: generateBackupChecksum(content.data), data: backupPayload
-      };
-      return saveBackupToLocalStorage(finalBackupObject);
-    } catch (error) { return { success: false, message: error.message }; }
-  };
-
-  const getUniversalBackups = () => getBackupsFromLocalStorage();
-  const restoreUniversalBackup = async (backupId) => {
-    try {
-      const backup = getBackupFromLocalStorage(backupId);
-      if (!backup) return { success: false, message: "Backup not found." };
-      if (!validateBackupIntegrity(backup, backup.checksum)) return { success: false, message: "Backup corrupted." };
-      const structCheck = validateBackupStructure(backup);
-      if (!structCheck.isValid) return { success: false, message: `Invalid structure.` };
-      const dataKeys = Object.keys(backup.data);
-      dataKeys.forEach(key => localStorage.removeItem(key));
-      dataKeys.forEach(key => { localStorage.setItem(key, JSON.stringify(backup.data[key])); });
-      return { success: true, message: "System restored successfully." };
-    } catch (error) { return { success: false, message: error.message }; }
-  };
-  const deleteUniversalBackup = (backupId) => deleteBackupFromLocalStorage(backupId);
-  const exportUniversalBackup = (backupId) => {
-    const backup = getBackupFromLocalStorage(backupId);
-    if (!backup) return { success: false, message: "Backup not found." };
-    try {
-      downloadBackupFile(backup, `UniversalBackup_${backup.metadata.name.replace(/\s+/g, '_')}_${backup.metadata.createdAt.split('T')[0]}.json`);
-      return { success: true };
-    } catch (e) { return { success: false, message: e.message }; }
-  };
-  const importUniversalBackup = async (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const json = JSON.parse(e.target.result);
-          if (!validateBackupStructure(json).isValid) { resolve({ success: false, message: "Invalid format." }); return; }
-          if (!validateBackupIntegrity(json, json.checksum)) { resolve({ success: false, message: "Data corrupted." }); return; }
-          json.metadata.id = generateUUID(); 
-          json.metadata.name = `${json.metadata.name} (Importado)`;
-          resolve(saveBackupToLocalStorage(json));
-        } catch (err) { resolve({ success: false, message: "Parse error." }); }
-      };
-      reader.onerror = () => reject({ success: false, message: "File read error" });
-      reader.readAsText(file);
-    });
   };
 
   const createDioceseArchdiocese = (dioceseData, userData) => {
@@ -525,6 +440,91 @@ export const AppDataProvider = ({ children }) => {
       if (!parishId) return { success: false, message: "Falta ID de parroquia" };
       localStorage.setItem(`conceptosAnulacion_${parishId}`, JSON.stringify(getConceptosAnulacion(parishId).filter(i => i.id !== id)));
       return { success: true, message: "Concepto eliminado" };
+  };
+
+  const createUniversalBackup = async (backupName, backupDescription = '') => {
+    try {
+      const keysToBackup = [
+        'dioceses', 'vicariates', 'deaneries', 'parishes', 
+        'chancelleries', 'sacraments', 'communications', 'catalogs',
+        'diocesis', 'iglesias', 'obispos', 'parrocos', 'ciudades', 'paises', 'parroquias_externas', 'mis_datos',
+        'chancellors', 'users', 'parishNotifications',
+        'matrimonialNotifications', 'matrimonialNotificationAvisos'
+      ];
+      const dynamicKeys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (
+          key.startsWith('baptisms_') || key.startsWith('confirmations_') || key.startsWith('matrimonios_') ||
+          key.startsWith('pendingBaptisms_') || key.startsWith('pendingConfirmations_') || key.startsWith('pendingMatrimonios_') ||
+          key.startsWith('baptismParameters_') || key.startsWith('confirmationParameters_') || key.startsWith('matrimonioParameters_') ||
+          key.startsWith('baptismCorrections_') || key.startsWith('conceptosAnulacion_') || key.startsWith('notasAlMargen_') ||
+          key.startsWith('decreeReplacements_') || key.startsWith('decreeReplacementBaptism_') || key.startsWith('parrocos_') || key.startsWith('obispos_')
+        ) { dynamicKeys.push(key); }
+      }
+      const allKeys = [...new Set([...keysToBackup, ...dynamicKeys])];
+      const backupPayload = {};
+      let totalRecords = 0;
+      allKeys.forEach(key => {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            backupPayload[key] = parsed;
+            if (Array.isArray(parsed)) totalRecords += parsed.length;
+          }
+        } catch (e) {}
+      });
+      const backupId = generateUUID();
+      const now = new Date().toISOString();
+      const content = { data: backupPayload };
+      const finalBackupObject = {
+        metadata: { id: backupId, name: backupName, description: backupDescription, versionApp: '1.0.0', createdAt: now, totalRegistros: totalRecords, sizeBytes: calculateBackupSize(content) },
+        checksum: generateBackupChecksum(content.data), data: backupPayload
+      };
+      return saveBackupToLocalStorage(finalBackupObject);
+    } catch (error) { return { success: false, message: error.message }; }
+  };
+
+  const getUniversalBackups = () => getBackupsFromLocalStorage();
+  const restoreUniversalBackup = async (backupId) => {
+    try {
+      const backup = getBackupFromLocalStorage(backupId);
+      if (!backup) return { success: false, message: "Backup not found." };
+      if (!validateBackupIntegrity(backup, backup.checksum)) return { success: false, message: "Backup corrupted." };
+      const structCheck = validateBackupStructure(backup);
+      if (!structCheck.isValid) return { success: false, message: `Invalid structure.` };
+      const dataKeys = Object.keys(backup.data);
+      dataKeys.forEach(key => localStorage.removeItem(key));
+      dataKeys.forEach(key => { localStorage.setItem(key, JSON.stringify(backup.data[key])); });
+      return { success: true, message: "System restored successfully." };
+    } catch (error) { return { success: false, message: error.message }; }
+  };
+  const deleteUniversalBackup = (backupId) => deleteBackupFromLocalStorage(backupId);
+  const exportUniversalBackup = (backupId) => {
+    const backup = getBackupFromLocalStorage(backupId);
+    if (!backup) return { success: false, message: "Backup not found." };
+    try {
+      downloadBackupFile(backup, `UniversalBackup_${backup.metadata.name.replace(/\s+/g, '_')}_${backup.metadata.createdAt.split('T')[0]}.json`);
+      return { success: true };
+    } catch (e) { return { success: false, message: e.message }; }
+  };
+  const importUniversalBackup = async (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const json = JSON.parse(e.target.result);
+          if (!validateBackupStructure(json).isValid) { resolve({ success: false, message: "Invalid format." }); return; }
+          if (!validateBackupIntegrity(json, json.checksum)) { resolve({ success: false, message: "Data corrupted." }); return; }
+          json.metadata.id = generateUUID(); 
+          json.metadata.name = `${json.metadata.name} (Importado)`;
+          resolve(saveBackupToLocalStorage(json));
+        } catch (err) { resolve({ success: false, message: "Parse error." }); }
+      };
+      reader.onerror = () => reject({ success: false, message: "File read error" });
+      reader.readAsText(file);
+    });
   };
 
   const getMisDatosList = (contextId) => {
@@ -692,6 +692,73 @@ export const AppDataProvider = ({ children }) => {
       return { success: true, message: `${count} registros asentados.` };
   };
 
+  const createNotification = (notificationData) => {
+    const targetId = notificationData.parish_id || notificationData.parishId;
+    if (!targetId) return { success: false, message: "Parish ID missing for notification" };
+
+    const newNotification = {
+        id: generateUUID(), createdAt: new Date().toISOString(), status: 'unread', ...notificationData,
+        decree_id: notificationData.decree_id || notificationData.decreeId, decree_type: notificationData.decree_type || notificationData.type,
+        parish_id: targetId
+    };
+    
+    if (!newNotification.message) {
+         const messageTemplates = { correction: 'Cancillería acaba de crear un Decreto de Corrección que afecta una de sus partidas.', replacement: 'Cancillería acaba de crear un Decreto de Reposición para su parroquia.' };
+         newNotification.message = messageTemplates[newNotification.decree_type] || 'Nueva notificación de Cancillería.';
+    }
+
+    const allNotifications = { ...parishNotifications };
+    const currentParishNotifs = allNotifications[targetId] ? [...allNotifications[targetId]] : [];
+    
+    currentParishNotifs.unshift(newNotification);
+    allNotifications[targetId] = currentParishNotifs;
+    
+    localStorage.setItem('parishNotifications', JSON.stringify(allNotifications));
+    setParishNotifications(allNotifications);
+    return { success: true, id: newNotification.id };
+  };
+
+  const updateNotificationStatus = async (notificationId, status) => {
+      let updated = false;
+      const newNotifications = {};
+      
+      Object.keys(parishNotifications).forEach(pId => {
+          const list = parishNotifications[pId];
+          const index = list.findIndex(n => n.id === notificationId);
+          if (index !== -1) {
+              newNotifications[pId] = list.map(n => n.id === notificationId ? { ...n, status: status, updatedAt: new Date().toISOString() } : n);
+              updated = true;
+          } else {
+              newNotifications[pId] = [...list];
+          }
+      });
+      
+      if (updated) {
+          localStorage.setItem('parishNotifications', JSON.stringify(newNotifications));
+          setParishNotifications(newNotifications);
+          window.dispatchEvent(new Event('storage'));
+          return { success: true };
+      }
+      return { success: false, message: "Notification not found" };
+  };
+
+  const deleteNotification = async (notificationId, parishId) => {
+    if (!notificationId) return;
+    const allNotifications = { ...parishNotifications };
+    
+    if (parishId && allNotifications[parishId]) {
+        allNotifications[parishId] = allNotifications[parishId].filter(n => n.id !== notificationId);
+    } else {
+        Object.keys(allNotifications).forEach(pId => { allNotifications[pId] = allNotifications[pId].filter(n => n.id !== notificationId); });
+    }
+
+    localStorage.setItem('parishNotifications', JSON.stringify(allNotifications));
+    setParishNotifications(allNotifications);
+    window.dispatchEvent(new Event('storage'));
+    return { success: true };
+  };
+
+  const addNotificationToParish = (parishId, notificationData) => createNotification({ ...notificationData, parish_id: parishId });
   const createNotificationFacade = (notificationData) => createNotification({ ...notificationData, parish_id: notificationData.parishId || notificationData.parish_id });
 
   return (
@@ -748,7 +815,7 @@ export const AppDataProvider = ({ children }) => {
         deleteCiudad: (id, pId) => AuxCRUDHelper.deleteCiudad(id, pId || currentUser?.parishId),
         importCiudades: (json, id, append) => AuxCRUDHelper.importCiudades(json, id || currentUser?.parishId, append),
         
-        getParrocos: (id) => AuxCRUDHelper.getObispos(id || currentUser?.parishId), // Adaptador temporal
+        getParrocos: (id) => AuxCRUDHelper.getObispos(id || currentUser?.parishId),
         getParrocoActual: (id) => AuxCRUDHelper.getObispos(id || currentUser?.parishId).find(p => p.estado === "1" || String(p.estado).toUpperCase() === 'ACTIVO'),
         addParroco: (item, id) => AuxCRUDHelper.addObispo(item, id || currentUser?.parishId),
         updateParroco: (id, item, pId) => AuxCRUDHelper.updateObispo(id, item, pId || currentUser?.parishId),
@@ -771,7 +838,7 @@ export const AppDataProvider = ({ children }) => {
         updateMatrimonioParameters: (id, params) => ParamsHelper.updateMatrimonioParameters(id || currentUser?.parishId, params),
         getNextMatrimonioNumbers: (id) => ParamsHelper.getNextMatrimonioNumbers(id || currentUser?.parishId),
 
-        // --- JERARQUÍA RESTANTE ---
+        // --- JERARQUÍA RESTAURADA (LAS QUE FALTABAN) ---
         createVicary, deleteVicary, createDecanate, deleteDecanate, createChancery,
         createDiocese, createArchdiocese, getVicaries: () => data.vicariates, getDecanates: () => data.deaneries,
         getChanceries: () => data.chancelleries, getDioceses: () => data.dioceses.filter(d => d.type === 'diocese'),
