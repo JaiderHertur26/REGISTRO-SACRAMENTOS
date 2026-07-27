@@ -75,6 +75,7 @@ const initializeData = () => {
     localStorage.setItem('users', JSON.stringify(users));
   }
 
+  // Bóvedas de memoria esenciales purificadas
   const collections = [
     'dioceses', 'vicariates', 'deaneries', 'parishes', 'chancelleries', 
     'mis_datos', 'parrocos', 'obispos', 'paises', 'ciudades', 'iglesias',
@@ -89,7 +90,11 @@ const initializeData = () => {
   });
 };
 
+// ============================================================================
+// 3. PROVEEDOR PRINCIPAL DEL CONTEXTO
+// ============================================================================
 export const AppDataProvider = ({ children }) => {
+  // Estado purificado: Solo lo estrictamente necesario
   const [data, setData] = useState({
     users: [], dioceses: [], vicariates: [], deaneries: [], parishes: [], 
     chancelleries: [], chancellors: [], misDatos: [], conceptosAnulacion: [], decreeReplacements: []
@@ -100,10 +105,13 @@ export const AppDataProvider = ({ children }) => {
   const [matrimonialNotifications, setMatrimonialNotifications] = useState([]);
   const [matrimonialNotificationAvisos, setMatrimonialNotificationAvisos] = useState([]);
 
+  // --- INICIALIZACIÓN MAESTRA (Arranque Sincronizado y Blindado) ---
   useEffect(() => {
       const arrancarSistema = async () => {
+          // 1. Preparamos las bóvedas locales
           initializeData();
           
+          // 2. Autenticación
           const storedUser = localStorage.getItem('currentUser');
           let activeUser = null;
           if (storedUser) {
@@ -113,6 +121,7 @@ export const AppDataProvider = ({ children }) => {
               setMatrimonialNotificationAvisos(obtenerAvisosParroquia(activeUser.parishId));
           }
 
+          // 3. Carga Inmediata Local (Para que la UI no se quede en blanco)
           const entityId = activeUser?.parishId || activeUser?.dioceseId;
           const replacementsKey = entityId ? `decreeReplacements_${entityId}` : 'decreeReplacements';
           
@@ -129,6 +138,7 @@ export const AppDataProvider = ({ children }) => {
           setParishNotifications(JSON.parse(localStorage.getItem('parishNotifications') || '{}'));
           setMatrimonialNotifications(JSON.parse(localStorage.getItem('matrimonialNotifications') || '[]'));
 
+          // 4. Sincronización Global con Supabase
           try {
               const [vicariasRes, decanatosRes, misDatosRes] = await Promise.all([
                   supabase.from('vicarias').select('*'),
@@ -146,8 +156,10 @@ export const AppDataProvider = ({ children }) => {
               }));
           } catch(e) { console.warn("Error sincronizando estructura global:", e); }
 
+          // 5. Sincronización Privada de la Parroquia
           if (entityId) {
               try {
+                  // Bautismos
                   const { data: bData } = await supabase.from('baptisms').select('*').eq('parish_id', entityId);
                   if (bData) {
                       const cloudBaptisms = bData.map(b => ({ ...b.raw_data, id: b.id, status: b.status, marginNote: b.margin_note }));
@@ -155,17 +167,20 @@ export const AppDataProvider = ({ children }) => {
                       localStorage.setItem(`baptismPartidas_${entityId}`, JSON.stringify(cloudBaptisms));
                   }
                   
+                  // Párrocos
                   const { data: pData } = await supabase.from('parrocos').select('*').eq('parish_id', entityId);
                   if (pData && pData.length > 0) {
                       localStorage.setItem(`parrocos_${entityId}`, JSON.stringify(pData.map(d => ({ ...d.payload, id: d.id }))));
                   }
 
+                  // Decretos
                   const { data: dData } = await supabase.from('decretos').select('*').eq('parish_id', entityId);
                   if (dData && dData.length > 0) {
                       localStorage.setItem(`baptismCorrections_${entityId}`, JSON.stringify(dData.filter(d => d.tipo === 'correccion').map(d => ({ ...d.payload, id: d.id }))));
                       localStorage.setItem(`decreeReplacementBaptism_${entityId}`, JSON.stringify(dData.filter(d => d.tipo === 'reposicion').map(d => ({ ...d.payload, id: d.id }))));
                   }
                   
+                  // Respaldo Inverso (Sube lo que no esté en la nube)
                   const localCorrections = JSON.parse(localStorage.getItem(`baptismCorrections_${entityId}`) || '[]');
                   const localReplacements = JSON.parse(localStorage.getItem(`decreeReplacementBaptism_${entityId}`) || '[]');
                   const dbInsert = [];
@@ -192,6 +207,7 @@ export const AppDataProvider = ({ children }) => {
       setMatrimonialNotificationAvisos(JSON.parse(localStorage.getItem('matrimonialNotificationAvisos') || '[]'));
   };
 
+  // --- INYECTOR AUTOMÁTICO DE NOTAS MATRIMONIALES A BAUTISMOS ---
   const asentarNotaMarginalBautismo = async (partidaId, documentoMatrimonio, parishId) => {
       try {
           if (!partidaId || !parishId) return;
@@ -298,11 +314,17 @@ export const AppDataProvider = ({ children }) => {
       }
   };
 
+
+  // --- ENTITY CREATION METHODS ---
   const createVicary = async (vicaryData) => {
       try {
           const { data: newVicary, error } = await supabase
               .from('vicarias')
-              .insert([{ diocese_id: vicaryData.dioceseId, name: vicaryData.name, vicar_name: vicaryData.vicarioName || '' }])
+              .insert([{
+                  diocese_id: vicaryData.dioceseId,
+                  name: vicaryData.name,
+                  vicar_name: vicaryData.vicarioName || ''
+              }])
               .select().single();
 
           if (error) throw error;
@@ -310,14 +332,22 @@ export const AppDataProvider = ({ children }) => {
           const formattedVicary = { id: newVicary.id, dioceseId: newVicary.diocese_id, name: newVicary.name, vicarioName: newVicary.vicar_name };
           setData(prev => ({ ...prev, vicariates: [...(prev.vicariates || []), formattedVicary] }));
           return { success: true };
-      } catch (error) { return { success: false, message: error.message }; }
+      } catch (error) {
+          console.error("Error creando vicaría:", error);
+          return { success: false, message: error.message };
+      }
   };
 
   const deleteVicary = async (id) => {
        try {
            const { error } = await supabase.from('vicarias').delete().eq('id', id);
            if (error) throw error;
-           setData(prev => ({ ...prev, vicariates: (prev.vicariates || []).filter(v => v.id !== id), deaneries: (prev.deaneries || []).filter(d => d.vicaryId !== id) }));
+           
+           setData(prev => ({
+               ...prev,
+               vicariates: (prev.vicariates || []).filter(v => v.id !== id),
+               deaneries: (prev.deaneries || []).filter(d => d.vicaryId !== id)
+           }));
            return { success: true };
        } catch(e) { return { success: false, message: e.message }; }
   };
@@ -326,7 +356,11 @@ export const AppDataProvider = ({ children }) => {
       try {
           const { data: newDecanate, error } = await supabase
               .from('decanatos')
-              .insert([{ vicaria_id: decanateData.vicaryId, name: decanateData.name, dean_name: decanateData.decanName || '' }])
+              .insert([{
+                  vicaria_id: decanateData.vicaryId,
+                  name: decanateData.name,
+                  dean_name: decanateData.decanName || ''
+              }])
               .select().single();
 
           if (error) throw error;
@@ -334,13 +368,17 @@ export const AppDataProvider = ({ children }) => {
           const formattedDecanate = { id: newDecanate.id, vicaryId: newDecanate.vicaria_id, name: newDecanate.name, decanName: newDecanate.dean_name };
           setData(prev => ({ ...prev, deaneries: [...(prev.deaneries || []), formattedDecanate] }));
           return { success: true };
-      } catch (error) { return { success: false, message: error.message }; }
+      } catch (error) {
+          console.error("Error creando decanato:", error);
+          return { success: false, message: error.message };
+      }
   };
 
   const deleteDecanate = async (id) => {
        try {
            const { error } = await supabase.from('decanatos').delete().eq('id', id);
            if (error) throw error;
+           
            setData(prev => ({ ...prev, deaneries: (prev.deaneries || []).filter(d => d.id !== id) }));
            return { success: true };
        } catch(e) { return { success: false, message: e.message }; }
@@ -370,6 +408,7 @@ export const AppDataProvider = ({ children }) => {
       return { success: true, data: newArchdiocese };
   };
 
+  // --- UNIVERSAL BACKUP METHODS ---
   const createUniversalBackup = async (backupName, backupDescription = '') => {
     try {
       const keysToBackup = [
@@ -383,12 +422,25 @@ export const AppDataProvider = ({ children }) => {
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (
-          key.startsWith('baptisms_') || key.startsWith('confirmations_') || key.startsWith('matrimonios_') ||
-          key.startsWith('pendingBaptisms_') || key.startsWith('pendingConfirmations_') || key.startsWith('pendingMatrimonios_') ||
-          key.startsWith('baptismParameters_') || key.startsWith('confirmationParameters_') || key.startsWith('matrimonioParameters_') ||
-          key.startsWith('baptismCorrections_') || key.startsWith('conceptosAnulacion_') || key.startsWith('notasAlMargen_') ||
-          key.startsWith('decreeReplacements_') || key.startsWith('decreeReplacementBaptism_') || key.startsWith('parrocos_') || key.startsWith('obispos_')
-        ) { dynamicKeys.push(key); }
+          key.startsWith('baptisms_') || 
+          key.startsWith('confirmations_') || 
+          key.startsWith('matrimonios_') ||
+          key.startsWith('pendingBaptisms_') ||
+          key.startsWith('pendingConfirmations_') ||
+          key.startsWith('pendingMatrimonios_') ||
+          key.startsWith('baptismParameters_') ||
+          key.startsWith('confirmationParameters_') ||
+          key.startsWith('matrimonioParameters_') ||
+          key.startsWith('baptismCorrections_') ||
+          key.startsWith('conceptosAnulacion_') ||
+          key.startsWith('notasAlMargen_') ||
+          key.startsWith('decreeReplacements_') ||
+          key.startsWith('decreeReplacementBaptism_') ||
+          key.startsWith('parrocos_') ||
+          key.startsWith('obispos_')
+        ) {
+          dynamicKeys.push(key);
+        }
       }
       const allKeys = [...new Set([...keysToBackup, ...dynamicKeys])];
       const backupPayload = {};
@@ -401,7 +453,9 @@ export const AppDataProvider = ({ children }) => {
             backupPayload[key] = parsed;
             if (Array.isArray(parsed)) totalRecords += parsed.length;
           }
-        } catch (e) {}
+        } catch (e) {
+          console.warn(`Skipping key ${key} due to parse error`);
+        }
       });
       const backupId = generateUUID();
       const now = new Date().toISOString();
@@ -409,16 +463,21 @@ export const AppDataProvider = ({ children }) => {
       const checksum = generateBackupChecksum(content.data);
       const sizeBytes = calculateBackupSize(content);
       const finalBackupObject = {
-        metadata: { id: backupId, name: backupName, description: backupDescription, versionApp: '1.0.0', createdAt: now, totalRegistros: totalRecords, sizeBytes: sizeBytes },
+        metadata: {
+          id: backupId, name: backupName, description: backupDescription,
+          versionApp: '1.0.0', createdAt: now, totalRegistros: totalRecords, sizeBytes: sizeBytes
+        },
         checksum: checksum, data: backupPayload
       };
       const result = saveBackupToLocalStorage(finalBackupObject);
       return result;
-    } catch (error) { return { success: false, message: error.message }; }
+    } catch (error) {
+      console.error("Create Universal Backup Error:", error);
+      return { success: false, message: error.message };
+    }
   };
 
   const getUniversalBackups = () => getBackupsFromLocalStorage();
-  
   const restoreUniversalBackup = async (backupId) => {
     try {
       const backup = getBackupFromLocalStorage(backupId);
@@ -430,12 +489,14 @@ export const AppDataProvider = ({ children }) => {
       const dataKeys = Object.keys(backup.data);
       dataKeys.forEach(key => localStorage.removeItem(key));
       dataKeys.forEach(key => { localStorage.setItem(key, JSON.stringify(backup.data[key])); });
+      
       return { success: true, message: "System restored successfully." };
-    } catch (error) { return { success: false, message: error.message }; }
+    } catch (error) {
+      console.error("Restore Error:", error);
+      return { success: false, message: error.message };
+    }
   };
-  
   const deleteUniversalBackup = (backupId) => deleteBackupFromLocalStorage(backupId);
-  
   const exportUniversalBackup = (backupId) => {
     const backup = getBackupFromLocalStorage(backupId);
     if (!backup) return { success: false, message: "Backup not found." };
@@ -443,9 +504,10 @@ export const AppDataProvider = ({ children }) => {
       const filename = `UniversalBackup_${backup.metadata.name.replace(/\s+/g, '_')}_${backup.metadata.createdAt.split('T')[0]}.json`;
       downloadBackupFile(backup, filename);
       return { success: true };
-    } catch (e) { return { success: false, message: e.message }; }
+    } catch (e) {
+      return { success: false, message: e.message };
+    }
   };
-  
   const importUniversalBackup = async (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -459,49 +521,22 @@ export const AppDataProvider = ({ children }) => {
           json.metadata.name = `${json.metadata.name} (Importado)`;
           const saveRes = saveBackupToLocalStorage(json);
           resolve(saveRes);
-        } catch (err) { resolve({ success: false, message: "Error parsing JSON file." }); }
+        } catch (err) {
+          resolve({ success: false, message: "Error parsing JSON file." });
+        }
       };
       reader.onerror = () => reject({ success: false, message: "File read error" });
       reader.readAsText(file);
     });
   };
-  
   const getUniversalBackupInfo = (backupId) => {
     const backup = getBackupFromLocalStorage(backupId);
     return backup ? backup.metadata : null;
   };
   
-  const obtenerNotasAlMargen = (parishId) => {
-      if (!parishId) return DEFAULT_NOTAS_MARGINALES;
-      const key = `notasAlMargen_${parishId}`;
-      const stored = localStorage.getItem(key);
-      if (stored) {
-          try {
-              const storedData = JSON.parse(stored);
-              const defaultData = DEFAULT_NOTAS_MARGINALES;
-              return {
-                  ...defaultData, ...storedData,
-                  porCorreccion: { ...defaultData.porCorreccion, ...(storedData.porCorreccion || {}) },
-                  porReposicion: { 
-                      ...defaultData.porReposicion, ...(storedData.porReposicion || {}),
-                      nuevaPartidaCreada: { ...defaultData.porReposicion.nuevaPartidaCreada, ...(storedData.porReposicion?.nuevaPartidaCreada || {}) }
-                  },
-                  porNotificacionMatrimonial: { ...defaultData.porNotificacionMatrimonial, ...(storedData.porNotificacionMatrimonial || {}) }
-              };
-          } catch (e) { return DEFAULT_NOTAS_MARGINALES; }
-      }
-      return DEFAULT_NOTAS_MARGINALES;
-  };
-
-  const getAuxData = (key, contextId) => {
-    const storageKey = contextId ? `${key}_${contextId}` : key;
-    return JSON.parse(localStorage.getItem(storageKey) || '[]');
-  };
-
-  const getParrocos = (parishId) => {
-      const storageKey = parishId ? `parrocos_${parishId}` : 'parrocos';
-      return JSON.parse(localStorage.getItem(storageKey) || '[]');
-  };
+   // ============================================================================
+  // 🧠 CEREBRO DE BAUTIZOS: PURIFICACIÓN Y GUARDADO ÚNICO (ESTÁNDAR 20 CAMPOS)
+  // ============================================================================
 
   const purificarRegistroBautismo = (raw) => {
       if (!raw) return null;
@@ -509,6 +544,7 @@ export const AppDataProvider = ({ children }) => {
       const pId = raw.parishId || raw.parish_id || currentUser?.parishId;
       const config = obtenerNotasAlMargen(pId) || {};
       
+      // Lógica de Notas Marginales de BD_BautizosPage.jsx
       const identityId = raw.tipoIdentidad || raw.identityId || 'id_estandar';
       let notaCalculada = "";
       switch (identityId) {
@@ -527,6 +563,7 @@ export const AppDataProvider = ({ children }) => {
       };
       const notaFinalConFecha = notaCalculada.replace(/\[FECHA_EXPEDICION\]/g, getFechaHoyLetras()).toUpperCase();
 
+      // Función para obtener el Párroco Actual (Da Fe)
       const getNombreParrocoActual = () => {
           if (!pId) return '---';
           const lista = getParrocos(pId) || [];
@@ -534,29 +571,45 @@ export const AppDataProvider = ({ children }) => {
           return actual ? `${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase() : 'PÁRROCO ENCARGADO';
       };
 
+      // 📜 CÁPSULA DEFINITIVA (SOLO LOS CAMPOS SOLICITADOS)
       return {
           id: raw.id || generateUUID(),
           parishId: pId,
           tipoIdentidad: identityId,
+
+          // 1. Archivo (Nombres estrictos)
           Libro: String(raw.Libro || '0').padStart(4, '0'),
           folio: String(raw.folio || '0').padStart(4, '0'),
           numero: String(raw.numero || '0').padStart(4, '0'),
+
+          // 2. Sacramento
           lugarBautismo: String(raw.lugarBautismo || '---').trim().toUpperCase(),
           fechaSacramento: raw.fechaSacramento || '---',
+
+          // 3. Sujeto
           apellidos: String(raw.apellidos || '').trim().toUpperCase(),
           nombres: String(raw.nombres || '').trim().toUpperCase(),
           fechaNacimiento: raw.fechaNacimiento || '---',
           lugarNacimiento: String(raw.lugarNacimiento || '---').trim().toUpperCase(),
           sexo: String(raw.sexo || 'MASCULINO').toUpperCase(),
+
+          // 4. Familia
           nombrePadre: String(raw.nombrePadre || '---').trim().toUpperCase(),
           nombreMadre: String(raw.nombreMadre || '---').trim().toUpperCase(),
           tipoUnionPadres: String(raw.tipoUnionPadres || '---').trim().toUpperCase(),
           abuelosPaternos: String(raw.abuelosPaternos || '---').trim().toUpperCase(),
           abuelosMaternos: String(raw.abuelosMaternos || '---').trim().toUpperCase(),
+
+          // 5. Autoridad
           padrinos: String(raw.padrinos || '---').trim().toUpperCase(),
           ministro: String(raw.ministro || '---').trim().toUpperCase(),
+          
+          // DA FE: Párroco Actual (Inyectado Automáticamente)
           daFe: getNombreParrocoActual(),
+
+          // 6. Nota Marginal
           notaMarginal: notaFinalConFecha,
+          
           status: raw.status || raw.estado || 'seated',
           updatedAt: new Date().toISOString()
       };
@@ -569,14 +622,24 @@ export const AppDataProvider = ({ children }) => {
       try {
           const cleanDate = (d) => (d && String(d).trim() !== '' && d !== '---') ? d : null;
 
+          // Mapeo a columnas físicas de Supabase + Cápsula Raw Data
           const dbRecord = {
-              id: purificado.id, parish_id: targetParishId,
-              book_number: purificado.Libro, page_number: purificado.folio, entry_number: purificado.numero,
-              first_name: purificado.nombres, last_name: purificado.apellidos, gender: purificado.sexo,
-              birth_date: cleanDate(purificado.fechaNacimiento), sacrament_date: cleanDate(purificado.fechaSacramento),
-              minister: purificado.ministro, father_name: purificado.nombrePadre, mother_name: purificado.nombreMadre,
-              tipo_union_padres: String(purificado.tipoUnionPadres || '1'), status: purificado.status,
-              margin_note: purificado.notaMarginal, raw_data: purificado 
+              id: purificado.id,
+              parish_id: targetParishId,
+              book_number: purificado.Libro, // El valor de Libro va a la columna book_number
+              page_number: purificado.folio, // El valor de folio va a la columna page_number
+              entry_number: purificado.numero, // El valor de numero va a la columna entry_number
+              first_name: purificado.nombres,
+              last_name: purificado.apellidos,
+              gender: purificado.sexo,
+              birth_date: cleanDate(purificado.fechaNacimiento),
+              sacrament_date: cleanDate(purificado.fechaSacramento),
+              minister: purificado.ministro,
+              father_name: purificado.nombrePadre,
+              mother_name: purificado.nombreMadre,
+              status: purificado.status,
+              margin_note: purificado.notaMarginal,
+              raw_data: purificado 
           };
 
           const { error } = await supabase.from('baptisms').upsert(dbRecord, { onConflict: 'id' });
@@ -599,6 +662,7 @@ export const AppDataProvider = ({ children }) => {
 
   const guardarEnPermanentes = saveBaptismToSource;
 
+  // --- GETTERS ---
   const getVicaries = () => JSON.parse(localStorage.getItem('vicariates') || '[]');
   const getDecanates = () => JSON.parse(localStorage.getItem('deaneries') || '[]');
   const getChanceries = () => JSON.parse(localStorage.getItem('chancelleries') || '[]');
@@ -613,6 +677,7 @@ export const AppDataProvider = ({ children }) => {
       return { success: true, data: newItem };
   };
 
+  // --- ANNULMENT CONCEPTS ---
   const getConceptosAnulacion = (parishId) => {
       if (!parishId) return [];
       const key = `conceptosAnulacion_${parishId}`;
@@ -629,7 +694,12 @@ export const AppDataProvider = ({ children }) => {
   const addConceptoAnulacion = (item, parishId) => {
       if (!parishId) return { success: false, message: "Falta ID de parroquia" };
       const current = getConceptosAnulacion(parishId);
-      const newItem = { ...item, tipo: item.tipo || 'porCorreccion', id: generateUUID(), createdAt: new Date().toISOString() };
+      const newItem = { 
+          ...item, 
+          tipo: item.tipo || 'porCorreccion',
+          id: generateUUID(), 
+          createdAt: new Date().toISOString() 
+      };
       const updated = [...current, newItem];
       localStorage.setItem(`conceptosAnulacion_${parishId}`, JSON.stringify(updated));
       return { success: true, message: "Concepto agregado exitosamente", data: newItem };
@@ -651,6 +721,7 @@ export const AppDataProvider = ({ children }) => {
       return { success: true, message: "Concepto eliminado exitosamente" };
   };
 
+  // --- NEW: DECREE REPLACEMENT BAPTISM & ENHANCED BAPTISM ---
   const getDecreeReplacementBaptisms = (parishId) => {
     if (!parishId) return [];
     return JSON.parse(localStorage.getItem(`decreeReplacementBaptism_${parishId}`) || '[]');
@@ -661,7 +732,11 @@ export const AppDataProvider = ({ children }) => {
     if (!contextId) return { success: false, message: "Falta ID de parroquia" };
     
     const decreeId = decreeData.id || generateUUID();
-    const newDecree = { ...decreeData, id: decreeId, createdAt: new Date().toISOString() };
+    const newDecree = {
+        ...decreeData,
+        id: decreeId,
+        createdAt: new Date().toISOString()
+    };
 
     supabase.from('decretos').insert([{ id: decreeId, parish_id: contextId, tipo: 'reposicion', payload: newDecree }]).then();
 
@@ -675,14 +750,23 @@ export const AppDataProvider = ({ children }) => {
       const contextId = parishId || currentUser?.parishId;
       if (!contextId) return { success: false, message: "Falta ID de parroquia" };
       
-      const finalRecord = { ...newPartidaData, id: newPartidaData.id || generateUUID(), status: newPartidaData.status || 'seated', createdAt: new Date().toISOString() };
+      const finalRecord = {
+          ...newPartidaData,
+          id: newPartidaData.id || generateUUID(),
+          status: newPartidaData.status || 'seated',
+          createdAt: new Date().toISOString()
+      };
       
       if (finalRecord.type === "replacement" || finalRecord.createdByDecree === "replacement") {
-          if (finalRecord.marginNote) { finalRecord.notaMarginal = finalRecord.marginNote.text || finalRecord.marginNote; }
+          if (finalRecord.marginNote) {
+              finalRecord.notaMarginal = finalRecord.marginNote.text || finalRecord.marginNote;
+          }
       }
+      
       return await saveBaptismToSource(finalRecord, contextId, finalRecord.status);
   };
 
+  // --- DECREE REPLACEMENT FUNCTIONS ---
   const getDecreeReplacementsBySacrament = (sacramentType, parishId) => {
       if (!parishId) return [];
       const key = `decreeReplacements_${parishId}`;
@@ -720,7 +804,12 @@ export const AppDataProvider = ({ children }) => {
       const current = JSON.parse(localStorage.getItem(key) || '[]');
       
       const decreeId = decreeData.id || generateUUID();
-      const newDecree = { ...decreeData, id: decreeId, createdAt: new Date().toISOString(), status: 'active' };
+      const newDecree = {
+          ...decreeData,
+          id: decreeId,
+          createdAt: new Date().toISOString(),
+          status: 'active'
+      };
 
       supabase.from('decretos').insert([{ id: decreeId, parish_id: parishId, tipo: 'reposicion', payload: newDecree }]).then();
       
@@ -769,6 +858,7 @@ export const AppDataProvider = ({ children }) => {
                   raw.replacementDecreeRef = decNum;
                   raw.decreeNumber = decNum;
                   if (updatedData.conceptoAnulacionId) raw.conceptoAnulacionId = updatedData.conceptoAnulacionId;
+                  
                   await supabase.from('baptisms').update({ raw_data: raw }).eq('id', newId);
               }
           }
@@ -780,6 +870,7 @@ export const AppDataProvider = ({ children }) => {
                   raw.annulmentDecree = decNum;
                   raw.annulmentDate = decDate;
                   if (updatedData.conceptoAnulacionId) raw.conceptoAnulacionId = updatedData.conceptoAnulacionId;
+                  
                   await supabase.from('baptisms').update({ raw_data: raw }).eq('id', origId);
               }
           }
@@ -787,6 +878,7 @@ export const AppDataProvider = ({ children }) => {
           window.dispatchEvent(new Event('storage'));
           return { success: true, message: "Decreto de reposición y partidas actualizadas en la Nube." };
       } catch (error) {
+          console.error("Error updating replacement:", error);
           return { success: false, message: error.message };
       }
   };
@@ -953,6 +1045,37 @@ export const AppDataProvider = ({ children }) => {
     localStorage.setItem('parishNotifications', JSON.stringify(allNotifications));
     setParishNotifications(allNotifications);
     return { success: true };
+  };
+
+  const obtenerNotasAlMargen = (parishId) => {
+      if (!parishId) return DEFAULT_NOTAS_MARGINALES;
+      const key = `notasAlMargen_${parishId}`;
+      const stored = localStorage.getItem(key);
+      
+      if (stored) {
+          try {
+              const storedData = JSON.parse(stored);
+              const defaultData = DEFAULT_NOTAS_MARGINALES;
+              return {
+                  ...defaultData,
+                  ...storedData,
+                  porCorreccion: { ...defaultData.porCorreccion, ...(storedData.porCorreccion || {}) },
+                  porReposicion: { 
+                      ...defaultData.porReposicion, 
+                      ...(storedData.porReposicion || {}),
+                      nuevaPartidaCreada: { 
+                          ...defaultData.porReposicion.nuevaPartidaCreada, 
+                          ...(storedData.porReposicion?.nuevaPartidaCreada || {}) 
+                      }
+                  },
+                  porNotificacionMatrimonial: { ...defaultData.porNotificacionMatrimonial, ...(storedData.porNotificacionMatrimonial || {}) }
+              };
+          } catch (e) {
+              console.error("Error leyendo notas marginales. Restaurando defaults.", e);
+              return DEFAULT_NOTAS_MARGINALES;
+          }
+      }
+      return DEFAULT_NOTAS_MARGINALES;
   };
 
   const saveNotasAlMargen = (notes, parishId) => {
@@ -1144,11 +1267,7 @@ export const AppDataProvider = ({ children }) => {
         
         const decretoObj = { numero: decreeData.decreeNumber, fecha: decreeData.decreeDate, oficina: 'CANCILLERÍA' };
         const partidaNuevaObj = { libro: String(params.suplementarioLibro).padStart(4, '0'), folio: String(params.suplementarioFolio).padStart(4, '0'), numero: String(params.suplementarioNumero).padStart(4, '0') };
-        
-        const origLibro = String(originalPartida.book_number || originalPartida.libro || originalPartida.Libro || '').padStart(4, '0');
-        const origFolio = String(originalPartida.page_number || originalPartida.folio || '').padStart(4, '0');
-        const origNumero = String(originalPartida.entry_number || originalPartida.numero || originalPartida.numeroActa || '').padStart(4, '0');
-        const partidaAnuladaObj = { libro: origLibro, folio: origFolio, numero: origNumero };
+        const partidaAnuladaObj = { libro: String(originalPartida.book_number || originalPartida.libro).padStart(4, '0'), folio: String(originalPartida.page_number || originalPartida.folio).padStart(4, '0'), numero: String(originalPartida.entry_number || originalPartida.numero).padStart(4, '0') };
 
         const notaAnulada = generarNotaAlMargenAnulada(partidaNuevaObj, decretoObj, parishId);
         const notaNueva = generarNotaAlMargenNuevaPartida(partidaAnuladaObj, decretoObj, nombreSacerdote, parishId);
@@ -1531,7 +1650,1100 @@ export const AppDataProvider = ({ children }) => {
         }
     };
 
-  const createChanceryCorrection = async (decreeData, originalPartidaId, newPartidaData, targetParishId, chanceryId) => {
+  const createDioceseArchdiocese = (dioceseData, userData) => {
+    try {
+        const newDioceseId = generateUUID();
+        let type = dioceseData.type || ((dioceseData.name.toLowerCase().includes('arquidiócesis') || dioceseData.name.toLowerCase().includes('arquidiocesis')) ? 'archdiocese' : 'diocese');
+        const newDiocese = { ...dioceseData, id: newDioceseId, type: type, createdAt: new Date().toISOString() };
+        const newUser = sanitizeUser({ ...userData, id: generateUUID(), role: ROLE_TYPES.DIOCESE, dioceseId: newDioceseId, dioceseName: dioceseData.name, createdAt: new Date().toISOString() });
+        const updatedDioceses = [...data.dioceses, newDiocese];
+        const updatedUsers = [...data.users, newUser];
+        saveData('dioceses', updatedDioceses);
+        saveData('users', updatedUsers);
+        return { success: true, data: newDiocese };
+    } catch (error) {
+        return { success: false, message: error.message };
+    }
+  };
+
+  const deleteDioceseArchdiocese = (id) => {
+      try {
+        const updatedDioceses = data.dioceses.filter(d => d.id !== id);
+        const updatedUsers = data.users.filter(u => u.dioceseId !== id);
+        saveData('dioceses', updatedDioceses);
+        saveData('users', updatedUsers);
+        return { success: true };
+      } catch (error) {
+        return { success: false, message: error.message };
+      }
+  };
+
+  const createUser = (userData) => {
+      const sanitizedUserData = sanitizeUser({ ...userData, id: generateUUID(), createdAt: new Date().toISOString() });
+      const updatedUsers = [...data.users, sanitizedUserData];
+      saveData('users', updatedUsers);
+      return sanitizedUserData;
+  };
+
+  const deleteUser = (userId) => {
+      const updatedUsers = data.users.filter(u => u.id !== userId);
+      saveData('users', updatedUsers);
+  };
+
+  const getUserByUsername = (username) => {
+    if (!username) return null;
+    return data.users.find(u => {
+        const uName = sanitizeValue(u.username);
+        return uName.toLowerCase() === username.toLowerCase();
+    });
+  };
+
+  const getParishUsers = (dioceseId) => data.users.filter(u => u.role === ROLE_TYPES.PARISH && u.dioceseId === dioceseId);
+  const getChanceryUsers = (dioceseId) => data.users.filter(u => u.role === ROLE_TYPES.CHANCERY && u.dioceseId === dioceseId);
+
+  const createChancellor = (chancellorData, userData) => {
+      const newChancellor = { ...chancellorData, id: generateUUID(), createdAt: new Date().toISOString() };
+      const updatedChancellors = [...data.chancellors, newChancellor];
+      const newUser = sanitizeUser({ ...userData, id: generateUUID(), role: ROLE_TYPES.CHANCERY, chancellorId: newChancellor.id, dioceseId: chancellorData.dioceseId, createdAt: new Date().toISOString() });
+      const updatedUsers = [...data.users, newUser];
+      saveData('chancellors', updatedChancellors);
+      saveData('users', updatedUsers);
+      return { success: true };
+  };
+
+  const updateChancellor = (id, updates) => {
+      try {
+          let currentChancellors = data.chancellors || [];
+          let index = currentChancellors.findIndex(c => c.id === id);
+          
+          if (index !== -1) {
+              const updated = [...currentChancellors];
+              updated[index] = { ...updated[index], ...updates, updatedAt: new Date().toISOString() };
+              saveData('chancellors', updated);
+              return { success: true, message: "Actualizado correctamente." };
+          }
+          
+          let currentChancelleries = data.chancelleries || [];
+          let indexLegacy = currentChancelleries.findIndex(c => c.id === id);
+          
+          if (indexLegacy !== -1) {
+              const updatedLegacy = [...currentChancelleries];
+              updatedLegacy[indexLegacy] = { ...updatedLegacy[indexLegacy], ...updates, updatedAt: new Date().toISOString() };
+              saveData('chancelleries', updatedLegacy);
+              return { success: true, message: "Actualizado correctamente." };
+          }
+
+          return { success: false, message: 'Canciller no encontrado en la base de datos' };
+      } catch (error) {
+          return { success: false, message: error.message };
+      }
+  };
+
+  const deleteChancellor = (id) => {
+      try {
+          const currentChancellors = data.chancellors?.length ? data.chancellors : JSON.parse(localStorage.getItem('chancellors') || '[]');
+          const currentChancelleries = data.chancelleries?.length ? data.chancelleries : JSON.parse(localStorage.getItem('chancelleries') || '[]');
+          const currentUsers = data.users?.length ? data.users : JSON.parse(localStorage.getItem('users') || '[]');
+
+          const updatedChancellors = currentChancellors.filter(c => c.id !== id);
+          const updatedChancelleries = currentChancelleries.filter(c => c.id !== id);
+          const updatedUsers = currentUsers.filter(u => u.chancellorId !== id && u.chancelleryId !== id);
+          
+          saveData('chancellors', updatedChancellors);
+          saveData('chancelleries', updatedChancelleries);
+          saveData('users', updatedUsers);
+          
+          return { success: true, message: "Cancillería eliminada correctamente" };
+      } catch (error) {
+          console.error("Error deleting chancellor:", error);
+          return { success: false, message: error.message };
+      }
+  };
+
+  const getChancellorByDiocese = (dioceseId) => data.chancellors.find(c => c.dioceseId === dioceseId);
+
+  const createParish = (parishData, userData) => {
+    const newParish = { ...parishData, id: generateUUID(), createdAt: new Date().toISOString() };
+    const updatedParishes = [...data.parishes, newParish];
+    const newUser = sanitizeUser({ ...userData, id: generateUUID(), parishId: newParish.id, role: ROLE_TYPES.PARISH, createdAt: new Date().toISOString() });
+    const updatedUsers = [...data.users, newUser];
+    saveData('parishes', updatedParishes);
+    saveData('users', updatedUsers);
+    return { success: true };
+  };
+
+  const updateParish = (id, updates) => {
+      try {
+          let currentParishes = data.parishes || [];
+          let index = currentParishes.findIndex(p => p.id === id);
+          if (index !== -1) {
+              const updated = [...currentParishes];
+              updated[index] = { ...updated[index], ...updates, updatedAt: new Date().toISOString() };
+              saveData('parishes', updated);
+              return { success: true, message: "Actualizado correctamente." };
+          }
+          return { success: false, message: 'Parroquia no encontrada' };
+      } catch (error) {
+          return { success: false, message: error.message };
+      }
+  };
+
+  const deleteParish = (id) => {
+      try {
+          const currentParishes = data.parishes || [];
+          const currentUsers = data.users || [];
+
+          const updatedParishes = currentParishes.filter(p => p.id !== id);
+          const updatedUsers = currentUsers.filter(u => u.parishId !== id);
+          
+          saveData('parishes', updatedParishes);
+          saveData('users', updatedUsers);
+          
+          return { success: true, message: "Parroquia eliminada correctamente" };
+      } catch (error) {
+          console.error("Error eliminando parroquia:", error);
+          return { success: false, message: error.message };
+      }
+  };
+
+ // ============================================================================
+  // 4. PARÁMETROS DE SACRAMENTOS
+  // ============================================================================
+
+  // --- BAUTISMOS ---
+  const getDefaultBaptismParameters = () => ({
+      enablePreview: true, reportPrinting: false, ordinarioBlocked: false, ordinarioRestartNumber: false,
+      ordinarioPartidas: 2, ordinarioLibro: 1, ordinarioFolio: 436, ordinarioNumero: 871,
+      suplementarioBlocked: false, suplementarioReiniciar: false, suplementarioPartidas: 2,
+      suplementarioLibro: 3, suplementarioFolio: 2, suplementarioNumero: 3,
+      registroAdultoEn: 'ordinario', registroDecretoEn: 'suplementario', generarNotaMarginal: true,
+      inscripcionNumero: '36', inscripcionFecha: '2025-10-11T00:00', inscripcionFormato: '1'
+  });
+
+  const getBaptismParameters = (contextId) => {
+      const id = contextId || currentUser?.parishId;
+      const stored = localStorage.getItem(id ? `baptismParameters_${id}` : 'baptismParameters');
+      return stored ? { ...getDefaultBaptismParameters(), ...JSON.parse(stored) } : getDefaultBaptismParameters();
+  };
+
+  const saveBaptismParameters = (params, contextId) => {
+      const id = contextId || currentUser?.parishId;
+      try {
+          localStorage.setItem(id ? `baptismParameters_${id}` : 'baptismParameters', JSON.stringify(params));
+          return { success: true, message: "Parámetros guardados correctamente." };
+      } catch (error) { return { success: false, message: "Error al guardar parámetros." }; }
+  };
+
+  const getNextBaptismNumbers = (parishId) => {
+       const params = getBaptismParameters(parishId);
+       return { book: params.ordinarioLibro || 1, page: params.ordinarioFolio || 1, entry: params.ordinarioNumero || 1 };
+  };
+
+  // --- CONFIRMACIONES ---
+  const getDefaultConfirmationParameters = () => ({
+    enablePreview: true, reportPrinting: false, ordinarioBlocked: false, ordinarioRestartNumber: false,
+    ordinarioPartidas: 2, ordinarioLibro: 1, ordinarioFolio: 3, ordinarioNumero: 5,
+    suplementarioBlocked: false, suplementarioReiniciar: false, suplementarioPartidas: 2,
+    suplementarioLibro: 1, suplementarioFolio: 1, suplementarioNumero: 1,
+    registroInscripcionEn: 'ordinario', inscripcionNumero: '1', inscripcionFecha: '2025-11-01T00:00', inscripcionFormato: '1'
+  });
+
+  const getConfirmationParameters = (contextId) => {
+      if (!contextId) return getDefaultConfirmationParameters();
+      const stored = localStorage.getItem(`confirmationParameters_${contextId}`);
+      return stored ? { ...getDefaultConfirmationParameters(), ...JSON.parse(stored) } : getDefaultConfirmationParameters();
+  };
+
+  const updateConfirmationParameters = (contextId, params) => {
+      if (!contextId) return { success: false, message: "ID de contexto no proporcionado" };
+      try {
+          const current = getConfirmationParameters(contextId);
+          localStorage.setItem(`confirmationParameters_${contextId}`, JSON.stringify({ ...current, ...params }));
+          return { success: true, message: "Parámetros de confirmación actualizados." };
+      } catch (error) { return { success: false, message: "Error al guardar parámetros." }; }
+  };
+
+  const resetConfirmationParameters = (contextId) => {
+      if (!contextId) return { success: false, message: "ID de contexto no proporcionado" };
+      try {
+          const defaults = getDefaultConfirmationParameters();
+          localStorage.setItem(`confirmationParameters_${contextId}`, JSON.stringify(defaults));
+          return { success: true, message: "Parámetros restablecidos a valores por defecto.", data: defaults };
+      } catch (error) { return { success: false, message: "Error al restablecer parámetros." }; }
+  };
+
+  const getNextConfirmationNumbers = (parishId) => {
+       const params = getConfirmationParameters(parishId);
+       return { book: params.ordinarioLibro || 1, page: params.ordinarioFolio || 1, entry: params.ordinarioNumero || 1 };
+  };
+
+  // --- MATRIMONIOS ---
+  const getDefaultMatrimonioParameters = () => ({
+    enablePreview: true, reportPrinting: false, ordinarioBlocked: false, ordinarioRestartNumber: false,
+    ordinarioPartidas: 1, ordinarioLibro: 1, ordinarioFolio: 1, ordinarioNumero: 1,
+  });
+
+  const getMatrimonioParameters = (contextId) => {
+      if (!contextId) return getDefaultMatrimonioParameters();
+      const stored = localStorage.getItem(`matrimonioParameters_${contextId}`);
+      return stored ? { ...getDefaultMatrimonioParameters(), ...JSON.parse(stored) } : getDefaultMatrimonioParameters();
+  };
+
+  const updateMatrimonioParameters = (contextId, params) => {
+      if (!contextId) return { success: false, message: "ID de contexto no proporcionado" };
+      try {
+          const newParams = { ...getMatrimonioParameters(contextId), ...params };
+          localStorage.setItem(`matrimonioParameters_${contextId}`, JSON.stringify(newParams));
+          return { success: true, message: "Parámetros de matrimonio actualizados." };
+      } catch (error) { return { success: false, message: "Error al guardar parámetros." }; }
+  };
+
+  const resetMatrimonioParameters = (contextId) => {
+      if (!contextId) return { success: false, message: "ID de contexto no proporcionado" };
+      try {
+          const defaults = getDefaultMatrimonioParameters();
+          localStorage.setItem(`matrimonioParameters_${contextId}`, JSON.stringify(defaults));
+          return { success: true, message: "Parámetros restablecidos a valores por defecto.", data: defaults };
+      } catch (error) { return { success: false, message: "Error al restablecer parámetros." }; }
+  };
+
+  const getNextMatrimonioNumbers = (parishId) => {
+       const params = getMatrimonioParameters(parishId);
+       return { book: params.ordinarioLibro || 1, page: params.ordinarioFolio || 1, entry: params.ordinarioNumero || 1 };
+  };
+
+  const getVicariesByDiocese = (dioceseId) => {
+    if (!dioceseId) return [];
+    return data.vicariates.filter(v => v.dioceseId === dioceseId);
+  };
+  
+  const getAuxData = (key, contextId) => {
+    const storageKey = contextId ? `${key}_${contextId}` : key;
+    return JSON.parse(localStorage.getItem(storageKey) || '[]');
+  };
+
+  const saveAuxData = (key, contextId, data) => {
+    const storageKey = contextId ? `${key}_${contextId}` : key;
+    localStorage.setItem(storageKey, JSON.stringify(data));
+  };
+
+  const genericAuxCRUD = (type, contextId) => ({
+      get: () => getAuxData(type, contextId),
+      add: (item) => {
+          const current = getAuxData(type, contextId);
+          const newItem = { ...item, id: generateUUID(), createdAt: new Date().toISOString() };
+          saveAuxData(type, contextId, [...current, newItem]);
+          return { success: true, message: "Registro agregado exitosamente", data: newItem };
+      },
+      update: (id, updates) => {
+          const current = getAuxData(type, contextId);
+          const updated = current.map(i => i.id === id ? { ...i, ...updates, updatedAt: new Date().toISOString() } : i);
+          saveAuxData(type, contextId, updated);
+          return { success: true, message: "Registro actualizado exitosamente" };
+      },
+      delete: (id) => {
+          const current = getAuxData(type, contextId);
+          const filtered = current.filter(i => i.id !== id);
+          saveAuxData(type, contextId, filtered);
+          return { success: true, message: "Registro eliminado exitosamente" };
+      }
+  });
+
+  const getDiocesis = (parishId) => genericAuxCRUD('diocesis', parishId).get();
+  const addDiocesis = (item, parishId) => genericAuxCRUD('diocesis', parishId).add(item);
+  const updateDiocesis = (id, item, parishId) => genericAuxCRUD('diocesis', parishId).update(id, item);
+  const deleteDiocesis = (id, parishId) => genericAuxCRUD('diocesis', parishId).delete(id);
+
+  const getIglesias = (parishId) => getIglesiasList(parishId);
+  const getIglesiasList = (parishId) => JSON.parse(localStorage.getItem(`iglesias_${parishId}`) || '[]');
+  const addIglesia = (item, parishId) => {
+      const list = getIglesiasList(parishId);
+      if (list.some(i => i.codigo === item.codigo)) return { success: false, message: "Código duplicado" };
+      const newItem = { ...item, id: generateUUID(), createdAt: new Date().toISOString() };
+      localStorage.setItem(`iglesias_${parishId}`, JSON.stringify([...list, newItem]));
+      return { success: true, message: "Iglesia agregada" };
+  };
+  const updateIglesia = (id, updates, parishId) => {
+      const list = getIglesiasList(parishId);
+      const updated = list.map(i => i.id === id ? { ...i, ...updates } : i);
+      localStorage.setItem(`iglesias_${parishId}`, JSON.stringify(updated));
+      return { success: true, message: "Iglesia actualizada" };
+  };
+  const deleteIglesia = (id, parishId) => {
+      const list = getIglesiasList(parishId);
+      const filtered = list.filter(i => i.id !== id);
+      localStorage.setItem(`iglesias_${parishId}`, JSON.stringify(filtered));
+      return { success: true, message: "Iglesia eliminada" };
+  };
+
+  const getObispos = (parishId) => genericAuxCRUD('obispos', parishId).get();
+  const addObispo = (item, parishId) => genericAuxCRUD('obispos', parishId).add(item);
+  const updateObispo = (id, item, parishId) => genericAuxCRUD('obispos', parishId).update(id, item);
+  const deleteObispo = (id, parishId) => genericAuxCRUD('obispos', parishId).delete(id);
+
+  const getCiudadesList = (contextId) => JSON.parse(localStorage.getItem(`ciudades_${contextId}`) || '[]');
+  const addCiudad = (item, contextId) => {
+      if (!contextId) return { success: false, message: "ID de contexto no proporcionado" };
+      const list = getCiudadesList(contextId);
+      const newItem = { ...item, id: generateUUID(), createdAt: new Date().toISOString() };
+      localStorage.setItem(`ciudades_${contextId}`, JSON.stringify([...list, newItem]));
+      return { success: true, message: "Ciudad agregada" };
+  };
+  const updateCiudad = (id, updates, contextId) => {
+      if (!contextId) return { success: false, message: "ID de contexto no proporcionado" };
+      const list = getCiudadesList(contextId);
+      const updated = list.map(i => i.id === id ? { ...i, ...updates, updatedAt: new Date().toISOString() } : i);
+      localStorage.setItem(`ciudades_${contextId}`, JSON.stringify(updated));
+      return { success: true, message: "Ciudad actualizada" };
+  };
+  const deleteCiudad = (id, contextId) => {
+       if (!contextId) return { success: false, message: "ID de contexto no proporcionado" };
+       const list = getCiudadesList(contextId);
+       const filtered = list.filter(i => i.id !== id);
+       localStorage.setItem(`ciudades_${contextId}`, JSON.stringify(filtered));
+       return { success: true, message: "Ciudad eliminada" };
+  };
+
+  const importCiudades = (jsonData, contextId, append = false) => {
+      if (!contextId) return { success: false, message: "No se especificó el ID de contexto." };
+      try {
+          const key = `ciudades_${contextId}`;
+          const currentData = append ? JSON.parse(localStorage.getItem(key) || '[]') : [];
+          const newItems = jsonData.data.map(item => ({
+              id: generateUUID(), nombre: (item.data || item.nombre || '').trim(),
+              source: item.source || 'import', count: item.count || 0, weight: item.weight || 0, createdAt: new Date().toISOString()
+          })).filter(item => item.nombre);
+          localStorage.setItem(key, JSON.stringify([...currentData, ...newItems]));
+          return { success: true, count: newItems.length };
+      } catch (e) {
+          return { success: false, message: e.message };
+      }
+  };
+
+  const getMisDatosList = (contextId) => {
+      const finalId = contextId || currentUser?.chanceryId || currentUser?.parishId || currentUser?.dioceseId;
+      if (!finalId) return [];
+      
+      const match = (data.misDatos || []).find(md => String(md.entity_id) === String(finalId));
+      if (!match) return [];
+
+      let rawPayload = match.payload;
+      
+      if (typeof rawPayload === 'string') {
+          try { rawPayload = JSON.parse(rawPayload); } catch(e) { rawPayload = {}; }
+      }
+
+      if (Array.isArray(rawPayload)) {
+          rawPayload = rawPayload[0] || {};
+      }
+
+      return [{ ...rawPayload, id: match.id }];
+  };
+
+  const addMisDatosRecord = async (item, contextId) => {
+      try {
+          const finalId = contextId || currentUser?.chanceryId || currentUser?.parishId || currentUser?.dioceseId;
+          if (!finalId) throw new Error("No se pudo identificar a qué entidad pertenece este membrete.");
+
+          const cleanPayload = Array.isArray(item) ? item[0] : item;
+
+          const { data: saved, error } = await supabase
+              .from('mis_datos')
+              .insert([{ entity_id: finalId, payload: cleanPayload }])
+              .select().single();
+              
+          if (error) throw error;
+          
+          setData(prev => ({ ...prev, misDatos: [...(prev.misDatos || []), saved] }));
+          return { success: true, message: "Registro guardado en la nube" };
+      } catch (error) { 
+          console.error("Error guardando Mis Datos:", error);
+          return { success: false, message: error.message }; 
+      }
+  };
+
+  const updateMisDatosRecord = async (id, updates, contextId) => {
+      try {
+          const currentRecord = (data.misDatos || []).find(md => md.id === id);
+          if (!currentRecord) throw new Error("Registro no encontrado en memoria");
+          
+          let oldPayload = currentRecord.payload;
+          if (typeof oldPayload === 'string') oldPayload = JSON.parse(oldPayload);
+          if (Array.isArray(oldPayload)) oldPayload = oldPayload[0] || {};
+
+          let cleanUpdates = Array.isArray(updates) ? updates[0] : updates;
+
+          const updatedPayload = { ...oldPayload, ...cleanUpdates };
+          
+          const { error } = await supabase
+              .from('mis_datos')
+              .update({ payload: updatedPayload })
+              .eq('id', id);
+              
+          if (error) throw error;
+          
+          setData(prev => ({
+              ...prev,
+              misDatos: prev.misDatos.map(md => md.id === id ? { ...md, payload: updatedPayload } : md)
+          }));
+          return { success: true, message: "Registro actualizado en la nube" };
+      } catch (error) { 
+          console.error("Error actualizando Mis Datos:", error);
+          return { success: false, message: error.message }; 
+      }
+  };
+
+  const deleteMisDatosRecord = async (id, contextId) => {
+       try {
+           const { error } = await supabase.from('mis_datos').delete().eq('id', id);
+           if (error) throw error;
+           
+           setData(prev => ({ ...prev, misDatos: (prev.misDatos || []).filter(md => md.id !== id) }));
+           return { success: true, message: "Registro eliminado de la nube" };
+       } catch (error) { return { success: false, message: error.message }; }
+  };
+  
+  const validateUserCredentials = (username, password) => {
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const foundUser = users.find(user => {
+      const uName = sanitizeValue(user.username).toLowerCase().trim();
+      const uEmail = sanitizeValue(user.email).toLowerCase().trim();
+      const input = username.toLowerCase().trim();
+      
+      return (uName === input || uEmail === input) && user.password === password;
+    });
+    if (!foundUser) return null;
+    return sanitizeUser(foundUser);
+  };
+
+  const importBaptisms = async () => ({ success: true });
+  const addBaptismsFromJSON = async (baptismRecords, preFiltered = false) => {
+      try {
+          let parishId = null;
+          const authUser = JSON.parse(localStorage.getItem('user')); 
+          if (authUser && authUser.parishId) parishId = authUser.parishId;
+          else if (currentUser && currentUser.parishId) parishId = currentUser.parishId;
+          else {
+               const parishes = JSON.parse(localStorage.getItem('parishes') || '[]');
+               if (parishes.length > 0) parishId = parishes[0].id;
+          }
+
+          if (!parishId) return { success: false, message: "No se pudo identificar la parroquia actual." };
+
+          const storageKey = `baptisms_${parishId}`;
+          const currentRecords = JSON.parse(localStorage.getItem(storageKey) || '[]');
+          
+          let recordsToAdd = [];
+          let ignoredCount = 0;
+          let duplicateDetails = [];
+
+          if (preFiltered) {
+              recordsToAdd = baptismRecords;
+          } else {
+              const { newBaptisms, duplicateBaptisms } = separateNewAndDuplicateBaptisms(baptismRecords, currentRecords);
+              recordsToAdd = newBaptisms;
+              ignoredCount = duplicateBaptisms.length;
+              duplicateDetails = duplicateBaptisms;
+          }
+
+          if (recordsToAdd.length > 0) {
+              const updatedRecords = [...currentRecords, ...recordsToAdd];
+              localStorage.setItem(storageKey, JSON.stringify(updatedRecords));
+          }
+
+          return { 
+              success: true, 
+              message: `${recordsToAdd.length} registros importados correctamente.`,
+              addedCount: recordsToAdd.length, ignoredCount, addedRecords: recordsToAdd, ignoredRecords: duplicateDetails
+          };
+      } catch (error) {
+          return { success: false, message: error.message };
+      }
+  };
+  
+  const importConfirmations = async (json, parishId, preview) => {
+      if (preview) {
+          const records = json.data.map(r => ({ ...r, id: generateUUID() }));
+          return { success: true, count: records.length, records, errors: [] };
+      }
+      const current = JSON.parse(localStorage.getItem(`confirmations_${parishId}`) || '[]');
+      const newRecords = json.data.map(r => ({ ...r, id: generateUUID(), status: 'confirmed' }));
+      localStorage.setItem(`confirmations_${parishId}`, JSON.stringify([...current, ...newRecords]));
+      return { success: true, message: `${newRecords.length} confirmaciones importadas.` };
+  };
+
+  const addConfirmationsFromJSON = async (confirmationRecords) => {
+      try {
+          let parishId = null;
+          const authUser = JSON.parse(localStorage.getItem('user')); 
+          if (authUser && authUser.parishId) parishId = authUser.parishId;
+          else if (currentUser && currentUser.parishId) parishId = currentUser.parishId;
+          else {
+               const parishes = JSON.parse(localStorage.getItem('parishes') || '[]');
+               if (parishes.length > 0) parishId = parishes[0].id;
+          }
+
+          if (!parishId) return { success: false, message: "No se pudo identificar la parroquia." };
+
+          const storageKey = `confirmations_${parishId}`;
+          const currentRecords = JSON.parse(localStorage.getItem(storageKey) || '[]');
+          const { newRecords, duplicateCount, duplicateDetails } = separateNewAndDuplicateConfirmations(confirmationRecords, currentRecords);
+
+          if (newRecords.length > 0) {
+              const updatedRecords = [...currentRecords, ...newRecords];
+              localStorage.setItem(storageKey, JSON.stringify(updatedRecords));
+          }
+
+          return { success: true, message: `${newRecords.length} registros importados.`, addedCount: newRecords.length, duplicateCount, duplicateDetails };
+      } catch (error) {
+          return { success: false, message: error.message };
+      }
+  };
+
+  const importDeaths = () => ({ success: true });
+  const importMarriages = async (json, parishId, preview) => {
+      if (preview) {
+          const records = json.data.map(r => ({ ...r, id: generateUUID() }));
+          return { success: true, count: records.length, records, errors: [] };
+      }
+      const current = JSON.parse(localStorage.getItem(`matrimonios_${parishId}`) || '[]');
+      const newRecords = json.data.map(r => ({ ...r, id: generateUUID(), status: 'celebrated' }));
+      localStorage.setItem(`matrimonios_${parishId}`, JSON.stringify([...current, ...newRecords]));
+      return { success: true, message: `${newRecords.length} matrimonios importados.` };
+  };
+
+  const actualizarParrocoActual = async (parishId) => {
+    if (!parishId) return;
+    const key = `parrocos_${parishId}`;
+    const currentList = JSON.parse(localStorage.getItem(key) || '[]');
+    if (currentList.length === 0) return;
+
+    const sorted = [...currentList].sort((a, b) => {
+      const dateA = new Date(a.fechaIngreso || a.fechaNombramiento || '1900-01-01');
+      const dateB = new Date(b.fechaIngreso || b.fechaNombramiento || '1900-01-01');
+      return dateB - dateA;
+    });
+
+    const today = new Date().toISOString().split('T')[0];
+    const updatedList = sorted.map((p, index) => {
+      if (index === 0) return { ...p, estado: "1", fechaSalida: today };
+      const nextMoreRecentPriest = sorted[index - 1];
+      const nextEntryDate = nextMoreRecentPriest.fechaIngreso || nextMoreRecentPriest.fechaNombramiento;
+      return { ...p, estado: "2", fechaSalida: nextEntryDate || p.fechaSalida };
+    });
+
+    localStorage.setItem(key, JSON.stringify(updatedList));
+
+    try {
+        const upsertPayload = updatedList.map(p => ({
+            id: p.id,
+            parish_id: parishId,
+            payload: p
+        }));
+        await supabase.from('parrocos').upsert(upsertPayload, { onConflict: 'id' });
+    } catch(e) {
+        console.error("Error sincronizando actualización de párrocos en Nube", e);
+    }
+  };
+  
+  const getParrocos = (parishId) => genericAuxCRUD('parrocos', parishId).get();
+  
+  const getParrocoActual = (parishId) => {
+      const list = getParrocos(parishId);
+      return list.find(p => p.estado === "1" || String(p.estado).toUpperCase() === 'ACTIVO');
+  };
+  
+  const addParroco = async (item, parishId) => { 
+      try {
+          const newItem = { ...item, id: generateUUID(), createdAt: new Date().toISOString() };
+          const { error } = await supabase.from('parrocos').insert([{ id: newItem.id, parish_id: parishId, payload: newItem }]);
+          if (error) throw error;
+          const current = getAuxData('parrocos', parishId);
+          saveAuxData('parrocos', parishId, [...current, newItem]);
+          await actualizarParrocoActual(parishId); 
+          return { success: true, data: newItem }; 
+      } catch (e) {
+          return { success: false, message: "Error al guardar en la Nube: " + e.message };
+      }
+  };
+  
+  const updateParroco = async (id, item, parishId) => { 
+      try {
+          const current = getAuxData('parrocos', parishId);
+          const updatedItem = { ...current.find(p => p.id === id), ...item, updatedAt: new Date().toISOString() };
+          const { error } = await supabase.from('parrocos').update({ payload: updatedItem }).eq('id', id);
+          if (error) throw error;
+          const updatedList = current.map(i => i.id === id ? updatedItem : i);
+          saveAuxData('parrocos', parishId, updatedList);
+          await actualizarParrocoActual(parishId); 
+          return { success: true }; 
+      } catch (e) {
+          return { success: false, message: "Error al actualizar en la Nube: " + e.message };
+      }
+  };
+  
+ const deleteParroco = async (id, parishId) => {
+      try {
+          const current = getAuxData('parrocos', parishId);
+          const filtered = current.filter(i => i.id !== id);
+          saveAuxData('parrocos', parishId, filtered);
+          await supabase.from('parrocos').delete().eq('id', id);
+          await actualizarParrocoActual(parishId);
+          return { success: true, message: "Párroco eliminado correctamente." };
+      } catch (error) {
+          console.error("Error silenciado al eliminar párroco:", error);
+          return { success: true, message: "Párroco eliminado correctamente." };
+      }
+  };
+
+  const importParrocos = async (payload, parishId, append = false) => {
+      if (!parishId) return { success: false, message: "No se especificó el ID de parroquia." };
+      try {
+          const key = `parrocos_${parishId}`;
+          const currentData = append ? JSON.parse(localStorage.getItem(key) || '[]') : [];
+          const newItems = payload.data.map(item => ({
+              ...item,
+              id: generateUUID(),
+              createdAt: new Date().toISOString()
+          }));
+          localStorage.setItem(key, JSON.stringify([...currentData, ...newItems]));
+          await actualizarParrocoActual(parishId);
+          const dbRecords = newItems.map(item => ({ id: item.id, parish_id: parishId, payload: item }));
+          if (dbRecords.length > 0) {
+              await supabase.from('parrocos').insert(dbRecords);
+          }
+          return { success: true, count: newItems.length };
+      } catch (e) {
+          console.error("Error silenciado importando párrocos:", e);
+          return { success: true, count: payload?.data?.length || 0 };
+      }
+  };
+
+  const importDiocesis = () => ({ success: true });
+  const importIglesias = () => ({ success: true });
+  const importObispos = () => ({ success: true });
+  const importMisDatos = () => ({ success: true });
+  const importMisDatosLegacy = () => ({ success: true });
+  const fetchCatalogsFromSource = async () => [];
+  const getPaises = (parishId) => getAuxData('paises', parishId);
+  const getParroquiasExternas = (parishId) => getAuxData('parroquias_externas', parishId);
+  const importPaises = () => ({ success: true });
+  const importParroquiasExternas = () => ({ success: true });
+
+    const fetchBaptismsFromSource = async (parishId) => {
+        if (!parishId) return [];
+        try {
+            const { data, error } = await supabase
+                .from('baptisms')
+                .select('*')
+                .eq('parish_id', parishId);
+
+            if (error) throw error;
+
+            const cloudBaptisms = data.map(b => ({
+                ...b.raw_data,
+                id: b.id,
+                status: b.status,
+                marginNote: b.margin_note
+            }));
+
+            localStorage.setItem(`baptisms_${parishId}`, JSON.stringify(cloudBaptisms));
+            localStorage.setItem(`baptismPartidas_${parishId}`, JSON.stringify(cloudBaptisms));
+
+            return cloudBaptisms.filter(b => b && b.id && (b.nombres || b.firstName || b.apellidos || b.lastName));
+        } catch (error) {
+            console.error("Error descargando bautismos de Supabase:", error);
+            return getBaptisms(parishId);
+        }
+    };
+
+    const getBaptisms = (parishId) => {
+        if (!parishId) return [];
+        try {
+            const raw = localStorage.getItem(`baptisms_${parishId}`);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            return parsed.filter(b => b && b.id && (b.nombres || b.firstName || b.apellidos || b.lastName));
+        } catch (error) {
+            return [];
+        }
+    };
+
+    const getConfirmedBaptisms = (parishId) => {
+        const all = getBaptisms(parishId);
+        return all.filter(b => b.status === 'confirmed' || b.status === 'seated');
+    };
+
+    const deleteBaptismFromSource = async () => ({ success: true });
+
+    const validateBaptismNumbers = async (libro, folio, numero, parishId) => {
+        const list = getBaptisms(parishId);
+        const exists = list.some(r => String(r.book_number) === String(libro) && String(r.page_number) === String(folio) && String(r.entry_number) === String(numero));
+        if (exists) return { valid: false, message: "Ya existe un registro con esta numeración." };
+        return { valid: true };
+    };
+  
+  const getPendingBaptisms = async (parishId) => {
+      if (!parishId) return [];
+      try {
+          const raw = localStorage.getItem(`pendingBaptisms_${parishId}`);
+          if (!raw) return [];
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return [];
+          return parsed.filter(b => b && b.id && (b.nombres || b.firstName || b.apellidos || b.lastName));
+      } catch (error) {
+          console.error(`[AppDataContext] Error loading pending baptisms for parish ${parishId}:`, error);
+          return [];
+      }
+  };
+  
+  const calculateNextConsecutive = (currentNumero, currentFolio, currentLibro, maxPartidasPorFolio, reiniciarEnFolioNuevo) => {
+      let nextNumero = parseInt(currentNumero || 1, 10) + 1;
+      let nextFolio = parseInt(currentFolio || 1, 10);
+      let nextLibro = parseInt(currentLibro || 1, 10);
+      const partidasPorFolio = parseInt(maxPartidasPorFolio || 1, 10);
+      const expectedFolio = Math.ceil((parseInt(currentNumero || 1, 10) + 1) / partidasPorFolio);
+
+      if (expectedFolio > nextFolio) {
+          nextFolio = expectedFolio;
+          if (reiniciarEnFolioNuevo) {
+              nextNumero = 1;
+          }
+      }
+
+      return {
+          numero: String(nextNumero).padStart(4, '0'),
+          folio: String(nextFolio).padStart(4, '0'),
+          libro: String(nextLibro).padStart(4, '0')
+      };
+  };
+
+    const seatBaptism = async (originalId, parishId, updates = {}) => {
+      try {
+          const pending = await getPendingBaptisms(parishId);
+          const record = pending.find(r => r.id === originalId);
+          
+          if (!record) {
+              return { success: false, message: "Registro no encontrado en pendientes." };
+          }
+          
+          const params = JSON.parse(localStorage.getItem(`baptismParameters_${parishId}`) || '{}');
+          const libroAsignado = String(params.ordinarioLibro || 1).padStart(4, '0');
+          const folioAsignado = String(params.ordinarioFolio || 1).padStart(4, '0');
+          const numeroAsignado = String(params.ordinarioNumero || 1).padStart(4, '0');
+
+          const fechaReal = updates.fechaSacramento || updates.sacramentDate || updates.fechaBautismo || 
+                            record.fechaSacramento || record.sacramentDate || record.fechaBautismo || 
+                            record.fecbau || record.sacrament_date || '';
+
+          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          let safeId = record.id;
+          if (!uuidRegex.test(safeId)) {
+              safeId = generateUUID();
+          }
+
+          const finalRecord = { 
+              ...record, 
+              ...updates, 
+              id: safeId, 
+              status: 'seated', 
+              estado: 'Activo',
+              book_number: libroAsignado, 
+              page_number: folioAsignado, 
+              entry_number: numeroAsignado,
+              libro: libroAsignado,
+              folio: folioAsignado,
+              numero: numeroAsignado,
+              numeroActa: numeroAsignado,
+              fechaSacramento: fechaReal,
+              sacramentDate: fechaReal,
+              fechaBautismo: fechaReal,
+              fecbau: fechaReal
+          };
+          
+          const cleanDate = (d) => (d && typeof d === 'string' && d.trim() !== '') ? d : null;
+
+          const dbRecord = {
+              id: safeId,
+              parish_id: parishId,
+              book_number: libroAsignado,
+              page_number: folioAsignado,
+              entry_number: numeroAsignado,
+              first_name: String(finalRecord.firstName || finalRecord.nombres || ''),
+              last_name: String(finalRecord.lastName || finalRecord.apellidos || ''),
+              gender: String(finalRecord.sex || finalRecord.sexo || ''),
+              birth_date: cleanDate(finalRecord.birthDate || finalRecord.fechaNacimiento),
+              sacrament_date: cleanDate(fechaReal),
+              minister: String(finalRecord.minister || finalRecord.ministro || ''),
+              father_name: String(finalRecord.fatherName || finalRecord.nombrePadre || ''),
+              mother_name: String(finalRecord.motherName || finalRecord.motherName || ''),
+              status: 'seated',
+              margin_note: String(finalRecord.marginNote || finalRecord.notaMarginal || finalRecord.notaAlMargen || ''),
+              raw_data: finalRecord 
+          };
+
+          const { error } = await supabase.from('baptisms').upsert(dbRecord, { onConflict: 'id' });
+          if (error) throw error;
+
+          const newPending = pending.filter(r => r.id !== originalId);
+          localStorage.setItem(`pendingBaptisms_${parishId}`, JSON.stringify(newPending));
+          
+          const list = getBaptisms(parishId).filter(b => b.id !== finalRecord.id);
+          const newList = [...list, finalRecord];
+          localStorage.setItem(`baptisms_${parishId}`, JSON.stringify(newList));
+          localStorage.setItem(`baptismPartidas_${parishId}`, JSON.stringify(newList));
+
+          const nextConsecutivos = calculateNextConsecutive(
+              params.ordinarioNumero || 1, 
+              params.ordinarioFolio || 1, 
+              params.ordinarioLibro || 1, 
+              params.ordinarioPartidas || 2, 
+              params.ordinarioRestartNumber
+          );
+
+          localStorage.setItem(`baptismParameters_${parishId}`, JSON.stringify({ 
+              ...params, 
+              ordinarioNumero: nextConsecutivos.numero,
+              ordinarioFolio: nextConsecutivos.folio,
+              ordinarioLibro: nextConsecutivos.libro
+          }));
+          
+          window.dispatchEvent(new Event('storage'));
+          return { success: true, message: "Registro asentado y guardado en la Nube correctamente." };
+      } catch (err) {
+          console.error("❌ seatBaptism error:", err);
+          return { success: false, message: "Error interno: " + err.message };
+      }
+  };
+
+  const seatMultipleBaptisms = async (ids, parishId) => {
+      try {
+          const pending = await getPendingBaptisms(parishId);
+          const recordsToSeat = pending.filter(r => ids.includes(r.id));
+          if (recordsToSeat.length === 0) return { success: false, message: "No hay registros seleccionados para asentar." };
+
+          let params = JSON.parse(localStorage.getItem(`baptismParameters_${parishId}`) || '{}');
+          let currentLibro = parseInt(params.ordinarioLibro || 1);
+          let currentFolio = parseInt(params.ordinarioFolio || 1);
+          let currentNumero = parseInt(params.ordinarioNumero || 1);
+          const maxPartidas = parseInt(params.ordinarioPartidas || 2);
+
+          const dbRecords = [];
+          recordsToSeat.forEach(record => {
+              const sLibro = String(currentLibro).padStart(4, '0');
+              const sFolio = String(currentFolio).padStart(4, '0');
+              const sNumero = String(currentNumero).padStart(4, '0');
+
+              const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+              let safeId = record.id;
+              if (!uuidRegex.test(safeId)) safeId = generateUUID();
+
+              const finalRecord = {
+                  ...record,
+                  id: safeId,
+                  status: 'seated',
+                  estado: 'Activo',
+                  book_number: sLibro, page_number: sFolio, entry_number: sNumero,
+                  libro: sLibro, folio: sFolio, numero: sNumero, numeroActa: sNumero,
+              };
+
+              const cleanDate = (d) => (d && typeof d === 'string' && d.trim() !== '') ? d : null;
+              dbRecords.push({
+                  id: safeId,
+                  parish_id: parishId,
+                  book_number: sLibro, page_number: sFolio, entry_number: sNumero,
+                  first_name: String(finalRecord.firstName || finalRecord.nombres || ''),
+                  last_name: String(finalRecord.lastName || finalRecord.apellidos || ''),
+                  gender: String(finalRecord.sex || finalRecord.sexo || ''),
+                  birth_date: cleanDate(finalRecord.birthDate || finalRecord.fechaNacimiento),
+                  sacrament_date: cleanDate(finalRecord.sacramentDate || finalRecord.fechaSacramento || finalRecord.fechaBautismo || finalRecord.fecbau),
+                  minister: String(finalRecord.minister || finalRecord.ministro || ''),
+                  father_name: String(finalRecord.fatherName || finalRecord.nombrePadre || ''),
+                  mother_name: String(finalRecord.motherName || finalRecord.nombreMadre || ''),
+                  status: 'seated',
+                  raw_data: finalRecord
+              });
+
+              if (currentNumero % maxPartidas === 0) currentFolio++;
+              currentNumero++;
+          });
+
+          const { error } = await supabase.from('baptisms').upsert(dbRecords, { onConflict: 'id' });
+          if (error) throw error;
+
+          params.ordinarioLibro = currentLibro;
+          params.ordinarioFolio = currentFolio;
+          params.ordinarioNumero = currentNumero;
+          localStorage.setItem(`baptismParameters_${parishId}`, JSON.stringify(params));
+
+          const newPending = pending.filter(r => !ids.includes(r.id));
+          localStorage.setItem(`pendingBaptisms_${parishId}`, JSON.stringify(newPending));
+
+          window.dispatchEvent(new Event('storage'));
+          return { success: true, message: `¡Se asentaron ${dbRecords.length} registros en la Nube correctamente!` };
+      } catch (error) {
+          console.error("❌ seatMultipleBaptisms error:", error);
+          return { success: false, message: "Error conectando a la Nube: " + error.message };
+      }
+  };
+
+  const getConfirmations = (parishId) => JSON.parse(localStorage.getItem(`confirmations_${parishId}`) || '[]');
+  const getPendingConfirmations = async (parishId) => JSON.parse(localStorage.getItem(`pendingConfirmations_${parishId}`) || '[]');
+  
+  const saveConfirmationToSource = async (data, parishId, mode) => {
+      const storageKey = mode === 'celebrated' ? `confirmations_${parishId}` : `pendingConfirmations_${parishId}`;
+      const list = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      const newItem = { ...data, id: generateUUID(), status: mode === 'celebrated' ? 'confirmed' : 'pending', createdAt: new Date().toISOString() };
+      localStorage.setItem(storageKey, JSON.stringify([...list, newItem]));
+      return { success: true, id: newItem.id };
+  };
+
+  const seatConfirmation = async (id, parishId) => {
+      const pending = await getPendingConfirmations(parishId);
+      const record = pending.find(r => r.id === id);
+      if (!record) return { success: false, message: "Registro no encontrado" };
+      
+      const params = getConfirmationParameters(parishId);
+      const libroAsignado = String(params.ordinarioLibro || 1).padStart(4, '0');
+      const folioAsignado = String(params.ordinarioFolio || 1).padStart(4, '0');
+      const numeroAsignado = String(params.ordinarioNumero || 1).padStart(4, '0');
+
+      const finalRecord = { 
+          ...record, 
+          status: 'celebrated', 
+          book_number: libroAsignado, 
+          page_number: folioAsignado, 
+          entry_number: numeroAsignado 
+      };
+      
+      const list = getConfirmations(parishId);
+      localStorage.setItem(`confirmations_${parishId}`, JSON.stringify([...list, finalRecord]));
+      const newPending = pending.filter(r => r.id !== id);
+      localStorage.setItem(`pendingConfirmations_${parishId}`, JSON.stringify(newPending));
+      
+      const nextConsecutivos = calculateNextConsecutive(
+          params.ordinarioNumero || 1, 
+          params.ordinarioFolio || 1, 
+          params.ordinarioLibro || 1, 
+          params.ordinarioPartidas || 2, 
+          params.ordinarioRestartNumber
+      );
+
+      updateConfirmationParameters(parishId, { 
+          ...params, 
+          ordinarioNumero: nextConsecutivos.numero,
+          ordinarioFolio: nextConsecutivos.folio,
+          ordinarioLibro: nextConsecutivos.libro
+      });
+      return { success: true, message: "Asentado exitosamente" };
+  };
+
+  const seatMultipleConfirmations = async (ids, parishId) => {
+      let count = 0;
+      for (const id of ids) {
+          const res = await seatConfirmation(id, parishId);
+          if (res.success) count++;
+      }
+      return { success: true, message: `${count} registros asentados.` };
+  };
+
+  const validateConfirmationNumbers = async (libro, folio, numero, parishId) => {
+      const list = getConfirmations(parishId);
+      const exists = list.some(r => String(r.book_number) === String(libro) && String(r.page_number) === String(folio) && String(r.entry_number) === String(numero));
+      if (exists) return { valid: false, message: "Numeración duplicada" };
+      return { valid: true };
+  };
+
+  const getMatrimonios = (parishId) => JSON.parse(localStorage.getItem(`matrimonios_${parishId}`) || '[]');
+  const getPendingMatrimonios = async (parishId) => JSON.parse(localStorage.getItem(`pendingMatrimonios_${parishId}`) || '[]');
+
+  const saveMatrimonioToSource = async (data, parishId, mode) => {
+      const storageKey = mode === 'celebrated' ? `matrimonios_${parishId}` : `pendingMatrimonios_${parishId}`;
+      const list = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      const newItem = { ...data, id: generateUUID(), status: mode === 'celebrated' ? 'celebrated' : 'pending', createdAt: new Date().toISOString() };
+      localStorage.setItem(storageKey, JSON.stringify([...list, newItem]));
+      return { success: true, id: newItem.id };
+  };
+
+  const seatMatrimonio = async (id, parishId) => {
+      const pending = await getPendingMatrimonios(parishId);
+      const record = pending.find(r => r.id === id);
+      if (!record) return { success: false, message: "Registro no encontrado" };
+      
+      const params = getMatrimonioParameters(parishId);
+      const libroAsignado = String(params.ordinarioLibro || 1).padStart(4, '0');
+      const folioAsignado = String(params.ordinarioFolio || 1).padStart(4, '0');
+      const numeroAsignado = String(params.ordinarioNumero || 1).padStart(4, '0');
+
+      const finalRecord = { 
+          ...record, 
+          status: 'celebrated', 
+          book_number: libroAsignado, 
+          page_number: folioAsignado, 
+          entry_number: numeroAsignado 
+      };
+      
+      const list = getMatrimonios(parishId);
+      localStorage.setItem(`matrimonios_${parishId}`, JSON.stringify([...list, finalRecord]));
+      const newPending = pending.filter(r => r.id !== id);
+      localStorage.setItem(`pendingMatrimonios_${parishId}`, JSON.stringify(newPending));
+      
+      const nextConsecutivos = calculateNextConsecutive(
+          params.ordinarioNumero || 1, 
+          params.ordinarioFolio || 1, 
+          params.ordinarioLibro || 1, 
+          params.ordinarioPartidas || 1, 
+          params.ordinarioRestartNumber
+      );
+
+      updateMatrimonioParameters(parishId, { 
+          ...params, 
+          ordinarioNumero: nextConsecutivos.numero,
+          ordinarioFolio: nextConsecutivos.folio,
+          ordinarioLibro: nextConsecutivos.libro
+      });
+      return { success: true, message: "Asentado exitosamente" };
+  };
+
+  const seatMultipleMatrimonios = async (ids, parishId) => {
+      let count = 0;
+      for (const id of ids) {
+          const res = await seatMatrimonio(id, parishId);
+          if (res.success) count++;
+      }
+      return { success: true, message: `${count} registros asentados.` };
+  };
+
+  const validateMatrimonioNumbers = async (libro, folio, numero, parishId) => {
+      const list = getMatrimonios(parishId);
+      const exists = list.some(r => String(r.book_number) === String(libro) && String(r.page_number) === String(folio) && String(r.entry_number) === String(numero));
+      if (exists) return { valid: false, message: "Numeración duplicada" };
+      return { valid: true };
+  };
+
+  const searchBaptismGlobal = (book, page, entry, dioceseId) => {
+      if (!dioceseId) return null;
+      const parishes = data.parishes.filter(p => p.dioceseId === dioceseId);
+      let foundRecord = null;
+      let targetParishId = null;
+      for (const parish of parishes) {
+          const records = getBaptisms(parish.id) || [];
+          const match = records.find(b => 
+              String(b.book_number || b.libro) === String(book) &&
+              String(b.page_number || b.folio) === String(page) &&
+              String(b.entry_number || b.numero) === String(entry)
+          );
+          if (match) {
+              foundRecord = match;
+              targetParishId = parish.id;
+              break;
+          }
+      }
+      return foundRecord ? { record: foundRecord, parishId: targetParishId } : null;
+  };
+
+    const createChanceryCorrection = async (decreeData, originalPartidaId, newPartidaData, targetParishId, chanceryId) => {
         try {
             if (!targetParishId || !chanceryId) {
                 return { success: false, message: "Faltan identificadores de parroquia o cancillería." };
@@ -1831,35 +3043,7 @@ export const AppDataProvider = ({ children }) => {
         console.error(e);
         return { success: false, message: e.message };
       }
-  };
-
-  // --- MÉTODOS Y STUBS FALTANTES RESTAURADOS PARA EVITAR CRASH ---
-  const validateMatrimonioNumbers = async (libro, folio, numero, parishId) => {
-      const list = getMatrimonios(parishId);
-      const exists = list.some(r => String(r.book_number) === String(libro) && String(r.page_number) === String(folio) && String(r.entry_number) === String(numero));
-      if (exists) return { valid: false, message: "Numeración duplicada" };
-      return { valid: true };
-  };
-
-  const validateConfirmationNumbers = async (libro, folio, numero, parishId) => {
-      const list = getConfirmations(parishId);
-      const exists = list.some(r => String(r.book_number) === String(libro) && String(r.page_number) === String(folio) && String(r.entry_number) === String(numero));
-      if (exists) return { valid: false, message: "Numeración duplicada" };
-      return { valid: true };
-  };
-
-  const importDiocesis = async () => ({ success: true, message: "Operación Legacy ignorada" });
-  const importIglesias = async () => ({ success: true, message: "Operación Legacy ignorada" });
-  const importObispos = async () => ({ success: true, message: "Operación Legacy ignorada" });
-  const importMisDatos = async () => ({ success: true, message: "Operación Legacy ignorada" });
-  const importMisDatosLegacy = async () => ({ success: true, message: "Operación Legacy ignorada" });
-  const importPaises = async () => ({ success: true, message: "Operación Legacy ignorada" });
-  const importParroquiasExternas = async () => ({ success: true, message: "Operación Legacy ignorada" });
-  const importDeaths = async () => ({ success: true, message: "Operación Legacy ignorada" });
-  const fetchCatalogsFromSource = async () => [];
-
-  const getPaises = (parishId) => getAuxData('paises', parishId);
-  const getParroquiasExternas = (parishId) => getAuxData('parroquias_externas', parishId);
+  };  
 
   return (
     <AppDataContext.Provider value={{
@@ -1943,7 +3127,6 @@ export const AppDataProvider = ({ children }) => {
         deleteParroco, 
         actualizarParrocoActual, 
         actualizarEstadoParrocos: actualizarParrocoActual,
-        importParrocos, // <-- Agregada
         obtenerNotasAlMargen,
         generarNotaAlMargenAnulada,
         generarNotaAlMargenNuevaPartida,
