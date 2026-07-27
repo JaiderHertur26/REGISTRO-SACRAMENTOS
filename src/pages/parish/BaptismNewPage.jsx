@@ -158,7 +158,7 @@ const BaptismNewPage = () => {
             const entityId = profile?.parish_id || user?.parishId;
             const newRecordId = generateUUID();
             
-            // Construimos el Payload del Borrador
+            // 1. Construimos el Payload del Borrador
             const registroAEnviar = {
                 ...formData,
                 id: newRecordId,
@@ -168,7 +168,7 @@ const BaptismNewPage = () => {
                 createdAt: new Date().toISOString()
             };
 
-            // 🛡️ PASO 1: Guardar DIRECTO en la tabla temporal de Supabase (Nube)
+            // 🚀 PASO 1: Guardar DIRECTO en la tabla temporal de Supabase (Nube)
             const dbRecord = {
                 id: newRecordId,
                 parish_id: entityId,
@@ -183,42 +183,37 @@ const BaptismNewPage = () => {
 
             if (insertError) throw insertError;
 
-            // Mantenemos una copia en el localStorage para compatibilidad inmediata con la UI
+            // 🚀 PASO 2: Mantener copia local rápida (Para que el carrusel de firmas lo vea al instante)
             const localKey = `pendingBaptisms_${entityId}`;
             const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
             localStorage.setItem(localKey, JSON.stringify([registroAEnviar, ...localData]));
 
-            // 🛡️ PASO 2: Actualizar el correlativo directamente en Supabase
+            // 🚀 PASO 3: Actualizar el correlativo directamente en Supabase
             if (fullParamsCache && fullParamsCache.numeroRegistroActual) {
                 const currentNum = parseInt(fullParamsCache.numeroRegistroActual, 10) || 0;
                 const nextNum = String(currentNum + 1).padStart(6, '0');
                 
-                const updatedParams = { 
-                    ...fullParamsCache, 
-                    numeroRegistroActual: nextNum 
-                };
-                
+                const updatedParams = { ...fullParamsCache, numeroRegistroActual: nextNum };
                 setFullParamsCache(updatedParams);
                 
-                // Actualizamos directo en la Nube
                 await supabase
                     .from('parish_parameters')
                     .update({ bautizos_params: updatedParams })
                     .eq('parish_id', entityId);
             }
             
-            // Refrescar el sistema global
             window.dispatchEvent(new Event('storage'));
+            await new Promise(resolve => setTimeout(resolve, 600)); 
             
             setTicketData(registroAEnviar);
             setIsSuccess(true);
-            toast({ title: "Guardado en Nube ☁️", description: "El borrador ha sido enviado exitosamente.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Guardado en Nube ☁️", description: "Borrador enviado a Supabase exitosamente.", className: "bg-green-50 text-green-900 border-green-200" });
             
             setTimeout(() => window.print(), 500);
 
         } catch (error) {
-            console.error("Error crítico al guardar:", error);
-            toast({ title: "Error de conexión", description: "No se pudo guardar el borrador en la nube.", variant: "destructive" });
+            console.error("Error crítico al guardar en Nube:", error);
+            toast({ title: "Error de conexión", description: "No se pudo guardar en la nube. Verifique su internet.", variant: "destructive" });
         } finally {
             setIsSubmitting(false);
         }
