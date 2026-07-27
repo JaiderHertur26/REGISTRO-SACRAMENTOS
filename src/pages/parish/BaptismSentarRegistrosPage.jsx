@@ -59,18 +59,35 @@ const BaptismSentarRegistrosPage = () => {
         setIsLoading(true);
 
         try {
-            const storedPending = await getPendingBaptisms(entityId);
-            const recordsMapped = storedPending.map(r => {
-                const purificado = purificarRegistroBautismo(r);
-                return {
-                    ...purificado,
-                    numeroRegistro: r.numeroRegistro || purificado.numeroRegistro || '---',
-                    direccion: r.direccion || purificado.direccion || '---',
-                    nuip: r.nuip || purificado.nuip || '---',
-                    oficinaRegistro: r.oficinaRegistro || purificado.oficinaRegistro || '---',
-                    fechaSacramento: r.fechaSacramento || purificado.fechaSacramento 
-                };
-            });
+            // 🚀 1. OBTENER BORRADORES DIRECTO DESDE LA NUBE (SUPABASE)
+            const { data: temp_data, error: temp_error } = await supabase
+                .from('pending_baptisms')
+                .select('*')
+                .eq('parish_id', entityId)
+                .order('created_at', { ascending: false });
+
+            if (temp_error) throw temp_error;
+
+            let recordsMapped = [];
+            
+            if (temp_data) {
+                // Sincronizamos la memoria local para que el Contexto Maestro pueda procesarlos al asentar
+                const cloudPending = temp_data.map(pb => ({ ...pb.raw_data, id: pb.id, status: 'pending' }));
+                localStorage.setItem(`pendingBaptisms_${entityId}`, JSON.stringify(cloudPending));
+
+                // Mapeamos los datos para inyectarlos en la pantalla
+                recordsMapped = cloudPending.map(r => {
+                    const purificado = purificarRegistroBautismo(r);
+                    return {
+                        ...purificado,
+                        numeroRegistro: r.numeroRegistro || purificado.numeroRegistro || '---',
+                        direccion: r.direccion || purificado.direccion || '---',
+                        nuip: r.nuip || purificado.nuip || '---',
+                        oficinaRegistro: r.oficinaRegistro || purificado.oficinaRegistro || '---',
+                        fechaSacramento: r.fechaSacramento || purificado.fechaSacramento 
+                    };
+                });
+            }
             
             setPendingBaptisms(recordsMapped);
 
