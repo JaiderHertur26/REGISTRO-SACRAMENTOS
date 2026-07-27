@@ -51,8 +51,11 @@ const BaptismSentarRegistrosPage = () => {
 
     // --- 1. CARGA DE DATOS ---
     const loadData = async () => {
-        if (!user?.parishId) return;
-        const entityId = user.parishId;
+        const entityId = user?.parish_id || user?.parishId;
+        if (!entityId) {
+            setIsLoading(false);
+            return;
+        }
         setIsLoading(true);
 
         try {
@@ -107,11 +110,12 @@ const BaptismSentarRegistrosPage = () => {
         }
     };
 
-    useEffect(() => { loadData(); }, [user?.parishId]);
+    useEffect(() => { loadData(); }, [user]);
 
     // 🚀 LÓGICA DE INCREMENTO DE PARÁMETROS EN SUPABASE (MANTIENE CEROS)
     const incrementParameters = async (count, bookType = 'ordinario') => {
-        if (!fullParamsCache || !user?.parishId) return;
+        const entityId = user?.parish_id || user?.parishId;
+        if (!fullParamsCache || !entityId) return;
 
         try {
             let p = { ...fullParamsCache };
@@ -151,7 +155,7 @@ const BaptismSentarRegistrosPage = () => {
             await supabase
                 .from('parish_parameters')
                 .update({ bautizos_params: updatedParams })
-                .eq('parish_id', user.parishId);
+                .eq('parish_id', entityId);
 
             setFullParamsCache(updatedParams);
             setNextNumbers({
@@ -179,7 +183,8 @@ const BaptismSentarRegistrosPage = () => {
 
         setIsSaving(true);
         try {
-            const result = await seatBaptism(currentBaptism.id, user.parishId, {});
+            const entityId = user?.parish_id || user?.parishId;
+            const result = await seatBaptism(currentBaptism.id, entityId, {});
             if (result.success) {
                 // Incrementa Ordinario por defecto (puedes ajustar el 'ordinario'/'suplementario' si manejas la lógica de adultos)
                 await incrementParameters(1, 'ordinario'); 
@@ -215,7 +220,8 @@ const BaptismSentarRegistrosPage = () => {
 
         setIsSaving(true);
         try {
-            const result = await seatMultipleBaptisms(selectedIds, user?.parishId);
+            const entityId = user?.parish_id || user?.parishId;
+            const result = await seatMultipleBaptisms(selectedIds, entityId);
             if (result.success) {
                 await incrementParameters(selectedIds.length, 'ordinario'); 
                 toast({ title: "Lote Procesado", className: "bg-green-50 text-green-900 border-green-200" });
