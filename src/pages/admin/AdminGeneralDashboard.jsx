@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
-import { useAppData } from '@/context/AppDataContext';
 import { useAuth } from '@/context/AuthContext';
 import Table from '@/components/ui/Table';
 import { Button } from '@/components/ui/button';
@@ -17,10 +16,8 @@ import DetailsModal from '@/components/modals/DetailsModal';
 import { ROLE_TYPES } from '@/config/supabaseConfig';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabaseClient';
-import { generateBackup } from '@/lib/backupHelpers'; 
 
 const AdminGeneralDashboard = () => {
-  const { data, deleteDioceseArchdiocese } = useAppData();
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -36,39 +33,75 @@ const AdminGeneralDashboard = () => {
   });
   const [generatedCode, setGeneratedCode] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  
+  // Nuevos estados Cloud-Native
   const [pendingDioceses, setPendingDioceses] = useState([]);
+  const [activeDioceses, setActiveDioceses] = useState([]);
+  const [systemStats, setSystemStats] = useState({ dioceses: 0, parishes: 0, sacraments: 0, users: 0 });
 
   // =========================================================================
-  // 1. CARGA DE TOKENS DESDE SUPABASE
+  // 1. CARGA MAESTRA DESDE LA NUBE (SUPABASE)
   // =========================================================================
   useEffect(() => {
-      const fetchPendingTokens = async () => {
+      const fetchCloudData = async () => {
           try {
-              const { data: tokens, error } = await supabase
-                  .from('pending_tokens')
-                  .select('*')
-                  .eq('type', 'DIOCESE');
-                  
-              if (error) throw error;
-              
-              if (tokens && Array.isArray(tokens)) {
-                  const formattedTokens = tokens.map(item => ({
-                      id: item.id,
-                      token: item.token,
-                      ...item.payload, 
+              // 1. Cargar Tokens Pendientes
+              const { data: tokens } = await supabase.from('pending_tokens').select('*').eq('type', 'DIOCESE');
+              if (tokens) {
+                  setPendingDioceses(tokens.map(item => ({
+                      id: item.id, token: item.token, ...item.payload, 
                       date: new Date(item.created_at).toLocaleDateString()
-                  }));
-                  setPendingDioceses(formattedTokens);
+                  })));
               }
+
+              // 2. Cargar Diócesis Activas
+              const { data: diocesesData } = await supabase.from('dioceses').select('*');
+              
+              // 3. Cargar Perfiles de Usuario
+              const { data: profilesData } = await supabase.from('user_profiles').select('*');
+
+              // 4. Calcular Estadísticas Globales (Conteo exacto)
+              const { count: parishesCount } = await supabase.from('parishes').select('*', { count: 'exact', head: true });
+              const { count: bCount } = await supabase.from('baptisms').select('*', { count: 'exact', head: true });
+              const { count: cCount } = await supabase.from('confirmations').select('*', { count: 'exact', head: true });
+              
+              // Sumamos matrimonios de ambas tablas por seguridad durante la migración
+              const { count: mCount1 } = await supabase.from('marriages').select('*', { count: 'exact', head: true });
+              const { count: mCount2 } = await supabase.from('matrimonios').select('*', { count: 'exact', head: true });
+              
+              const totalSacraments = (bCount || 0) + (cCount || 0) + (mCount1 || 0) + (mCount2 || 0);
+
+              // 5. Mapear usuarios con sus diócesis
+              if (diocesesData) {
+                  const formattedDioceses = diocesesData.map(dio => {
+                      const adminUser = profilesData?.find(u => u.diocese_id === dio.id && u.role === ROLE_TYPES.DIOCESE);
+                      return {
+                          ...dio,
+                          username: adminUser ? (adminUser.email || adminUser.username) : 'Sin asignar',
+                          userId: adminUser ? adminUser.id : null
+                      };
+                  });
+                  setActiveDioceses(formattedDioceses);
+              }
+
+              // 6. Actualizar contadores del Dashboard
+              setSystemStats({
+                  dioceses: diocesesData?.length || 0,
+                  parishes: parishesCount || 0,
+                  sacraments: totalSacraments,
+                  users: profilesData?.length || 0
+              });
+
           } catch (error) {
-              console.warn("Advertencia de red (Tokens):", error.message || error);
+              console.error("Fallo al sincronizar datos de la nube:", error);
           }
       };
-      fetchPendingTokens();
+      
+      fetchCloudData();
   }, []);
 
   // =========================================================================
-  // 2. MENÚ DE NAVEGACIÓN BLINDADO
+  // 2. MENÚ DE NAVEGACIÓN
   // =========================================================================
   const menuItems = [
     { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
@@ -76,36 +109,17 @@ const AdminGeneralDashboard = () => {
     { label: 'Ajustes', path: '/admin/settings', icon: SettingsIcon },
   ];
 
-  // Prevención de valores nulos
-  const safeDioceses = data?.dioceses || [];
-  const safeUsers = data?.users || [];
-  const safeParishes = data?.parishes || [];
-  const safeSacraments = data?.sacraments || [];
-
   const stats = [
-    { label: 'Diócesis Activas', value: safeDioceses.length, icon: Church, color: 'bg-blue-600', text: 'text-blue-700' },
-    { label: 'Total Parroquias', value: safeParishes.length, icon: Church, color: 'bg-indigo-600', text: 'text-indigo-700' },
-    { label: 'Total Sacramentos', value: safeSacraments.length, icon: FileText, color: 'bg-green-600', text: 'text-green-700' },
-    { label: 'Total Usuarios', value: safeUsers.length, icon: Users, color: 'bg-purple-600', text: 'text-purple-700' },
+    { label: 'Diócesis Activas', value: systemStats.dioceses, icon: Church, color: 'bg-blue-600', text: 'text-blue-700' },
+    { label: 'Total Parroquias', value: systemStats.parishes, icon: Church, color: 'bg-indigo-600', text: 'text-indigo-700' },
+    { label: 'Total Sacramentos', value: systemStats.sacraments, icon: FileText, color: 'bg-green-600', text: 'text-green-700' },
+    { label: 'Total Usuarios', value: systemStats.users, icon: Users, color: 'bg-purple-600', text: 'text-purple-700' },
   ];
 
-  const filteredDioceses = safeDioceses.filter(d => 
+  const dioceseTableData = activeDioceses.filter(d => 
     (d.name && d.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (d.city && d.city.toLowerCase().includes(searchTerm.toLowerCase()))
   );
-
-  const dioceseTableData = filteredDioceses.map(diocese => {
-    const adminUser = safeUsers.find(u => u.dioceseId === diocese.id && u.role === ROLE_TYPES.DIOCESE);
-    let displayUsername = 'Sin asignar';
-    if (adminUser) {
-        if (typeof adminUser.username === 'object' && adminUser.username !== null) {
-            displayUsername = adminUser.username.name || adminUser.username.username || 'Usuario';
-        } else {
-            displayUsername = adminUser.username || adminUser.email || 'Usuario';
-        }
-    }
-    return { ...diocese, username: displayUsername, userId: adminUser ? adminUser.id : null };
-  });
 
   const handleEdit = (diocese) => {
     setSelectedDiocese(diocese);
@@ -117,16 +131,25 @@ const AdminGeneralDashboard = () => {
     setIsDetailsModalOpen(true);
   };
 
-  const handleDeleteDiocese = (diocese) => {
-    if (window.confirm('¿Deseas eliminar esta Diócesis/Arquidiócesis? Todos sus datos asociados se perderán.')) {
-        const result = deleteDioceseArchdiocese(diocese.id);
-        if (result.success) toast({ title: 'Eliminado', description: 'La jurisdicción ha sido eliminada.', variant: 'success' });
-        else toast({ title: 'Error', description: 'Hubo un error al eliminar.', variant: 'destructive' });
+  // ELIMINACIÓN DIRECTA EN SUPABASE
+  const handleDeleteDiocese = async (diocese) => {
+    if (window.confirm('¿Deseas eliminar esta Diócesis/Arquidiócesis? Todos sus datos en la nube se perderán.')) {
+        try {
+            const { error } = await supabase.from('dioceses').delete().eq('id', diocese.id);
+            if (error) throw error;
+            
+            setActiveDioceses(prev => prev.filter(d => d.id !== diocese.id));
+            setSystemStats(prev => ({ ...prev, dioceses: prev.dioceses - 1 }));
+            toast({ title: 'Eliminado', description: 'La jurisdicción ha sido borrada de la nube.', variant: 'success' });
+        } catch (error) {
+            console.error(error);
+            toast({ title: 'Error', description: 'No se pudo eliminar de la base de datos.', variant: 'destructive' });
+        }
     }
   };
 
   // =========================================================================
-  // 3. GENERACIÓN DE TOKENS (CON MANEJO ESTRICTO DE ERRORES)
+  // 3. GENERACIÓN DE TOKENS (ESTRICTO)
   // =========================================================================
   const handleGenerateToken = async (e) => {
       e.preventDefault();
@@ -241,7 +264,7 @@ const AdminGeneralDashboard = () => {
     <DashboardLayout menuItems={menuItems} entityName="Administración General">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
         
-        {/* CABECERA Y BOTÓN DE BACKUP INTEGRADO */}
+        {/* CABECERA */}
         <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3 tracking-tight">
@@ -252,8 +275,7 @@ const AdminGeneralDashboard = () => {
           <Button 
             variant="outline" 
             onClick={() => {
-                toast({ title: 'Generando Backup', description: 'La descarga comenzará automáticamente.' });
-                generateBackup(data, user);
+                toast({ title: 'Aviso', description: 'Función de backup global en actualización.' });
             }}
             className="gap-2 border-gray-200 text-gray-700 bg-white rounded-2xl h-12 px-6 hover:bg-gray-50 shadow-sm"
           >
@@ -261,6 +283,7 @@ const AdminGeneralDashboard = () => {
           </Button>
         </div>
 
+        {/* STATS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
           {stats.map((stat, idx) => (
             <div key={idx} className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100 hover:shadow-lg transition-all flex items-center gap-5">
@@ -275,6 +298,7 @@ const AdminGeneralDashboard = () => {
           ))}
         </div>
 
+        {/* TOKENS ACTIVOS */}
         {pendingDioceses.length > 0 && (
             <div className="mb-10 border border-amber-200 bg-amber-50/40 rounded-[2rem] overflow-hidden shadow-sm">
                 <div className="bg-amber-100/60 p-6 border-b border-amber-200 flex items-center justify-between">
@@ -309,6 +333,7 @@ const AdminGeneralDashboard = () => {
             </div>
         )}
 
+        {/* TABLA PRINCIPAL DE DIÓCESIS */}
         <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-8">
           <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-6">
               <div>
@@ -337,6 +362,7 @@ const AdminGeneralDashboard = () => {
         </div>
       </motion.div>
 
+      {/* MODAL DE CREACIÓN */}
       <Modal 
           isOpen={isCreateModalOpen} 
           onClose={resetEnvModal} 
