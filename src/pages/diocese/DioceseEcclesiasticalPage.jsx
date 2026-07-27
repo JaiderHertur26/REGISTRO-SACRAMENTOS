@@ -525,7 +525,7 @@ const DioceseEcclesiasticalPage = () => {
                                                 onChange={(e) => setEnvFormData({...envFormData, vicaryId: e.target.value, decanateId: ''})}
                                             >
                                                 <option value="">-- No Asignar a Vicaría --</option>
-                                                {vicaries.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                                                {realVicaries.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
                                             </select>
                                         </div>
                                         {envFormData.vicaryId && (
@@ -585,8 +585,9 @@ const DioceseEcclesiasticalPage = () => {
             </div>
         </Modal>
 
-        {modals.createVicary && <CreateVicaryModal isOpen={modals.createVicary} onClose={() => closeModal('createVicary')} />}
-        {modals.createDecanate && <CreateDecanateModal isOpen={modals.createDecanate} onClose={() => closeModal('createDecanate')} />}
+        {/* 🚀 Pasamos el currentDioceseId a los modales */}
+        {modals.createVicary && <CreateVicaryModal isOpen={modals.createVicary} onClose={() => closeModal('createVicary')} dioceseId={currentDioceseId} />}
+        {modals.createDecanate && <CreateDecanateModal isOpen={modals.createDecanate} onClose={() => closeModal('createDecanate')} dioceseId={currentDioceseId} />}
         {modals.editParish && <EditParishModal isOpen={modals.editParish} onClose={() => closeModal('editParish')} parish={selectedItem} />}
         {modals.editChancellor && <EditChancellorModal isOpen={modals.editChancellor} onClose={() => closeModal('editChancellor')} chancellor={selectedItem} />}
         {modals.editVicary && <EditVicaryModal isOpen={modals.editVicary} onClose={() => closeModal('editVicary')} vicary={selectedItem} />}

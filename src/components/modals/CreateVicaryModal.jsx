@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { Button } from '@/components/ui/button';
-import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/components/ui/use-toast';
 import { Network, User, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
-const CreateVicaryModal = ({ isOpen, onClose }) => {
-  const { user } = useAuth();
+// 🚀 Añadimos "dioceseId" a las props recibidas
+const CreateVicaryModal = ({ isOpen, onClose, dioceseId }) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
 
@@ -17,11 +16,8 @@ const CreateVicaryModal = ({ isOpen, onClose }) => {
     e.preventDefault();
     if (!formData.name) return;
 
-    // Adaptador de compatibilidad (Local vs Nube)
-    const currentDioceseId = user?.diocese_id || user?.dioceseId;
-
-    if (!currentDioceseId) {
-        toast({ title: 'Error', description: 'No se detecta la jurisdicción del usuario.', variant: 'destructive' });
+    if (!dioceseId) {
+        toast({ title: 'Error Crítico', description: 'Jurisdicción no detectada. Recarga la página.', variant: 'destructive' });
         return;
     }
 
@@ -30,7 +26,7 @@ const CreateVicaryModal = ({ isOpen, onClose }) => {
       const { error } = await supabase.from('vicarias').insert([{
         name: formData.name,
         vicar_name: formData.vicarioName,
-        diocese_id: currentDioceseId
+        diocese_id: dioceseId // Usamos el ID rastreado
       }]);
       
       if (error) throw error;

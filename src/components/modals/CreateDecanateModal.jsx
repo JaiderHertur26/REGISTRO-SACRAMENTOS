@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import Modal from '@/components/ui/Modal';
-import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { LayoutGrid, User, Network, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
-const CreateDecanateModal = ({ isOpen, onClose }) => {
-  const { user } = useAuth();
+// 🚀 Añadimos "dioceseId" a las props
+const CreateDecanateModal = ({ isOpen, onClose, dioceseId }) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [vicaries, setVicaries] = useState([]);
@@ -15,19 +14,16 @@ const CreateDecanateModal = ({ isOpen, onClose }) => {
 
   const [formData, setFormData] = useState({ name: '', decanName: '', vicaryId: '' });
 
-  // Adaptador de compatibilidad
-  const currentDioceseId = user?.diocese_id || user?.dioceseId;
-
   useEffect(() => {
-      if (!isOpen || !currentDioceseId) return;
+      if (!isOpen || !dioceseId) return;
       const fetchVicaries = async () => {
           setFetching(true);
-          const { data } = await supabase.from('vicarias').select('*').eq('diocese_id', currentDioceseId);
+          const { data } = await supabase.from('vicarias').select('*').eq('diocese_id', dioceseId);
           if (data) setVicaries(data);
           setFetching(false);
       };
       fetchVicaries();
-  }, [isOpen, currentDioceseId]);
+  }, [isOpen, dioceseId]);
 
   const handleSubmit = async (e) => { 
     e.preventDefault();
@@ -42,7 +38,7 @@ const CreateDecanateModal = ({ isOpen, onClose }) => {
             name: formData.name,
             dean_name: formData.decanName,
             vicaria_id: formData.vicaryId,
-            diocese_id: currentDioceseId
+            diocese_id: dioceseId // Usamos el ID rastreado
         }]);
         
         if (error) throw error;
