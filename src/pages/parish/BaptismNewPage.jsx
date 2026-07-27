@@ -158,7 +158,7 @@ const BaptismNewPage = () => {
             const entityId = profile?.parish_id || user?.parishId;
             const newRecordId = generateUUID();
             
-            // Construimos el Payload exacto como lo espera Supabase
+            // Construimos el Payload del Borrador
             const registroAEnviar = {
                 ...formData,
                 id: newRecordId,
@@ -168,13 +168,27 @@ const BaptismNewPage = () => {
                 createdAt: new Date().toISOString()
             };
 
-            // 🛡️ PASO 1: Guardar en la Bóveda Local Inmediatamente (IndexedDB)
-            await saveToLocalMirror('baptisms', registroAEnviar);
+            // 🛡️ PASO 1: Guardar DIRECTO en la tabla temporal de Supabase (Nube)
+            const dbRecord = {
+                id: newRecordId,
+                parish_id: entityId,
+                status: 'pending',
+                raw_data: registroAEnviar,
+                created_at: new Date().toISOString()
+            };
 
-            // 🛡️ PASO 2: Agregar a la cola para sincronización en segundo plano
-            await addToSyncQueue('baptisms', 'INSERT', registroAEnviar);
+            const { error: insertError } = await supabase
+                .from('pending_baptisms')
+                .insert([dbRecord]);
 
-            // 🛡️ PASO 3: Actualizar el correlativo (Parámetros) tanto en Nube como Local
+            if (insertError) throw insertError;
+
+            // Mantenemos una copia en el localStorage para compatibilidad inmediata con la UI
+            const localKey = `pendingBaptisms_${entityId}`;
+            const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
+            localStorage.setItem(localKey, JSON.stringify([registroAEnviar, ...localData]));
+
+            // 🛡️ PASO 2: Actualizar el correlativo directamente en Supabase
             if (fullParamsCache && fullParamsCache.numeroRegistroActual) {
                 const currentNum = parseInt(fullParamsCache.numeroRegistroActual, 10) || 0;
                 const nextNum = String(currentNum + 1).padStart(6, '0');
@@ -184,29 +198,27 @@ const BaptismNewPage = () => {
                     numeroRegistroActual: nextNum 
                 };
                 
-                // Actualizamos estado en pantalla
                 setFullParamsCache(updatedParams);
                 
-                // Lo enviamos a la cola para que Supabase se actualice cuando haya internet
-                await addToSyncQueue('parish_parameters', 'UPDATE', {
-                    parish_id: entityId,
-                    bautizos_params: updatedParams
-                });
-
-                console.log("📈 Correlativo enviado a cola de sincronización:", nextNum);
+                // Actualizamos directo en la Nube
+                await supabase
+                    .from('parish_parameters')
+                    .update({ bautizos_params: updatedParams })
+                    .eq('parish_id', entityId);
             }
             
-            await new Promise(resolve => setTimeout(resolve, 600)); // Animación suave
+            // Refrescar el sistema global
+            window.dispatchEvent(new Event('storage'));
             
             setTicketData(registroAEnviar);
             setIsSuccess(true);
-            toast({ title: "Guardado ⚡", description: "Borrador almacenado en la bóveda local.", className: "bg-blue-50 text-blue-900 border-blue-200" });
+            toast({ title: "Guardado en Nube ☁️", description: "El borrador ha sido enviado exitosamente.", className: "bg-green-50 text-green-900 border-green-200" });
             
             setTimeout(() => window.print(), 500);
 
         } catch (error) {
             console.error("Error crítico al guardar:", error);
-            toast({ title: "Error al guardar el documento", description: "Intente nuevamente.", variant: "destructive" });
+            toast({ title: "Error de conexión", description: "No se pudo guardar el borrador en la nube.", variant: "destructive" });
         } finally {
             setIsSubmitting(false);
         }
