@@ -4,95 +4,121 @@ import { useAppData } from '@/context/AppDataContext';
 import { useAuth } from '@/context/AuthContext';
 import Table from '@/components/ui/Table';
 import { Button } from '@/components/ui/button';
-import { Church, Users, FileText, LayoutDashboard, Database, Plus, Download, Edit, Trash2, Key, ShieldCheck, CheckCircle2, Copy, Loader2 } from 'lucide-react';
+import { Church, Users, FileText, LayoutDashboard, Database, Plus, Download, Edit, Trash2, Key, ShieldCheck, CheckCircle2, Copy, Loader2, MapPin } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { generateBackup } from '@/lib/backupHelpers';
 import Modal from '@/components/ui/Modal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabaseClient';
+import { ROLE_TYPES } from '@/config/supabaseConfig';
+
+// Importación de Modales
 import EditParishUserModal from '@/components/modals/EditParishUserModal';
 import EditChanceryUserModal from '@/components/modals/EditChanceryUserModal';
 import ChangePasswordModal from '@/components/modals/ChangePasswordModal';
 
 const DioceseDashboard = () => {
-  const { data, getParishUsers, getChanceryUsers, deleteUser } = useAppData();
+  const { data } = useAppData(); // Mantenido solo para el backup legacy
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const [modalState, setModalState] = useState({
-      createEnv: false,
-      editParish: false,
-      editChancery: false,
-      password: false
-  });
-  
+  const [isLoading, setIsLoading] = useState(true);
+  const [modalState, setModalState] = useState({ createEnv: false, editParish: false, editChancery: false, password: false });
   const [selectedUser, setSelectedUser] = useState(null);
 
+  // Estados Cloud-Native
+  const [stats, setStats] = useState({ envs: 0, parishes: 0, vicariates: 0, sacraments: 0 });
+  const [parishUsers, setParishUsers] = useState([]);
+  const [chanceryUsers, setChanceryUsers] = useState([]);
+  const [pendingEnvironments, setPendingEnvironments] = useState([]);
+  
+  // Estado del Generador de Tokens
   const [envFormData, setEnvFormData] = useState({ name: '', city: '', type: 'PARISH' });
   const [generatedCode, setGeneratedCode] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [pendingEnvironments, setPendingEnvironments] = useState([]);
 
-  // 🚀 CONEXIÓN A SUPABASE PARA LEER TOKENS
+  // =========================================================================
+  // 1. MOTOR DE SINCRONIZACIÓN CLOUD-NATIVE (SUPABASE)
+  // =========================================================================
   useEffect(() => {
-      const fetchPendingTokens = async () => {
-          if (!user?.id) return;
+      const fetchDashboardData = async () => {
+          if (!user?.dioceseId) return;
+          setIsLoading(true);
+
           try {
-              const { data: tokens, error } = await supabase
-                  .from('pending_tokens')
-                  .select('*')
-                  .eq('created_by', user.id);
-                  
-              if (error) throw error;
-              
+              // 1. Cargar Tokens Pendientes
+              const { data: tokens } = await supabase.from('pending_tokens').select('*').eq('created_by', user.id);
               if (tokens) {
-                  const formattedTokens = tokens.map(item => ({
-                      id: item.id,
-                      token: item.token,
-                      ...item.payload,
+                  setPendingEnvironments(tokens.map(item => ({
+                      id: item.id, token: item.token, ...item.payload,
                       date: new Date(item.created_at).toLocaleDateString()
-                  }));
-                  setPendingEnvironments(formattedTokens);
+                  })));
               }
+
+              // 2. Cargar Estructura (Parroquias y Vicarías)
+              const { data: parishes } = await supabase.from('parishes').select('*').eq('diocese_id', user.dioceseId);
+              const { count: vCount } = await supabase.from('vicariates').select('*', { count: 'exact', head: true }).eq('diocese_id', user.dioceseId);
+
+              // 3. Cargar Perfiles de Usuarios de esta Diócesis
+              const { data: profiles } = await supabase.from('user_profiles').select('*').eq('diocese_id', user.dioceseId);
+
+              // 4. Calcular Sacramentos (Sumando los registros de las parroquias de esta diócesis)
+              let sCount = 0;
+              if (parishes && parishes.length > 0) {
+                  const pIds = parishes.map(p => p.id);
+                  const [bRes, cRes, mRes1, mRes2] = await Promise.all([
+                      supabase.from('baptisms').select('*', { count: 'exact', head: true }).in('parish_id', pIds),
+                      supabase.from('confirmations').select('*', { count: 'exact', head: true }).in('parish_id', pIds),
+                      supabase.from('marriages').select('*', { count: 'exact', head: true }).in('parish_id', pIds),
+                      supabase.from('matrimonios').select('*', { count: 'exact', head: true }).in('parish_id', pIds)
+                  ]);
+                  sCount = (bRes.count || 0) + (cRes.count || 0) + (mRes1.count || 0) + (mRes2.count || 0);
+              }
+
+              // 5. Mapear Usuarios
+              const pUsers = [];
+              const cUsers = [];
+              
+              (profiles || []).forEach(p => {
+                  const roleUpper = p.role?.toUpperCase();
+                  if (roleUpper === 'PARISH') {
+                      pUsers.push({
+                          ...p,
+                          username: p.email || p.username,
+                          parishName: parishes?.find(par => par.id === p.parish_id)?.name || 'Parroquia no asignada'
+                      });
+                  } else if (roleUpper === 'CHANCERY') {
+                      cUsers.push({
+                          ...p,
+                          username: p.email || p.username,
+                          parishName: 'Tribunal / Cancillería'
+                      });
+                  }
+              });
+
+              setParishUsers(pUsers);
+              setChanceryUsers(cUsers);
+              setStats({
+                  envs: pUsers.length + cUsers.length,
+                  parishes: parishes?.length || 0,
+                  vicariates: vCount || 0,
+                  sacraments: sCount
+              });
+
           } catch (error) {
-              console.error("Error cargando tokens:", error);
+              console.error("Fallo al sincronizar datos:", error);
+              toast({ title: "Error de Red", description: "No se pudieron descargar los datos recientes.", variant: "destructive" });
+          } finally {
+              setIsLoading(false);
           }
       };
-      fetchPendingTokens();
-  }, [user]);
 
-  const menuItems = [
-    { label: 'Dashboard', path: '/diocese/dashboard', icon: LayoutDashboard },
-    { label: 'Organización Eclesiástica', path: '/diocese/ecclesiastical', icon: Church },
-    { label: 'Backups', path: '/backups', icon: Database },
-  ];
+      fetchDashboardData();
+  }, [user, toast]);
 
-  const safeParishes = data.parishes || [];
-  const safeVicariates = data.vicariates || [];
-  const safeDeaneries = data.deaneries || [];
-  const safeSacraments = data.sacraments || [];
-
-  const dioceseParishes = safeParishes.filter(p => p.dioceseId === user?.dioceseId);
-  const dioceseVicariates = safeVicariates.filter(v => v.dioceseId === user?.dioceseId);
-  const dioceseSacraments = safeSacraments.filter(s => s.dioceseId === user?.dioceseId);
-  
-  const parishUsers = getParishUsers(user?.dioceseId);
-  const chanceryUsers = getChanceryUsers(user?.dioceseId);
-
-  const stats = [
-    { label: 'Entornos Activos', value: parishUsers.length + chanceryUsers.length, icon: ShieldCheck, color: 'bg-green-600' },
-    { label: 'Total Parroquias', value: dioceseParishes.length, icon: Church, color: 'bg-blue-600' },
-    { label: 'Total Vicarías', value: dioceseVicariates.length, icon: Users, color: 'bg-indigo-600' },
-    { label: 'Total Sacramentos', value: dioceseSacraments.length, icon: FileText, color: 'bg-purple-600' },
-  ];
-
-  const safeString = (val) => {
-      if (typeof val === 'string') return val;
-      if (typeof val === 'object' && val !== null) return val.name || val.label || '';
-      return String(val || '');
-  };
-
-  // 🚀 CONEXIÓN A SUPABASE PARA GENERAR TOKENS
+  // =========================================================================
+  // 2. GENERACIÓN DE TOKENS EN LA NUBE
+  // =========================================================================
   const handleCreateEnvironment = async (e) => {
       e.preventDefault();
       setIsGenerating(true);
@@ -124,9 +150,7 @@ const DioceseDashboard = () => {
           if (error) throw error;
 
           const newEnv = {
-              id: savedToken.id,
-              token: savedToken.token,
-              ...savedToken.payload,
+              id: savedToken.id, token: savedToken.token, ...savedToken.payload,
               date: new Date(savedToken.created_at).toLocaleDateString()
           };
 
@@ -143,19 +167,40 @@ const DioceseDashboard = () => {
   };
 
   const handleDeletePending = async (id) => {
-      if(window.confirm("¿Revocar este código de activación?")) {
+      if(window.confirm("¿Revocar este código de activación de la base de datos?")) {
           try {
               const { error } = await supabase.from('pending_tokens').delete().eq('id', id);
               if (error) throw error;
-              
               setPendingEnvironments(prev => prev.filter(d => d.id !== id));
               toast({ title: "Revocado", description: "El código ha sido eliminado.", variant: "success" });
           } catch (error) {
-              toast({ title: "Error", description: "No se pudo borrar.", variant: "destructive" });
+              toast({ title: "Error", description: "No se pudo borrar de la nube.", variant: "destructive" });
           }
       }
   };
 
+  // =========================================================================
+  // 3. ELIMINAR USUARIOS (BORRADO EN SUPABASE)
+  // =========================================================================
+  const handleDeleteUser = async (id) => {
+    if (window.confirm('¿Está seguro de revocar el acceso a este usuario? Perderá acceso al sistema.')) {
+        try {
+            const { error } = await supabase.from('user_profiles').delete().eq('id', id);
+            if (error) throw error;
+            
+            setParishUsers(prev => prev.filter(u => u.id !== id));
+            setChanceryUsers(prev => prev.filter(u => u.id !== id));
+            setStats(prev => ({ ...prev, envs: prev.envs - 1 }));
+            toast({ title: 'Usuario eliminado', description: 'El acceso ha sido revocado de la base de datos.', variant: 'success' });
+        } catch (error) {
+            toast({ title: 'Error', description: 'No se pudo eliminar el usuario.', variant: 'destructive' });
+        }
+    }
+  };
+
+  // =========================================================================
+  // 4. UTILIDADES Y RENDERIZADO
+  // =========================================================================
   const resetEnvModal = () => {
       setModalState(prev => ({ ...prev, createEnv: false }));
       setGeneratedCode(null);
@@ -167,136 +212,173 @@ const DioceseDashboard = () => {
       toast({ title: "Copiado", description: "Código copiado al portapapeles.", className: "bg-blue-50 text-blue-800" });
   };
 
+  const menuItems = [
+    { label: 'Dashboard', path: '/diocese/dashboard', icon: LayoutDashboard },
+    { label: 'Organización Eclesiástica', path: '/diocese/ecclesiastical', icon: Church },
+    { label: 'Backups', path: '/backups', icon: Database },
+  ];
+
+  const statCards = [
+    { label: 'Entornos Activos', value: stats.envs, icon: ShieldCheck, color: 'bg-green-600', text: 'text-green-700' },
+    { label: 'Total Parroquias', value: stats.parishes, icon: Church, color: 'bg-blue-600', text: 'text-blue-700' },
+    { label: 'Total Vicarías', value: stats.vicariates, icon: Users, color: 'bg-indigo-600', text: 'text-indigo-700' },
+    { label: 'Total Sacramentos', value: stats.sacraments, icon: FileText, color: 'bg-purple-600', text: 'text-purple-700' },
+  ];
+
   const columnsPendingEnvs = [
       { header: 'Tipo', render: (row) => row.type === 'PARISH' ? 'Parroquia' : 'Cancillería' },
       { header: 'Nombre Asignado', accessor: 'name' },
-      { header: 'Código de Activación', render: (row) => <span className="font-mono font-bold text-blue-600 tracking-wider">{row.token}</span> },
+      { header: 'Código de Activación', render: (row) => <span className="font-mono font-bold text-[#4B7BA7] bg-blue-50 px-3 py-1 rounded-lg tracking-wider border border-blue-100">{row.token}</span> },
       { header: 'Estado', render: () => <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-[10px] uppercase tracking-widest font-bold">Esperando</span> },
-      { header: 'Acción', render: (row) => <Button size="sm" variant="ghost" onClick={() => handleDeletePending(row.id)}><Trash2 className="w-4 h-4 text-red-500" /></Button> }
+      { header: 'Acción', render: (row) => <Button size="sm" variant="ghost" onClick={() => handleDeletePending(row.id)}><Trash2 className="w-4 h-4 text-red-500 hover:text-red-700 transition-colors" /></Button> }
   ];
 
   const columnsParishUsers = [
-    { header: 'Usuario / Email', render: (row) => <div><div className="font-bold">{row.username}</div><div className="text-xs text-gray-500">{row.email}</div></div> },
-    { header: 'Parroquia', render: (row) => safeString(row.parishName) },
-    { header: 'Estado', render: () => <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest">Activo</span> },
+    { header: 'Usuario / Email', render: (row) => <div><div className="font-black text-gray-900">{row.username}</div><div className="text-[10px] uppercase font-bold text-gray-400 mt-0.5">{row.email || 'SIN EMAIL'}</div></div> },
+    { header: 'Entidad', render: (row) => <span className="font-medium text-gray-600">{row.parishName}</span> },
+    { header: 'Estado', render: () => <span className="bg-green-100/50 text-green-700 border border-green-200 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">Activo</span> },
     {
         header: 'Acciones',
         render: (row) => (
-          <div className="flex gap-2">
-              <Button size="sm" variant="ghost" onClick={() => { setSelectedUser(row); setModalState(prev => ({...prev, editParish: true})); }} title="Editar">
-                  <Edit className="w-4 h-4 text-blue-600" />
+          <div className="flex gap-2 justify-end">
+              <Button size="sm" variant="ghost" onClick={() => { setSelectedUser(row); setModalState(prev => ({...prev, editParish: row.role?.toUpperCase() === 'PARISH', editChancery: row.role?.toUpperCase() === 'CHANCERY'})); }} title="Editar">
+                  <Edit className="w-4 h-4 text-blue-600 hover:text-blue-800" />
               </Button>
               <Button size="sm" variant="ghost" onClick={() => { setSelectedUser(row); setModalState(prev => ({...prev, password: true})); }} title="Cambiar Contraseña">
-                  <Key className="w-4 h-4 text-orange-500" />
+                  <Key className="w-4 h-4 text-orange-500 hover:text-orange-700" />
               </Button>
               <Button size="sm" variant="ghost" onClick={() => handleDeleteUser(row.id)} title="Eliminar">
-                  <Trash2 className="w-4 h-4 text-red-600" />
+                  <Trash2 className="w-4 h-4 text-red-500 hover:text-red-700" />
               </Button>
           </div>
         )
       }
   ];
 
-  const handleDeleteUser = (id) => {
-    if (window.confirm('¿Está seguro de eliminar este usuario? Perderá acceso al sistema.')) {
-        deleteUser(id);
-        toast({ title: 'Usuario eliminado', description: 'El usuario ha sido eliminado correctamente.' });
-    }
-  };
-
-  const handleBackup = () => {
-    generateBackup(data, user);
-    toast({ title: 'Backup Generado', description: 'La descarga comenzará automáticamente.' });
-  };
-
   return (
     <DashboardLayout menuItems={menuItems} entityName={user?.dioceseName}>
-      <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-           <h1 className="text-3xl font-black text-gray-900 tracking-tight">Panel de Gestión Diocesana</h1>
-           <p className="text-gray-500 font-bold uppercase text-xs tracking-widest mt-2">{safeString(user?.dioceseName)}</p>
-        </div>
-        <Button variant="outline" onClick={handleBackup} className="gap-2 rounded-2xl h-12 px-6">
-            <Download className="w-4 h-4 text-blue-600" /> Exportar Backup Total
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-        {stats.map((stat, idx) => (
-          <div key={idx} className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100 hover:shadow-lg transition-all flex items-center gap-5">
-            <div className={`p-4 rounded-2xl ${stat.color} bg-opacity-10 shadow-inner`}>
-              <stat.icon className={`w-7 h-7 ${stat.color.replace('bg-', 'text-')}`} />
-            </div>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pb-10">
+          {/* HEADER */}
+          <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
-              <p className="text-3xl font-black text-gray-900 tracking-tighter">{stat.value}</p>
-              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">{stat.label}</p>
+              <h1 className="text-3xl font-black text-[#2C3E50] tracking-tight">Panel de Gestión Diocesana</h1>
+              <p className="text-[#D4AF37] font-black uppercase text-xs tracking-widest mt-1 flex items-center gap-2">
+                  <Church className="w-4 h-4" /> {user?.dioceseName || 'Jurisdicción no identificada'}
+              </p>
             </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="bg-white rounded-[2.5rem] shadow-sm border border-blue-100 p-8 mb-10 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-48 h-48 bg-blue-50 rounded-bl-[100%] z-0"></div>
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-center">
-            <div>
-                <h2 className="text-xl font-black text-[#2C3E50] flex items-center gap-2">
-                    <ShieldCheck className="w-6 h-6 text-[#D4AF37]" />
-                    Asignación de Nuevos Entornos
-                </h2>
-                <p className="text-sm text-gray-600 font-medium mt-2 max-w-2xl">
-                    Para dar de alta a una nueva Parroquia o Cancillería, genere un <strong>Código de Activación</strong>. 
-                    El encargado utilizará este código en la pantalla de inicio para crear su propia contraseña segura.
-                </p>
-            </div>
-            <Button onClick={() => setModalState(prev => ({...prev, createEnv: true}))} className="gap-2 bg-[#D4AF37] hover:bg-[#C4A027] text-[#111111] font-black uppercase tracking-widest text-[10px] px-6 py-6 rounded-2xl mt-4 md:mt-0 shadow-xl shadow-yellow-900/10">
-                <Plus className="w-4 h-4" /> Generar Código
+            <Button variant="outline" onClick={() => { generateBackup(data, user); toast({ title: 'Backup Generado', description: 'Descarga en proceso.' }); }} className="gap-2 rounded-2xl h-12 px-6 border-gray-200 text-gray-700 hover:bg-gray-50">
+                <Download className="w-4 h-4 text-[#4B7BA7]" /> Exportar Backup
             </Button>
-        </div>
-
-        {pendingEnvironments.length > 0 && (
-            <div className="mt-8 pt-8 border-t border-gray-100">
-                <h3 className="font-black text-gray-400 mb-4 text-[10px] uppercase tracking-[0.2em]">Entornos Esperando Activación</h3>
-                <Table columns={columnsPendingEnvs} data={pendingEnvironments} className="border-none shadow-none" />
-            </div>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-10">
-          <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-8">
-            <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h3 className="font-black text-[#2C3E50] text-xl tracking-tight">Parroquias Activas</h3>
-                    <p className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mt-1">Usuarios que ya activaron su cuenta</p>
-                </div>
-            </div>
-            <Table columns={columnsParishUsers} data={parishUsers} className="border-none shadow-none" />
           </div>
 
-          <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-8">
-            <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h3 className="font-black text-[#2C3E50] text-xl tracking-tight">Cancillería Activa</h3>
-                    <p className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mt-1">Usuarios del tribunal diocesano</p>
-                </div>
-            </div>
-            <Table columns={columnsParishUsers} data={chanceryUsers} className="border-none shadow-none" /> 
-          </div>
-      </div>
+          {isLoading ? (
+              <div className="h-64 flex flex-col items-center justify-center">
+                  <Loader2 className="w-12 h-12 text-[#D4AF37] animate-spin mb-4" />
+                  <p className="text-gray-400 font-black uppercase tracking-widest text-xs">Sincronizando Bóveda...</p>
+              </div>
+          ) : (
+              <>
+                  {/* STATS */}
+                  <motion.div 
+                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+                      className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10"
+                  >
+                    {statCards.map((stat, idx) => (
+                      <div key={idx} className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100 hover:shadow-lg transition-all flex items-center gap-5">
+                        <div className={`p-4 rounded-2xl ${stat.color} bg-opacity-10 shadow-inner`}>
+                          <stat.icon className={`w-7 h-7 ${stat.text}`} />
+                        </div>
+                        <div>
+                          <p className="text-3xl font-black text-gray-900 tracking-tighter">{stat.value}</p>
+                          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">{stat.label}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </motion.div>
 
-      <Modal 
-        isOpen={modalState.createEnv} 
-        onClose={resetEnvModal} 
-        title={generatedCode ? "¡Código Generado!" : "Nuevo Entorno Seguro"}
-      >
+                  {/* CREADOR DE ENTORNOS */}
+                  <motion.div 
+                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+                      className="bg-white rounded-[2.5rem] shadow-sm border border-blue-100/50 p-8 mb-10 relative overflow-hidden"
+                  >
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-[#4B7BA7]/5 rounded-bl-[100%] z-0 pointer-events-none"></div>
+                    <div className="relative z-10 flex flex-col md:flex-row justify-between items-center">
+                        <div>
+                            <h2 className="text-xl font-black text-[#2C3E50] flex items-center gap-3 tracking-tight">
+                                <ShieldCheck className="w-6 h-6 text-[#D4AF37]" />
+                                Asignación de Nuevos Entornos
+                            </h2>
+                            <p className="text-sm text-gray-500 font-medium mt-2 max-w-2xl leading-relaxed">
+                                Para dar de alta a una nueva Parroquia o Cancillería, genere un <strong className="text-gray-700">Código de Activación</strong>. 
+                                El encargado utilizará este código en la pantalla de inicio para habilitar su bóveda privada.
+                            </p>
+                        </div>
+                        <Button onClick={() => setModalState(prev => ({...prev, createEnv: true}))} className="gap-2 bg-[#D4AF37] hover:bg-[#C4A027] text-[#111111] font-black uppercase tracking-widest text-[10px] px-8 py-6 rounded-2xl mt-6 md:mt-0 shadow-xl shadow-yellow-900/10 active:scale-95 transition-all whitespace-nowrap">
+                            <Plus className="w-4 h-4" /> Generar Código
+                        </Button>
+                    </div>
+
+                    {pendingEnvironments.length > 0 && (
+                        <div className="mt-8 pt-8 border-t border-gray-100 relative z-10">
+                            <h3 className="font-black text-gray-400 mb-6 text-[10px] uppercase tracking-[0.2em]">Entornos Esperando Activación ({pendingEnvironments.length})</h3>
+                            <Table columns={columnsPendingEnvs} data={pendingEnvironments} className="border-none shadow-none" />
+                        </div>
+                    )}
+                  </motion.div>
+
+                  {/* TABLAS DE USUARIOS */}
+                  <motion.div 
+                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+                      className="grid grid-cols-1 lg:grid-cols-2 gap-8"
+                  >
+                      <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-8 flex flex-col h-full">
+                        <div className="flex justify-between items-center mb-8">
+                            <div>
+                                <h3 className="font-black text-[#2C3E50] text-xl tracking-tight">Parroquias Activas</h3>
+                                <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400 mt-1">Sacerdotes registrados</p>
+                            </div>
+                        </div>
+                        <div className="flex-1">
+                            {parishUsers.length === 0 ? (
+                                <div className="h-full min-h-[200px] flex flex-col items-center justify-center border-2 border-dashed border-gray-100 rounded-3xl bg-gray-50/50">
+                                    <Church className="w-10 h-10 text-gray-300 mb-3" />
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Sin parroquias registradas</p>
+                                </div>
+                            ) : (
+                                <Table columns={columnsParishUsers} data={parishUsers} className="border-none shadow-none" />
+                            )}
+                        </div>
+                      </div>
+
+                      <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-8 flex flex-col h-full">
+                        <div className="flex justify-between items-center mb-8">
+                            <div>
+                                <h3 className="font-black text-[#2C3E50] text-xl tracking-tight">Cancillería Activa</h3>
+                                <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400 mt-1">Personal del tribunal</p>
+                            </div>
+                        </div>
+                        <div className="flex-1">
+                            {chanceryUsers.length === 0 ? (
+                                <div className="h-full min-h-[200px] flex flex-col items-center justify-center border-2 border-dashed border-gray-100 rounded-3xl bg-gray-50/50">
+                                    <Users className="w-10 h-10 text-gray-300 mb-3" />
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Sin cancilleres registrados</p>
+                                </div>
+                            ) : (
+                                <Table columns={columnsParishUsers} data={chanceryUsers} className="border-none shadow-none" /> 
+                            )}
+                        </div>
+                      </div>
+                  </motion.div>
+              </>
+          )}
+      </motion.div>
+
+      {/* MODAL CREADOR DE ENTORNOS */}
+      <Modal isOpen={modalState.createEnv} onClose={resetEnvModal} title={generatedCode ? "¡Código Generado!" : "Nuevo Entorno Seguro"}>
         <div className="w-full max-w-md mx-auto p-2">
             <AnimatePresence mode="wait">
                 {!generatedCode ? (
-                    <motion.form 
-                        key="form"
-                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                        onSubmit={handleCreateEnvironment} 
-                        className="space-y-4 pt-2"
-                    >
+                    <motion.form key="form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onSubmit={handleCreateEnvironment} className="space-y-4 pt-2">
                         <div className="space-y-1">
                             <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Tipo de Entidad</label>
                             <select 
@@ -311,28 +393,37 @@ const DioceseDashboard = () => {
 
                         <div className="space-y-1">
                             <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Nombre Oficial</label>
-                            <input 
-                                type="text" required
-                                className="w-full pl-4 pr-4 py-3.5 border border-gray-200 bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#D4AF37] outline-none font-bold text-sm transition-all"
-                                placeholder={envFormData.type === 'PARISH' ? "Ej: Parroquia San Judas" : "Ej: Cancillería Principal"}
-                                value={envFormData.name}
-                                onChange={(e) => setEnvFormData({...envFormData, name: e.target.value})}
-                            />
+                            <div className="relative">
+                                <Church className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <input 
+                                    type="text" required
+                                    className="w-full pl-11 pr-4 py-3.5 border border-gray-200 bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#D4AF37] outline-none font-bold text-sm transition-all"
+                                    placeholder={envFormData.type === 'PARISH' ? "Ej: Parroquia San Judas" : "Ej: Tribunal Eclesiástico"}
+                                    value={envFormData.name}
+                                    onChange={(e) => setEnvFormData({...envFormData, name: e.target.value})}
+                                />
+                            </div>
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Ubicación / Ciudad</label>
-                            <input 
-                                type="text" required
-                                className="w-full pl-4 pr-4 py-3.5 border border-gray-200 bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#D4AF37] outline-none font-bold text-sm transition-all"
-                                placeholder="Ej: Barranquilla"
-                                value={envFormData.city}
-                                onChange={(e) => setEnvFormData({...envFormData, city: e.target.value})}
-                            />
+                            <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Ciudad / Municipio</label>
+                            <div className="relative">
+                                <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <input 
+                                    type="text" required
+                                    className="w-full pl-11 pr-4 py-3.5 border border-gray-200 bg-gray-50 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#D4AF37] outline-none font-bold text-sm transition-all"
+                                    placeholder="Ej: Magangué"
+                                    value={envFormData.city}
+                                    onChange={(e) => setEnvFormData({...envFormData, city: e.target.value})}
+                                />
+                            </div>
                         </div>
 
-                        <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 text-[11px] text-blue-800 mt-4 font-medium leading-relaxed">
-                            Al hacer clic en guardar, se creará un <strong>Código Único</strong>. El encargado de esta entidad no necesitará que usted le cree una contraseña; él mismo la configurará usando dicho código.
+                        <div className="bg-blue-50/60 p-4 rounded-xl border border-blue-100/50 flex gap-3 mt-4">
+                            <ShieldCheck className="w-5 h-5 text-[#4B7BA7] shrink-0" />
+                            <p className="text-[10px] text-[#4B7BA7] font-bold leading-relaxed tracking-wide">
+                                Al guardar, se creará un <strong className="font-black">Código Único</strong>. El párroco no necesitará que usted le cree una contraseña; él mismo la configurará usando dicho código.
+                            </p>
                         </div>
 
                         <div className="pt-6 flex justify-end gap-3 border-t border-gray-100">
@@ -343,11 +434,7 @@ const DioceseDashboard = () => {
                         </div>
                     </motion.form>
                 ) : (
-                    <motion.div 
-                        key="success"
-                        initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-                        className="py-6 text-center space-y-8"
-                    >
+                    <motion.div key="success" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="py-6 text-center space-y-8">
                         <div className="w-20 h-20 bg-green-50 rounded-3xl flex items-center justify-center mx-auto border border-green-100">
                             <CheckCircle2 className="w-10 h-10 text-green-500" />
                         </div>
@@ -357,15 +444,15 @@ const DioceseDashboard = () => {
                             <p className="text-gray-500 mt-2 text-sm font-medium">El entorno está listo para ser reclamado.</p>
                         </div>
 
-                        <div className="bg-gray-50 p-8 rounded-2xl border-2 border-dashed border-[#4B7BA7] relative">
-                            <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-white px-4 text-[10px] font-black text-[#4B7BA7] uppercase tracking-[0.2em] rounded-full border border-[#4B7BA7]">
+                        <div className="bg-gray-50 p-8 rounded-2xl border-2 border-dashed border-[#D4AF37] relative">
+                            <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-white px-4 text-[10px] font-black text-[#D4AF37] uppercase tracking-[0.2em] rounded-full border border-[#D4AF37]">
                                 Código de Activación
                             </span>
                             <p className="text-4xl font-mono font-black text-[#2C3E50] tracking-widest">{generatedCode}</p>
                         </div>
 
-                        <p className="text-[11px] text-gray-500 font-medium">
-                            Copie este código y envíeselo al Párroco o Encargado. Lo necesitará para crear su cuenta en la pantalla principal.
+                        <p className="text-[11px] text-gray-500 font-bold uppercase tracking-widest">
+                            Copie este código y envíeselo al Párroco.
                         </p>
 
                         <div className="pt-6 flex flex-col gap-3 border-t border-gray-100">
@@ -382,27 +469,12 @@ const DioceseDashboard = () => {
         </div>
       </Modal>
 
+      {/* MODALES SECUNDARIOS */}
       {selectedUser && (
         <>
-            <EditParishUserModal 
-                isOpen={modalState.editParish}
-                onClose={() => setModalState(prev => ({...prev, editParish: false}))}
-                user={selectedUser}
-                dioceseId={user.dioceseId}
-                onSuccess={() => setSelectedUser(null)}
-            />
-            <EditChanceryUserModal 
-                isOpen={modalState.editChancery}
-                onClose={() => setModalState(prev => ({...prev, editChancery: false}))}
-                user={selectedUser}
-                dioceseId={user.dioceseId}
-                onSuccess={() => setSelectedUser(null)}
-            />
-            <ChangePasswordModal 
-                isOpen={modalState.password}
-                onClose={() => setModalState(prev => ({...prev, password: false}))}
-                user={selectedUser}
-            />
+            <EditParishUserModal isOpen={modalState.editParish} onClose={() => setModalState(prev => ({...prev, editParish: false}))} user={selectedUser} dioceseId={user.dioceseId} onSuccess={() => setSelectedUser(null)} />
+            <EditChanceryUserModal isOpen={modalState.editChancery} onClose={() => setModalState(prev => ({...prev, editChancery: false}))} user={selectedUser} dioceseId={user.dioceseId} onSuccess={() => setSelectedUser(null)} />
+            <ChangePasswordModal isOpen={modalState.password} onClose={() => setModalState(prev => ({...prev, password: false}))} user={selectedUser} />
         </>
       )}
     </DashboardLayout>
