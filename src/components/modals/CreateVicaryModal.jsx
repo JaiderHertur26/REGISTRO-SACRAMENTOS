@@ -1,75 +1,85 @@
 import React, { useState } from 'react';
 import Modal from '@/components/ui/Modal';
-import Input from '@/components/ui/Input';
 import { Button } from '@/components/ui/button';
-import { useAppData } from '@/context/AppDataContext';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/components/ui/use-toast';
+import { Network, User, Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient';
 
 const CreateVicaryModal = ({ isOpen, onClose }) => {
-  const { createVicary } = useAppData();
   const { user } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    vicarioName: ''
-  });
+  const [formData, setFormData] = useState({ name: '', vicarioName: '' });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name || !formData.vicarioName) {
-        toast({ title: 'Error', description: 'Todos los campos son obligatorios', variant: 'destructive' });
-        return;
-    }
+    if (!formData.name) return;
 
     setLoading(true);
     try {
-      // 1. Agregamos "await" y guardamos el resultado
-      const result = await createVicary({
-        ...formData,
-        dioceseId: user.dioceseId
-      });
+      // Guardado directo en la nube (Supabase)
+      const { error } = await supabase.from('vicarias').insert([{
+        name: formData.name,
+        vicar_name: formData.vicarioName,
+        diocese_id: user.dioceseId
+      }]);
       
-      // 2. Verificamos la respuesta de la nube
-      if (result && result.success) {
-          toast({ title: 'Éxito', description: 'Vicaría creada y guardada en la nube.', variant: 'success' });
-          setFormData({ name: '', vicarioName: '' });
-          onClose();
-      } else {
-          toast({ title: 'Error', description: result?.message || 'No se pudo crear la vicaría en la nube.', variant: 'destructive' });
-      }
+      if (error) throw error;
+
+      toast({ title: 'Éxito', description: 'Vicaría creada en la nube. Recarga para ver los cambios.', className: "bg-green-50 border-green-200 text-green-700" });
+      setFormData({ name: '', vicarioName: '' });
+      onClose();
     } catch (error) {
-      toast({ title: 'Error', description: 'Ocurrió un error de conexión.', variant: 'destructive' });
+      console.error(error);
+      toast({ title: 'Error', description: 'No se pudo crear la vicaría en la nube.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Crear Vicaría">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="text-sm font-medium text-gray-700 block mb-1">Nombre de la Vicaría</label>
-          <Input 
-            placeholder="Ej: Vicaría Episcopal Territorial de San Pedro" 
-            value={formData.name} 
-            onChange={e => setFormData({...formData, name: e.target.value})} 
-          />
+    <Modal isOpen={isOpen} onClose={onClose} title="Crear Nueva Vicaría">
+      <form onSubmit={handleSubmit} className="space-y-4 p-2 pt-4">
+        
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nombre Oficial de la Vicaría</label>
+          <div className="relative">
+              <Network className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input 
+                required
+                type="text"
+                placeholder="Ej: Vicaría de San Pedro" 
+                value={formData.name} 
+                onChange={e => setFormData({...formData, name: e.target.value})} 
+                className="w-full pl-11 pr-5 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-800 outline-none text-sm font-bold text-slate-800 uppercase transition-all"
+                disabled={loading}
+              />
+          </div>
         </div>
-        <div>
-          <label className="text-sm font-medium text-gray-700 block mb-1">Nombre del Vicario</label>
-          <Input 
-            placeholder="Nombre del sacerdote a cargo" 
-            value={formData.vicarioName} 
-            onChange={e => setFormData({...formData, vicarioName: e.target.value})} 
-          />
+
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Vicario a Cargo (Opcional)</label>
+          <div className="relative">
+              <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input 
+                type="text"
+                placeholder="Ej: Pbro. Juan Pérez" 
+                value={formData.vicarioName} 
+                onChange={e => setFormData({...formData, vicarioName: e.target.value})} 
+                className="w-full pl-11 pr-5 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-800 outline-none text-sm font-bold text-slate-800 uppercase transition-all"
+                disabled={loading}
+              />
+          </div>
         </div>
-        <div className="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>Cancelar</Button>
-          <Button type="submit" disabled={loading} className="bg-[#4B7BA7] hover:bg-[#3B6B97] text-white">
-            {loading ? 'Subiendo a la Nube...' : 'Crear Vicaría'}
+
+        <div className="pt-6 flex justify-end gap-3 border-t border-slate-100 mt-4">
+          <Button type="button" variant="outline" onClick={onClose} disabled={loading} className="w-1/3 rounded-xl border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest hover:bg-slate-50">
+            Cancelar
+          </Button>
+          <Button type="submit" disabled={loading} className="w-2/3 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-black uppercase tracking-widest text-[10px] shadow-lg active:scale-95 transition-all">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Crear Vicaría'}
           </Button>
         </div>
       </form>
