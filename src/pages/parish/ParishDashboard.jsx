@@ -18,9 +18,10 @@ import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 const ParishDashboard = () => {
-  const { data, getConfirmations, getMatrimonios, getMisDatosList } = useAppData();
+  const { data, getMisDatosList } = useAppData();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
 
   const [recentRecords, setRecentRecords] = useState([]);
   const [isSyncing, setIsSyncing] = useState(true);
@@ -28,77 +29,80 @@ const ParishDashboard = () => {
   const [hasPending, setHasPending] = useState(false);
   const [nombreParroquia, setNombreParroquia] = useState('Cargando Parroquia...');
 
+  // 🚀 ADAPTADOR UNIVERSAL (Cierra la grieta de IDs nulos)
+  const currentParishId = user?.parish_id || user?.parishId;
+
+  // 1. OBTENER NOMBRE REAL DE LA PARROQUIA
   useEffect(() => {
       const fetchParishName = async () => {
-          if (!user) return;
+          if (!currentParishId) return;
 
-          const misDatos = getMisDatosList(user.parishId || user.parish_id);
+          // Intento rápido desde caché
+          const misDatos = getMisDatosList(currentParishId);
           if (misDatos && misDatos.length > 0 && misDatos[0].nombre) {
               setNombreParroquia(misDatos[0].nombre.toUpperCase());
               return;
           }
 
-          const sessionName = user.parishName || user.parish_name || user.dioceseName || user.diocese_name;
-          if (sessionName) {
-              setNombreParroquia(sessionName.toUpperCase());
-              return;
-          }
-
-          const pId = user.parishId || user.parish_id;
-          if (pId) {
-              try {
-                  const { data: pData } = await supabase
-                      .from('parishes')
-                      .select('name')
-                      .eq('id', pId)
-                      .single();
-                  
-                  if (pData && pData.name) {
-                      setNombreParroquia(pData.name.toUpperCase());
-                      return;
-                  }
-              } catch (e) {
-                  console.warn("No se pudo obtener el nombre de la parroquia desde Supabase");
+          // Intento seguro desde la Nube (Supabase)
+          try {
+              const { data: pData } = await supabase
+                  .from('parishes')
+                  .select('name')
+                  .eq('id', currentParishId)
+                  .single();
+              
+              if (pData && pData.name) {
+                  setNombreParroquia(pData.name.toUpperCase());
+                  return;
               }
+          } catch (e) {
+              console.warn("Sincronización menor: Leyendo nombre desde sesión.");
           }
 
-          setNombreParroquia('PARROQUIA');
+          // Fallback final
+          const sessionName = user?.parishName || user?.parish_name || user?.dioceseName;
+          setNombreParroquia((sessionName || 'PARROQUIA').toUpperCase());
       };
 
       fetchParishName();
-  }, [user, getMisDatosList]);
+  }, [user, currentParishId, getMisDatosList]);
 
-
+  // 2. BLINDAJE DE FECHAS (Evita que un borrador sin fecha rompa la tabla)
   const parseSortDate = (dateStr) => {
     if (!dateStr) return 0;
-    if (String(dateStr).match(/^\d{4}-\d{2}-\d{2}/)) return new Date(dateStr.split('T')[0]).getTime();
-    if (String(dateStr).match(/^\d{2}\/\d{2}\/\d{4}/)) {
-        const [d, m, y] = dateStr.split('/');
-        return new Date(`${y}-${m}-${d}`).getTime();
+    const str = String(dateStr);
+    if (str.match(/^\d{4}-\d{2}-\d{2}/)) return new Date(str.split('T')[0]).getTime() || 0;
+    if (str.match(/^\d{2}\/\d{2}\/\d{4}/)) {
+        const [d, m, y] = str.split('/');
+        return new Date(`${y}-${m}-${d}`).getTime() || 0;
     }
-    return 0;
+    return new Date(str).getTime() || 0;
   };
 
+  // 3. MOTOR CLOUD-NATIVE DE SINCRONIZACIÓN
   const updateDashboardData = useCallback(async () => {
-    if (!user?.parishId) return;
+    if (!currentParishId) return;
     setIsSyncing(true);
 
     try {
-        const { data: bCloud, error } = await supabase
-            .from('baptisms')
-            .select('id, raw_data, status')
-            .eq('parish_id', user.parishId)
-            .in('status', ['seated', 'confirmed', 'anulada']);
+        // Descarga paralela 100% desde Supabase
+        const [bRes, cRes, mRes] = await Promise.all([
+            supabase.from('baptisms').select('id, raw_data, status, created_at').eq('parish_id', currentParishId).in('status', ['seated', 'confirmed', 'anulada']),
+            supabase.from('confirmations').select('id, raw_data, status, created_at').eq('parish_id', currentParishId).in('status', ['seated', 'confirmed', 'anulada']),
+            supabase.from('marriages').select('id, raw_data, status, created_at').eq('parish_id', currentParishId).in('status', ['seated', 'confirmed', 'anulada'])
+        ]);
         
-        const bSeated = error ? [] : bCloud.map(r => ({ ...r.raw_data, id: r.id, status: r.status }));
+        const bSeated = bRes.error ? [] : bRes.data.map(r => ({ ...r.raw_data, id: r.id, status: r.status, createdAt: r.created_at }));
+        const cSeated = cRes.error ? [] : cRes.data.map(r => ({ ...r.raw_data, id: r.id, status: r.status, createdAt: r.created_at }));
+        const mSeated = mRes.error ? [] : mRes.data.map(r => ({ ...r.raw_data, id: r.id, status: r.status, createdAt: r.created_at }));
 
-        const cSeated = getConfirmations(user.parishId) || [];
-        const mSeated = getMatrimonios(user.parishId) || [];
+        // Borradores locales (Se mantienen en localStorage hasta ser asentados)
+        const bPending = JSON.parse(localStorage.getItem(`pendingBaptisms_${currentParishId}`) || '[]');
+        const cPending = JSON.parse(localStorage.getItem(`pendingConfirmations_${currentParishId}`) || '[]');
+        const mPending = JSON.parse(localStorage.getItem(`pendingMatrimonios_${currentParishId}`) || '[]');
 
-        const bPending = JSON.parse(localStorage.getItem(`pendingBaptisms_${user.parishId}`) || '[]');
-        const cPending = JSON.parse(localStorage.getItem(`pendingConfirmations_${user.parishId}`) || '[]');
-        const mPending = JSON.parse(localStorage.getItem(`pendingMatrimonios_${user.parishId}`) || '[]');
-
+        // Actualizamos Estadísticas
         setStats({
           baptisms: bSeated.length,
           confirmations: cSeated.length,
@@ -109,6 +113,7 @@ const ParishDashboard = () => {
         const pendingTotal = bPending.length + cPending.length + mPending.length;
         setHasPending(pendingTotal > 0);
 
+        // Mapeo seguro de registros para la tabla
         const mapRecord = (r, type, label, isPending) => {
             let nombres = r.firstName || r.nombres;
             let apellidos = r.lastName || r.apellidos;
@@ -138,26 +143,30 @@ const ParishDashboard = () => {
             ...mSeated.map(r => mapRecord(r, 'marriage', 'Matrimonio', false))
         ];
 
+        // Ordenar: Primero borradores pendientes, luego por fecha más reciente
         allRecords.sort((a, b) => {
             if (a.isPending && !b.isPending) return -1;
             if (!a.isPending && b.isPending) return 1;
             return b.sortDate - a.sortDate;
         });
 
-        setRecentRecords(allRecords.slice(0, 10));
+        setRecentRecords(allRecords.slice(0, 10)); // Mostrar los 10 más recientes
     } catch (err) {
         console.error("Dashboard Sync Error:", err);
+        toast({ title: 'Aviso', description: 'Trabajando en modo sin conexión.', variant: 'default' });
     } finally {
         setIsSyncing(false);
     }
-  }, [user, getConfirmations, getMatrimonios]);
+  }, [currentParishId, toast]);
 
+  // Listener para sincronización entre pestañas
   useEffect(() => {
     updateDashboardData();
     window.addEventListener('storage', updateDashboardData);
     return () => window.removeEventListener('storage', updateDashboardData);
   }, [updateDashboardData]);
 
+  // Configuración UI de Tarjetas
   const statsCards = [
     { label: 'Bautizos', value: stats.baptisms, icon: Church, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Confirmaciones', value: stats.confirmations, icon: ScrollText, color: 'text-purple-600', bg: 'bg-purple-50' },
@@ -165,6 +174,7 @@ const ParishDashboard = () => {
     { label: 'Total Libros', value: stats.total, icon: FileStack, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ];
 
+  // Columnas de la Tabla Principal
   const columns = [
     { 
         header: 'Titular', 
@@ -209,6 +219,7 @@ const ParishDashboard = () => {
     <DashboardLayout entityName={nombreParroquia}>
       <div className="max-w-7xl mx-auto pb-12">
         
+        {/* Cabecera del Panel */}
         <div className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div>
                 <div className="flex items-center gap-3 mb-2 text-[#4B7BA7]">
@@ -232,12 +243,13 @@ const ParishDashboard = () => {
                     <span className="text-[10px] font-black uppercase tracking-widest">Sincronizar</span>
                 </Button>
                 <Button variant="outline" onClick={() => generateBackup(data, user)} className="h-12 px-6 rounded-2xl border-gray-200 hover:bg-gray-50">
-                    <Download className="w-4 h-4 mr-2 text-blue-500" />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Exportar Backup</span>
+                    <Download className="w-4 h-4 mr-2 text-[#4B7BA7]" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-gray-700">Exportar Backup</span>
                 </Button>
             </div>
         </div>
 
+        {/* Tarjetas Estadísticas */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
             {statsCards.map((stat, idx) => (
                 <motion.div 
@@ -258,7 +270,10 @@ const ParishDashboard = () => {
             ))}
         </div>
 
+        {/* Área Principal Inferior */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            {/* Columna Izquierda: Botones Rápidos */}
             <div className="lg:col-span-1 space-y-6">
                 <div className="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm">
                     <h2 className="text-xs font-black text-gray-400 uppercase tracking-[0.3em] mb-8 flex items-center gap-2">
@@ -281,6 +296,7 @@ const ParishDashboard = () => {
                 </div>
             </div>
 
+            {/* Columna Derecha: Tabla Reciente */}
             <div className="lg:col-span-2">
                 <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden h-full flex flex-col">
                     <div className="px-10 py-8 border-b border-gray-50 flex items-center justify-between bg-gray-50/50">
@@ -288,7 +304,7 @@ const ParishDashboard = () => {
                             <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest">Actividad Reciente</h3>
                             <p className="text-[10px] text-gray-400 font-bold uppercase mt-1">Últimos 10 registros procesados</p>
                         </div>
-                        <Button variant="ghost" className="text-[10px] font-black uppercase tracking-widest text-[#4B7BA7]">Ver Historial Completo</Button>
+                        <Button variant="ghost" className="text-[10px] font-black uppercase tracking-widest text-[#4B7BA7]">Ver Historial</Button>
                     </div>
                     
                     <div className="p-4 flex-1">
@@ -311,6 +327,7 @@ const ParishDashboard = () => {
   );
 };
 
+// Subcomponente de Botones
 const QuickActionButton = ({ color, label, onClick }) => (
     <button 
         onClick={onClick}
