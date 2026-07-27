@@ -5,6 +5,14 @@ import { Button } from '@/components/ui/button';
 const DetailsModal = ({ isOpen, onClose, data }) => {
   if (!data) return null;
 
+  // Adaptadores para mapear los datos que vienen desde Supabase (formato snake_case) 
+  // o desde el estado local anterior (formato camelCase)
+  const provincia = data.provincia_eclesiastica || data.ecclesiasticalProvince || data.provinciaEclesiastica || 'No registrada';
+  const jurisdiccion = data.jurisdiccion_eclesiastica || data.jurisdiction || data.jurisdiccionEclesiastica || 'No registrada';
+  const obispo = data.bishop || 'No registrado';
+  const auxiliar = data.auxiliary_bishop || data.auxiliaryBishop || 'N/A';
+  const adminUser = data.username && data.username !== 'Sin asignar' ? data.username : 'No asignado';
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Detalles de Diócesis/Arquidiócesis">
       <div className="space-y-6">
@@ -24,22 +32,22 @@ const DetailsModal = ({ isOpen, onClose, data }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Provincia Eclesiástica</label>
-            <p className="text-gray-900">{data.ecclesiasticalProvince || 'No registrada'}</p>
+            <p className="text-gray-900">{provincia}</p>
           </div>
           <div>
             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Jurisdicción Eclesiástica</label>
-            <p className="text-gray-900">{data.jurisdiction || 'No registrada'}</p>
+            <p className="text-gray-900">{jurisdiccion}</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Obispo/Arzobispo</label>
-            <p className="text-gray-900">{data.bishop}</p>
+            <p className="text-gray-900">{obispo}</p>
           </div>
           <div>
             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Obispo Auxiliar</label>
-            <p className="text-gray-900">{data.auxiliaryBishop || 'N/A'}</p>
+            <p className="text-gray-900">{auxiliar}</p>
           </div>
         </div>
 
@@ -53,7 +61,7 @@ const DetailsModal = ({ isOpen, onClose, data }) => {
             </div>
             <div>
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Usuario Administrador</label>
-              <p className="text-gray-900 font-medium">{data.username || 'No asignado'}</p>
+              <p className="text-gray-900 font-medium">{adminUser}</p>
             </div>
           </div>
         </div>

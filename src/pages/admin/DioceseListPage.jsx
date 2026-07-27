@@ -13,20 +13,26 @@ const DioceseListPage = () => {
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
 
   useEffect(() => {
-    const fetchDioceses = async () => {
+    const fetchDiocesesAndUsers = async () => {
       try {
-        const { data, error } = await supabase
-            .from('dioceses')
-            .select('*')
-            .order('name', { ascending: true });
+        // Hacemos una doble consulta a la nube al mismo tiempo para cruzar los datos
+        const [dioRes, profRes] = await Promise.all([
+            supabase.from('dioceses').select('*').order('name', { ascending: true }),
+            supabase.from('user_profiles').select('*')
+        ]);
         
-        if (error) throw error;
+        if (dioRes.error) throw dioRes.error;
         
-        // Mapeamos los datos y asignamos el país por defecto
-        const formattedData = data.map(d => ({
-            ...d,
-            country: d.country || 'Colombia' 
-        }));
+        // Cruzamos los datos: A cada diócesis le asignamos su usuario administrador
+        const formattedData = dioRes.data.map(d => {
+            const admin = profRes.data?.find(u => u.diocese_id === d.id);
+            
+            return {
+                ...d,
+                country: d.country || 'Colombia',
+                username: admin ? (admin.email || admin.username) : 'Sin asignar'
+            };
+        });
         
         setDioceses(formattedData || []);
       } catch (error) {
@@ -36,7 +42,7 @@ const DioceseListPage = () => {
       }
     };
 
-    fetchDioceses();
+    fetchDiocesesAndUsers();
   }, []);
 
   const filteredDioceses = dioceses.filter(d => 
