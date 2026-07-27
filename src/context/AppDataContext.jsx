@@ -2427,17 +2427,43 @@ export const AppDataProvider = ({ children }) => {
         return { valid: true };
     };
   
-  const getPendingBaptisms = (parishId) => {
+  const getPendingBaptisms = async (parishId) => {
       if (!parishId) return [];
       try {
-          const raw = localStorage.getItem(`pendingBaptisms_${parishId}`);
-          if (!raw) return [];
-          const parsed = JSON.parse(raw);
-          if (!Array.isArray(parsed)) return [];
-          return parsed.filter(b => b && b.id && (b.nombres || b.firstName || b.apellidos || b.lastName));
-      } catch (error) {
-          console.error(`[AppDataContext] Error loading pending baptisms for parish ${parishId}:`, error);
+          // 🚀 1. DESCARGA DIRECTA Y EN TIEMPO REAL DESDE SUPABASE
+          const { data, error } = await supabase
+              .from('pending_baptisms')
+              .select('*')
+              .eq('parish_id', parishId)
+              .order('created_at', { ascending: false });
+
+          if (error) throw error;
+
+          if (data && data.length > 0) {
+              const cloudPending = data.map(pb => {
+                  let raw = pb.raw_data;
+                  if (typeof raw === 'string') {
+                      try { raw = JSON.parse(raw); } catch (e) { raw = {}; }
+                  }
+                  return { ...raw, id: pb.id, status: 'pending' };
+              });
+              
+              // Sincronizar el espejo local para que otras partes no fallen
+              localStorage.setItem(`pendingBaptisms_${parishId}`, JSON.stringify(cloudPending));
+              
+              return cloudPending.filter(b => b && b.id && (b.nombres || b.firstName || b.apellidos || b.lastName));
+          }
+          
+          // Si no hay datos, limpiamos la caché
+          localStorage.setItem(`pendingBaptisms_${parishId}`, JSON.stringify([]));
           return [];
+
+      } catch (error) {
+          console.error(`[AppDataContext] Error loading pending baptisms from Supabase:`, error);
+          // 🛡️ Fallback de seguridad: Si se cae el internet, lee el último respaldo local
+          const raw = localStorage.getItem(`pendingBaptisms_${parishId}`);
+          const parsed = raw ? JSON.parse(raw) : [];
+          return Array.isArray(parsed) ? parsed.filter(b => b && b.id) : [];
       }
   };
   
