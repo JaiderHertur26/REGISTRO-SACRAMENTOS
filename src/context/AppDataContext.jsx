@@ -166,6 +166,20 @@ export const AppDataProvider = ({ children }) => {
                       localStorage.setItem(`baptisms_${entityId}`, JSON.stringify(cloudBaptisms));
                       localStorage.setItem(`baptismPartidas_${entityId}`, JSON.stringify(cloudBaptisms));
                   }
+		  
+		  // Confirmaciones (Añadido)
+                  const { data: cData } = await supabase.from('confirmations').select('*').eq('parish_id', entityId);
+                  if (cData) {
+                      const cloudConfirmations = cData.map(c => ({ ...c.raw_data, id: c.id, status: c.status }));
+                      localStorage.setItem(`confirmations_${entityId}`, JSON.stringify(cloudConfirmations));
+                  }
+
+                  // Matrimonios (Añadido)
+                  const { data: mData } = await supabase.from('marriages').select('*').eq('parish_id', entityId);
+                  if (mData) {
+                      const cloudMarriages = mData.map(m => ({ ...m.raw_data, id: m.id, status: m.status }));
+                      localStorage.setItem(`matrimonios_${entityId}`, JSON.stringify(cloudMarriages));
+                  }
                   
                   // Párrocos
                   const { data: pData } = await supabase.from('parrocos').select('*').eq('parish_id', entityId);
@@ -2594,8 +2608,26 @@ export const AppDataProvider = ({ children }) => {
   const saveConfirmationToSource = async (data, parishId, mode) => {
       const storageKey = mode === 'celebrated' ? `confirmations_${parishId}` : `pendingConfirmations_${parishId}`;
       const list = JSON.parse(localStorage.getItem(storageKey) || '[]');
-      const newItem = { ...data, id: generateUUID(), status: mode === 'celebrated' ? 'confirmed' : 'pending', createdAt: new Date().toISOString() };
-      localStorage.setItem(storageKey, JSON.stringify([...list, newItem]));
+      const newItem = { ...data, id: data.id || generateUUID(), status: mode === 'celebrated' ? 'confirmed' : 'pending', createdAt: new Date().toISOString() };
+      
+      localStorage.setItem(storageKey, JSON.stringify([...list.filter(c => c.id !== newItem.id), newItem]));
+      
+      // Subir a Supabase si el sacramento ya está celebrado
+      if (mode === 'celebrated') {
+          try {
+              const dbRecord = {
+                  id: newItem.id, parish_id: parishId,
+                  first_name: String(newItem.nombres || newItem.firstName || ''),
+                  last_name: String(newItem.apellidos || newItem.lastName || ''),
+                  sacrament_date: newItem.fechaSacramento || newItem.sacramentDate || null,
+                  status: newItem.status,
+                  raw_data: newItem
+              };
+              await supabase.from('confirmations').upsert(dbRecord, { onConflict: 'id' });
+          } catch (e) { console.warn("Modo offline confirmación:", e); }
+      }
+      
+      window.dispatchEvent(new Event('storage'));
       return { success: true, id: newItem.id };
   };
 
@@ -2661,8 +2693,26 @@ export const AppDataProvider = ({ children }) => {
   const saveMatrimonioToSource = async (data, parishId, mode) => {
       const storageKey = mode === 'celebrated' ? `matrimonios_${parishId}` : `pendingMatrimonios_${parishId}`;
       const list = JSON.parse(localStorage.getItem(storageKey) || '[]');
-      const newItem = { ...data, id: generateUUID(), status: mode === 'celebrated' ? 'celebrated' : 'pending', createdAt: new Date().toISOString() };
-      localStorage.setItem(storageKey, JSON.stringify([...list, newItem]));
+      const newItem = { ...data, id: data.id || generateUUID(), status: mode === 'celebrated' ? 'celebrated' : 'pending', createdAt: new Date().toISOString() };
+      
+      localStorage.setItem(storageKey, JSON.stringify([...list.filter(m => m.id !== newItem.id), newItem]));
+
+      // Subir a Supabase si el matrimonio ya está celebrado
+      if (mode === 'celebrated') {
+          try {
+              const dbRecord = {
+                  id: newItem.id, parish_id: parishId,
+                  first_name: String(newItem.esposo?.nombres || newItem.esposo_nombres || ''),
+                  last_name: String(newItem.esposa?.nombres || newItem.esposa_nombres || ''),
+                  sacrament_date: newItem.fechaSacramento || newItem.sacramentDate || null,
+                  status: newItem.status,
+                  raw_data: newItem
+              };
+              await supabase.from('marriages').upsert(dbRecord, { onConflict: 'id' });
+          } catch (e) { console.warn("Modo offline matrimonio:", e); }
+      }
+      
+      window.dispatchEvent(new Event('storage'));
       return { success: true, id: newItem.id };
   };
 
