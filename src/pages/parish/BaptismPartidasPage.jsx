@@ -122,8 +122,7 @@ const DetailItem = ({ icon: Icon, label, value, isItalic = false }) => (
 
 const BaptismPartidasPage = () => {
   const { user } = useAuth();
-  const { getMisDatosList, purificarRegistroBautismo } = useAppData();
-  const { toast } = useToast();
+  const { getMisDatosList, fetchBaptismsFromSource } = useAppData();
   const navigate = useNavigate();
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -154,36 +153,13 @@ const BaptismPartidasPage = () => {
       setIsLoading(true);
 
       try {
-          // 🚀 Consulta blindada a Supabase
-          const { data, count, error } = await supabase
-              .from('baptisms')
-              .select('*', { count: 'exact' })
-              .eq('parish_id', parishId)
-              .order('created_at', { ascending: false });
+          // Descarga directa desde Supabase usando el servicio optimizado
+          const allData = await fetchBaptismsFromSource(parishId);
 
-          if (error) throw error;
-
-          const rawList = data || [];
-
-          // Purificación y decodificación
-          const sanitizedData = rawList.map(record => {
-              const raw = typeof record.raw_data === 'string' ? JSON.parse(record.raw_data) : (record.raw_data || {});
-              return purificarRegistroBautismo({ 
-                  ...raw, 
-                  id: record.id, 
-                  status: record.status,
-                  marginNote: record.margin_note || raw.marginNote || raw.notaMarginal,
-                  Libro: raw.Libro || record.book_number,
-                  folio: raw.folio || record.page_number,
-                  numero: raw.numero || record.entry_number
-              });
-          });
-
-          // Filtrado de búsqueda inteligente
-          let filtered = sanitizedData;
+          let filtered = allData || [];
           if (searchTerm.trim()) {
               const term = searchTerm.trim().toUpperCase();
-              filtered = sanitizedData.filter(r => 
+              filtered = filtered.filter(r => 
                   (r.nombres && r.nombres.includes(term)) ||
                   (r.apellidos && r.apellidos.includes(term)) ||
                   (r.nombrePadre && r.nombrePadre.includes(term)) ||
@@ -203,10 +179,6 @@ const BaptismPartidasPage = () => {
           }
       } catch (err) {
           console.error("Error al consultar partidas:", err);
-          // Fallback a memoria local
-          const local = JSON.parse(localStorage.getItem(`baptisms_${parishId}`) || '[]');
-          setRecords(local.map(r => purificarRegistroBautismo(r)));
-          setTotalRecords(local.length);
       } finally {
           setIsLoading(false);
       }
@@ -242,7 +214,7 @@ const BaptismPartidasPage = () => {
           <div className="flex flex-col md:flex-row justify-between items-end gap-4">
             <div>
                 <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">Partidas de Bautismo</h1>
-                <p className="text-[#4B7BA7] text-[10px] font-black uppercase tracking-[0.3em] mt-2 ml-1">Archivo Parroquial Permanente • Registro Canónico Oficial</p>
+                <p className="text-[#4B7BA7] text-[10px] font-black uppercase tracking-[0.3em] mt-2 ml-1">{nombreParroquia} • Archivo Parroquial Permanente</p>
             </div>
             <div className="bg-slate-900 text-white px-6 py-3 rounded-[1.5rem] text-[11px] font-black uppercase tracking-widest shadow-2xl">
                 Total en Archivo: {totalRecords}
