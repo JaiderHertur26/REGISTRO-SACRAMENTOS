@@ -10,91 +10,161 @@ export const AuthProvider = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
 
+    // 🚀 FUNCIÓN MAESTRA: Obtiene perfil y enriquece el objeto user con parish_id y parishName
+    const fetchAndEnrichProfile = async (authUser) => {
+        if (!authUser) return null;
+
+        try {
+            // 1. Buscar en user_profiles vinculando el nombre de la parroquia
+            let { data: prof, error } = await supabase
+                .from('user_profiles')
+                .select('*, parishes:parish_id(id, name)')
+                .or(`auth_user_id.eq.${authUser.id},id.eq.${authUser.id}`)
+                .maybeSingle();
+
+            // 2. Fallback de búsqueda por email si no coincidió por ID
+            if (!prof && authUser.email) {
+                const { data: emailProf } = await supabase
+                    .from('user_profiles')
+                    .select('*, parishes:parish_id(id, name)')
+                    .eq('email', authUser.email)
+                    .maybeSingle();
+                prof = emailProf;
+            }
+
+            const pId = prof?.parish_id || authUser.user_metadata?.parish_id || null;
+            const pName = prof?.parishes?.name || prof?.parish_name || authUser.user_metadata?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO';
+            const userRole = prof?.role || authUser.user_metadata?.role || 'parish';
+
+            const enrichedUser = {
+                ...authUser,
+                ...prof,
+                id: authUser.id,
+                parishId: pId,
+                parish_id: pId,
+                parishName: pName?.toUpperCase(),
+                parish_name: pName?.toUpperCase(),
+                role: userRole
+            };
+
+            return { prof, enrichedUser };
+        } catch (error) {
+            console.error("Error cargando perfil de usuario:", error);
+            return null;
+        }
+    };
+
     useEffect(() => {
         const initSession = async () => {
             try {
                 const { data: { session } } = await supabase.auth.getSession();
+                
                 if (session?.user) {
-                    setUser(session.user);
-                    await loadUserProfile(session.user.id);
+                    const result = await fetchAndEnrichProfile(session.user);
+                    
+                    if (result?.enrichedUser) {
+                        setUser(result.enrichedUser);
+                        setProfile(result.prof);
+                        setIsAuthenticated(true);
+                        localStorage.setItem('sacraments_user_profile', JSON.stringify(result.prof || {}));
+                        localStorage.setItem('currentUser', JSON.stringify(result.enrichedUser));
+                        localStorage.setItem('user', JSON.stringify(result.enrichedUser));
+                    } else {
+                        setUser(session.user);
+                        setIsAuthenticated(true);
+                    }
                 } else {
-                    setIsLoading(false);
+                    setIsAuthenticated(false);
                 }
             } catch (error) {
+                console.error("Error al inicializar sesión:", error);
+                const cachedUser = localStorage.getItem('currentUser');
+                if (cachedUser) {
+                    const parsed = JSON.parse(cachedUser);
+                    setUser(parsed);
+                    setProfile(parsed);
+                    setIsAuthenticated(true);
+                }
+            } finally {
                 setIsLoading(false);
             }
         };
+
         initSession();
 
         const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-            if (event === 'SIGNED_OUT') {
+            if (event === 'SIGNED_IN' && session?.user) {
+                const result = await fetchAndEnrichProfile(session.user);
+                if (result?.enrichedUser) {
+                    setUser(result.enrichedUser);
+                    setProfile(result.prof);
+                    setIsAuthenticated(true);
+                    localStorage.setItem('currentUser', JSON.stringify(result.enrichedUser));
+                }
+            } else if (event === 'SIGNED_OUT') {
                 setUser(null);
                 setProfile(null);
                 setIsAuthenticated(false);
                 localStorage.removeItem('sacraments_user_profile');
+                localStorage.removeItem('currentUser');
+                localStorage.removeItem('user');
             }
         });
 
-        return () => authListener.subscription.unsubscribe();
+        return () => {
+            authListener.subscription.unsubscribe();
+        };
     }, []);
-
-    const loadUserProfile = async (authUserId) => {
-        try {
-            const { data, error } = await supabase
-                .from('user_profiles')
-                .select('*')
-                .eq('auth_user_id', authUserId)
-                .single();
-
-            if (data) {
-                setProfile(data);
-                setIsAuthenticated(true);
-                localStorage.setItem('sacraments_user_profile', JSON.stringify(data));
-            }
-        } catch (error) {
-            const cachedProfile = localStorage.getItem('sacraments_user_profile');
-            if (cachedProfile) {
-                setProfile(JSON.parse(cachedProfile));
-                setIsAuthenticated(true);
-            } else {
-                setIsAuthenticated(false);
-            }
-        } finally {
-            setIsLoading(false);
-        }
-    };
 
     const login = async (email, password) => {
         try {
             const { data, error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) throw error;
             
-            const { data: prof } = await supabase.from('user_profiles').select('*').eq('auth_user_id', data.user.id).single();
+            const result = await fetchAndEnrichProfile(data.user);
             
-            if(prof) {
-                setProfile(prof);
+            if (result?.enrichedUser) {
+                setUser(result.enrichedUser);
+                setProfile(result.prof);
                 setIsAuthenticated(true);
-                localStorage.setItem('sacraments_user_profile', JSON.stringify(prof));
-                return { success: true, role: prof.role };
+                localStorage.setItem('sacraments_user_profile', JSON.stringify(result.prof || {}));
+                localStorage.setItem('currentUser', JSON.stringify(result.enrichedUser));
+                localStorage.setItem('user', JSON.stringify(result.enrichedUser));
+                return { success: true, role: result.enrichedUser.role };
             }
-            return { success: true, role: 'unknown' };
+            
+            return { success: true, role: 'parish' };
         } catch (error) {
             return { success: false, error: "Credenciales incorrectas." };
         }
     };
 
-    // 🚀 FIX: Ahora cierra sesión y te lleva a la pantalla PÚBLICA PRINCIPAL (PublicSearchPage)
     const logout = async () => {
-        await supabase.auth.signOut();
+        try {
+            await supabase.auth.signOut();
+        } catch (e) {}
+        setUser(null);
+        setProfile(null);
+        setIsAuthenticated(false);
+        localStorage.removeItem('sacraments_user_profile');
+        localStorage.removeItem('currentUser');
+        localStorage.removeItem('user');
         window.location.href = '/'; 
     };
 
     return (
         <AuthContext.Provider value={{
-            user, profile, isAuthenticated, isLoading,
-            role: profile?.role || null,
-            parishId: profile?.parish_id || null,
-            login, logout
+            user, 
+            profile, 
+            isAuthenticated, 
+            isLoading,
+            role: user?.role || profile?.role || null,
+            parishId: user?.parish_id || profile?.parish_id || null,
+            parish_id: user?.parish_id || profile?.parish_id || null,
+            parishName: user?.parishName || profile?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO',
+            parish_name: user?.parish_name || profile?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO',
+            login, 
+            logout
         }}>
             {isLoading ? (
                 <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50 z-50 fixed top-0 left-0">

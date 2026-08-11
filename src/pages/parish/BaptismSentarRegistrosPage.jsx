@@ -47,7 +47,7 @@ const BaptismSentarRegistrosPage = () => {
         return sacramentDate > now; 
     };
 
-    // 🚀 1. RASTREADOR DE PARROQUIA
+    // 🚀 OBTENER ID REAL DE LA PARROQUIA
     useEffect(() => {
         const resolveParish = async () => {
             if (!user) return;
@@ -59,7 +59,7 @@ const BaptismSentarRegistrosPage = () => {
                     .select('parish_id')
                     .eq('email', user.email)
                     .maybeSingle();
-                if (profile) pId = profile.parish_id;
+                if (profile?.parish_id) pId = profile.parish_id;
             }
 
             if (pId) {
@@ -78,7 +78,7 @@ const BaptismSentarRegistrosPage = () => {
         resolveParish();
     }, [user]);
 
-    // 🚀 2. CARGA DIRECTA DE BORRADORES DESDE SUPABASE
+    // 🚀 CARGA DIRECTA DESDE pending_baptisms EN SUPABASE
     const loadData = async () => {
         if (!resolvedParishId) return;
         setIsLoading(true);
@@ -94,7 +94,7 @@ const BaptismSentarRegistrosPage = () => {
 
             let recordsMapped = [];
             
-            if (tempData) {
+            if (tempData && tempData.length > 0) {
                 const cloudPending = tempData.map(pb => {
                     const raw = typeof pb.raw_data === 'string' ? JSON.parse(pb.raw_data) : (pb.raw_data || {});
                     return { ...raw, id: pb.id, status: 'pending' };
@@ -255,7 +255,7 @@ const BaptismSentarRegistrosPage = () => {
 
     const handleBatchConfirm = async () => {
         if (selectedIds.length === 0 || isSaving) return;
-        if (!window.confirm(`¿Asentar ${selectedIds.length} registros en bloque permanentemente?`)) return;
+        if (!window.confirm(`¿Asentar ${selectedIds.length} registros permanentemente?`)) return;
 
         setIsSaving(true);
         try {

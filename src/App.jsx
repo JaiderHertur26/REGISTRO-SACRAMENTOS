@@ -67,7 +67,6 @@ import BaptismCorrectionNewPage from '@/pages/parish/BaptismCorrectionNewPage';
 import BaptismCorrectionListPage from '@/pages/parish/BaptismCorrectionListPage';
 import EditDecreeRepositionSheet from '@/pages/parish/EditDecreeRepositionSheet';
 import EditDecreeCorrectionSheet from '@/pages/parish/EditDecreeCorrectionSheet';
-import BD_BautizosPage from '@/pages/parish/BD_BautizosPage';
 
 /* --- CONFIRMATION --- */
 import ConfirmationNewPage from '@/pages/parish/ConfirmationNewPage';
@@ -83,13 +82,11 @@ import MatrimonioNewPage from '@/pages/parish/MatrimonioNewPage';
 import MatrimonioEditPage from '@/pages/parish/MatrimonioEditPage';
 import MatrimonioCelebratedPage from '@/pages/parish/MatrimonioCelebratedPage';
 import MatrimonioSentarRegistrosPage from '@/pages/parish/MatrimonioSentarRegistrosPage';
-import MatrimonioSeatIndividualPage from '@/pages/parish/MatrimonioSeatIndividualPage';
-import MatrimonioSeatBatchPage from '@/pages/parish/MatrimonioSeatBatchPage';
 import MarriageIndexPage from '@/pages/parish/MarriageIndexPage';
 import MatrimonioParametersPage from '@/pages/parish/MatrimonioParametersPage';
 import MatrimonioPartidasPage from '@/pages/parish/MatrimonioPartidasPage';
 
-/* --- DECREES (CORRECTION & REPLACEMENT) --- */
+/* --- DECREES (CORRECTION & REPLACEMENT - CHANCERY) --- */
 import NewDecreeCorrectionPage from '@/pages/chancery/decree-correction/NewDecreeCorrectionPage';
 import NewDecreeReplacementPage from '@/pages/chancery/decree-replacement/NewDecreeReplacementPage';
 import ChanceryCorrectionDecreeListPage from '@/pages/chancery/ChanceryCorrectionDecreeListPage';
@@ -106,7 +103,7 @@ import AnnulmentMatrimonialPage from '@/pages/parish/AnnulmentMatrimonialPage';
 /* --- ANNULMENT (CHANCERY) --- */
 import ChanceryAnnulmentConceptsPage from '@/pages/chancery/decree-annulment/AnnulmentConceptsPage';
 
-/* --- MARRIAGE ANNULMENT (NULIDAD MATRIMONIAL) --- */
+/* --- MARRIAGE NOTIFICATIONS (NOTIFICACIÓN MATRIMONIAL) --- */
 import NotificacionMatrimonialPage from '@/pages/parish/NotificacionMatrimonialPage';
 import NotificationWarningPage from '@/pages/parish/NotificationWarningPage';
 import AvisoNotificacionMatrimonialPage from '@/pages/parish/AvisoNotificacionMatrimonialPage';
@@ -185,13 +182,13 @@ const AppContent = () => {
                 <Route path="/parroquia/bautismo/sentar-registros" element={<ProtectedRoute requiredRole="parish"><BaptismSentarRegistrosPage /></ProtectedRoute>} />
                 <Route path="/parroquia/bautismo/asentar" element={<ProtectedRoute requiredRole="parish"><BaptismSentarRegistrosPage /></ProtectedRoute>} />
                 <Route path="/parroquia/bautismo/partidas" element={<ProtectedRoute requiredRole="parish"><BaptismPartidasPage /></ProtectedRoute>} />
+                <Route path="/parroquia/bautismo/base-datos" element={<Navigate to="/parroquia/bautismo/partidas" replace />} />
                 <Route path="/parroquia/bautismo/indice" element={<ProtectedRoute requiredRole="parish"><BaptismIndexPage /></ProtectedRoute>} />
                 <Route path="/parroquia/bautismo/parametros" element={<ProtectedRoute requiredRole="parish"><BaptismParametersPage /></ProtectedRoute>} />
                 <Route path="/parroquia/parametros" element={<ProtectedRoute requiredRole="parish"><BaptismParametersPage /></ProtectedRoute>} />
                 <Route path="/parroquia/bautismo/:baptismPartidaId" element={<ProtectedRoute requiredRole="parish"><BaptismDetailPage /></ProtectedRoute>} />
-                <Route path="/parroquia/bautismo/base-datos" element={<ProtectedRoute requiredRole="parish"><BD_BautizosPage /></ProtectedRoute>} />
 
-                {/* --- DECREES (Reposición & Corrección) ROUTES (Parish) --- */}
+                {/* --- DECREES (Reposición & Corrección - Parish) --- */}
                 <Route path="/parroquia/decretos/nuevo-reposicion" element={<ProtectedRoute requiredRole="parish"><BaptismRepositionNewPage /></ProtectedRoute>} />
                 <Route path="/parish/decree-replacement/new" element={<ProtectedRoute requiredRole="parish"><BaptismRepositionNewPage /></ProtectedRoute>} />
                 <Route path="/parroquia/decretos/reposicion" element={<ProtectedRoute requiredRole="parish"><BaptismRepositionListPage /></ProtectedRoute>} />
@@ -211,6 +208,7 @@ const AppContent = () => {
                 <Route path="/parroquia/confirmacion/editar" element={<ProtectedRoute requiredRole="parish"><ConfirmationEditPage /></ProtectedRoute>} />
                 <Route path="/parroquia/confirmacion/celebrado" element={<ProtectedRoute requiredRole="parish"><ConfirmationCelebratedPage /></ProtectedRoute>} />
                 <Route path="/parroquia/confirmacion/sentar-registros" element={<ProtectedRoute requiredRole="parish"><ConfirmationSentarRegistrosPage /></ProtectedRoute>} />
+                <Route path="/parroquia/confirmacion/asentar" element={<ProtectedRoute requiredRole="parish"><ConfirmationSentarRegistrosPage /></ProtectedRoute>} />
                 <Route path="/parroquia/confirmacion/partidas" element={<ProtectedRoute requiredRole="parish"><ConfirmationPartidasPage /></ProtectedRoute>} />
                 <Route path="/parroquia/confirmacion/indice" element={<ProtectedRoute requiredRole="parish"><ConfirmationIndexPage /></ProtectedRoute>} />
                 <Route path="/parroquia/confirmacion/parametros" element={<ProtectedRoute requiredRole="parish"><ConfirmationParametersPage /></ProtectedRoute>} />
@@ -220,8 +218,7 @@ const AppContent = () => {
                 <Route path="/parroquia/matrimonio/editar" element={<ProtectedRoute requiredRole="parish"><MatrimonioEditPage /></ProtectedRoute>} />
                 <Route path="/parroquia/matrimonio/celebrado" element={<ProtectedRoute requiredRole="parish"><MatrimonioCelebratedPage /></ProtectedRoute>} />
                 <Route path="/parroquia/matrimonio/sentar-registros" element={<ProtectedRoute requiredRole="parish"><MatrimonioSentarRegistrosPage /></ProtectedRoute>} />
-                <Route path="/parroquia/matrimonio/sentar-registros/individual" element={<ProtectedRoute requiredRole="parish"><MatrimonioSeatIndividualPage /></ProtectedRoute>} />
-                <Route path="/parroquia/matrimonio/sentar-registros/lote" element={<ProtectedRoute requiredRole="parish"><MatrimonioSeatBatchPage /></ProtectedRoute>} />
+                <Route path="/parroquia/matrimonio/asentar" element={<ProtectedRoute requiredRole="parish"><MatrimonioSentarRegistrosPage /></ProtectedRoute>} />
                 <Route path="/parroquia/matrimonio/partidas" element={<ProtectedRoute requiredRole="parish"><MatrimonioPartidasPage /></ProtectedRoute>} />
                 <Route path="/parroquia/matrimonio/indice" element={<ProtectedRoute requiredRole="parish"><MarriageIndexPage /></ProtectedRoute>} />
                 <Route path="/parroquia/matrimonio/parametros" element={<ProtectedRoute requiredRole="parish"><MatrimonioParametersPage /></ProtectedRoute>} />
@@ -230,7 +227,7 @@ const AppContent = () => {
                 <Route path="/parroquia/decretos/nulidad" element={<ProtectedRoute requiredRole="parish"><AnnulmentMatrimonialPage /></ProtectedRoute>} />
                 <Route path="/parish/annulment-concepts" element={<ProtectedRoute requiredRole="parish"><AnnulmentConceptsPage /></ProtectedRoute>} />
 
-                {/* --- MARRIAGE ANNULMENT (NULIDAD MATRIMONIAL) --- */}
+                {/* --- MARRIAGE NOTIFICATIONS (PARISH) --- */}
                 <Route path="/parroquia/matrimonio/notificacion" element={<ProtectedRoute requiredRole="parish"><NotificacionMatrimonialPage /></ProtectedRoute>} />
                 <Route path="/parroquia/aviso-notificacion" element={<ProtectedRoute requiredRole="parish"><NotificationWarningPage /></ProtectedRoute>} />
                 <Route path="/parroquia/matrimonio/aviso-notificacion" element={<ProtectedRoute requiredRole="parish"><AvisoNotificacionMatrimonialPage /></ProtectedRoute>} />
@@ -244,7 +241,7 @@ const AppContent = () => {
                 <Route path="/chancery/certifications" element={<ProtectedRoute requiredRole="chancery"><ChanceryDashboard /></ProtectedRoute>} />
                 <Route path="/chancery/backups" element={<ProtectedRoute requiredRole="chancery"><BackupPage /></ProtectedRoute>} />
 
-                {/* --- DECREES (CORRECTION & REPLACEMENT) ROUTES (Chancery) --- */}
+                {/* --- DECREES (CORRECTION & REPLACEMENT - CHANCERY) --- */}
                 <Route path="/chancery/decretos/correcciones" element={<ProtectedRoute requiredRole="chancery"><ChanceryDecreeCorrectionViewPage /></ProtectedRoute>} />
                 <Route path="/chancery/decretos/reposiciones" element={<ProtectedRoute requiredRole="chancery"><ChanceryDecreeReplacementViewPage /></ProtectedRoute>} />
 
