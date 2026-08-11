@@ -11,7 +11,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { convertDateToSpanishTextNatural } from '@/utils/dateTimeFormatters';
 import {
     Search, Edit, Database, BookOpen,
-    Clock, Loader2, ChevronLeft, ChevronRight, MapPin, Hash, Trash2
+    Loader2, ChevronLeft, ChevronRight, MapPin, Trash2
 } from 'lucide-react';
 
 const BD_BautizosPage = () => {
@@ -23,21 +23,50 @@ const BD_BautizosPage = () => {
     const topScrollRef = useRef(null);
     const tableContainerRef = useRef(null);
 
-    const [searchTerm, setSearchTerm] = useState('');
+    const [resolvedParishId, setResolvedParishId] = useState(null);
+    const [nombreParroquia, setNombreParroquia] = useState('PARROQUIA');
     const [registrosTemporales, setRegistrosTemporales] = useState([]);
     const [registrosPermanentes, setRegistrosPermanentes] = useState([]);
     const [totalRegistros, setTotalRegistros] = useState(0);
     const [paginaActual, setPaginaActual] = useState(1);
     const registrosPorPagina = 50;
     const [cargando, setCargando] = useState(true);
-    const [tabActiva, setTabActiva] = useState('permanentes');
+    const [tabActiva, setTabActiva] = useState('temporales'); // 🚀 Abre directo en borradores
 
-    // 🚀 1. IDENTIFICADOR NORMALIZADO
-    const entityId = user?.parish_id || user?.parishId;
+    // 🚀 1. RASTREADOR DEL ID REAL DE PARROQUIA
+    useEffect(() => {
+        const resolveParish = async () => {
+            if (!user) return;
+            let pId = user.parish_id || user.parishId;
+
+            if (!pId && user.email) {
+                const { data: profile } = await supabase
+                    .from('user_profiles')
+                    .select('parish_id')
+                    .eq('email', user.email)
+                    .maybeSingle();
+                if (profile) pId = profile.parish_id;
+            }
+
+            if (pId) {
+                setResolvedParishId(pId);
+                const { data: pData } = await supabase
+                    .from('parishes')
+                    .select('name')
+                    .eq('id', pId)
+                    .maybeSingle();
+                if (pData?.name) setNombreParroquia(pData.name.toUpperCase());
+            } else {
+                setCargando(false);
+            }
+        };
+
+        resolveParish();
+    }, [user]);
 
     const getNombreParrocoActual = () => {
-        if (!entityId) return '---';
-        const lista = getParrocos(entityId) || [];
+        if (!resolvedParishId) return '---';
+        const lista = getParrocos(resolvedParishId) || [];
         const actual = lista.find(p => String(p.estado) === '1');
         return actual ? `${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase() : '---';
     };
@@ -51,7 +80,7 @@ const BD_BautizosPage = () => {
 
     const purificarRegistro = (raw) => {
         if (!raw) return null;
-        const pId = raw.parishId || raw.parish_id || entityId;
+        const pId = raw.parishId || raw.parish_id || resolvedParishId;
         const config = obtenerNotasAlMargen(pId) || {};
         
         const noteTextRaw = raw.notaMarginal || raw.margin_note || raw.marginNote || '';
@@ -146,7 +175,7 @@ const BD_BautizosPage = () => {
     };
 
     const handleDeleteTemporal = async (id) => {
-        if (!window.confirm("¿Está seguro de eliminar este borrador de la nube? El número de registro regresará al anterior.")) return;
+        if (!window.confirm("¿Está seguro de eliminar este borrador de la nube? El correlativo regresará al número anterior.")) return;
 
         try {
             const { error: deleteError } = await supabase
@@ -156,14 +185,14 @@ const BD_BautizosPage = () => {
                 
             if (deleteError) throw deleteError;
 
-            // Decrementar correlativo en parámetros
+            // Decrementar correlativo
             const { data } = await supabase
                 .from('parish_parameters')
                 .select('bautizos_params')
-                .eq('parish_id', entityId)
+                .eq('parish_id', resolvedParishId)
                 .maybeSingle();
 
-            if (data && data.bautizos_params && data.bautizos_params.numeroRegistroActual) {
+            if (data?.bautizos_params?.numeroRegistroActual) {
                 const currentParams = data.bautizos_params;
                 const currentNum = parseInt(currentParams.numeroRegistroActual, 10) || 0;
                 const prevNum = Math.max(1, currentNum - 1);
@@ -173,7 +202,7 @@ const BD_BautizosPage = () => {
                     numeroRegistroActual: String(prevNum).padStart(6, '0')
                 };
 
-                await supabase.from('parish_parameters').update({ bautizos_params: updatedParams }).eq('parish_id', entityId);
+                await supabase.from('parish_parameters').update({ bautizos_params: updatedParams }).eq('parish_id', resolvedParishId);
             }
 
             setRegistrosTemporales(prev => prev.filter(r => r.id !== id));
@@ -188,18 +217,16 @@ const BD_BautizosPage = () => {
         }
     };
 
+    // 🚀 2. CONSULTA DIRECTA Y DECODIFICADA DE SUPABASE
     const fetchData = async () => {
-        if (!entityId) {
-            setCargando(false);
-            return;
-        }
+        if (!resolvedParishId) return;
         setCargando(true);
         try {
             // 1. Obtener Registros Permanentes
             const { data: permData, count, error: permError } = await supabase
                 .from('baptisms')
                 .select('*', { count: 'exact' })
-                .eq('parish_id', entityId)
+                .eq('parish_id', resolvedParishId)
                 .order('entry_number', { ascending: false })
                 .range((paginaActual - 1) * registrosPorPagina, paginaActual * registrosPorPagina - 1);
 
@@ -223,7 +250,7 @@ const BD_BautizosPage = () => {
             const { data: tempData, error: tempError } = await supabase
                 .from('pending_baptisms')
                 .select('*')
-                .eq('parish_id', entityId)
+                .eq('parish_id', resolvedParishId)
                 .order('created_at', { ascending: false });
                 
             if (tempError) throw tempError;
@@ -246,8 +273,10 @@ const BD_BautizosPage = () => {
     };
 
     useEffect(() => { 
-        fetchData(); 
-    }, [entityId, paginaActual]);
+        if (resolvedParishId) {
+            fetchData(); 
+        }
+    }, [resolvedParishId, paginaActual]);
 
     const handleTopScroll = () => { if (topScrollRef.current && tableContainerRef.current) tableContainerRef.current.scrollLeft = topScrollRef.current.scrollLeft; };
     const handleTableScroll = () => { if (topScrollRef.current && tableContainerRef.current) topScrollRef.current.scrollLeft = tableContainerRef.current.scrollLeft; };
@@ -280,14 +309,14 @@ const BD_BautizosPage = () => {
     ];
 
     return (
-        <DashboardLayout entityName={user?.parishName || "Parroquia"}>
+        <DashboardLayout entityName={nombreParroquia}>
             <div className="max-w-[100vw] px-4 md:px-8 space-y-4 pb-20">
                 <div className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
                     <div className="flex items-center gap-4">
                         <div className="bg-[#4B7BA7] p-3 rounded-2xl text-white shadow-lg shadow-blue-900/20"><Database className="w-6 h-6" /></div>
                         <div>
                             <h1 className="text-2xl font-black text-gray-900 tracking-tighter uppercase leading-none">Base de Datos Central</h1>
-                            <p className="text-gray-400 text-[9px] font-bold uppercase tracking-[0.3em] mt-1">Control de Borradores y Registros Permanentes</p>
+                            <p className="text-gray-400 text-[9px] font-bold uppercase tracking-[0.3em] mt-1">{nombreParroquia} • Sincronización en Tiempo Real</p>
                         </div>
                     </div>
                 </div>
@@ -295,11 +324,11 @@ const BD_BautizosPage = () => {
                 <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-xl overflow-hidden flex flex-col">
                     <Tabs value={tabActiva} onValueChange={setTabActiva}>
                         <TabsList className="w-full justify-start rounded-none border-b bg-gray-50/50 p-2 h-14">
-                            <TabsTrigger value="permanentes" className="px-8 rounded-xl font-black uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                                Permanentes ({totalRegistros})
-                            </TabsTrigger>
                             <TabsTrigger value="temporales" className="px-8 rounded-xl font-black uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-sm">
                                 Borradores (Temporales) ({registrosTemporales.length})
+                            </TabsTrigger>
+                            <TabsTrigger value="permanentes" className="px-8 rounded-xl font-black uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                                Permanentes ({totalRegistros})
                             </TabsTrigger>
                         </TabsList>
 
@@ -309,24 +338,32 @@ const BD_BautizosPage = () => {
 
                         <div ref={tableContainerRef} onScroll={handleTableScroll} className="overflow-auto max-h-[65vh] custom-scrollbar">
                             <div className="min-w-[5000px]">
-                                <TabsContent value="permanentes" className="p-0 m-0">
-                                    <Table
-                                        columns={columns}
-                                        data={registrosPermanentes}
-                                        actions={[
-                                            { label: 'Editar', icon: <Edit className="w-4" />, onClick: (r) => navigate(`/parroquia/bautismo/editar?id=${r.id}`) }
-                                        ]}
-                                    />
-                                </TabsContent>
                                 <TabsContent value="temporales" className="p-0 m-0">
-                                    <Table
-                                        columns={columns}
-                                        data={registrosTemporales}
-                                        actions={[
-                                            { label: 'Asentar', icon: <BookOpen className="w-4 text-blue-600" />, onClick: (r) => navigate(`/parroquia/bautismo/sentar-registros`) },
-                                            { label: 'Eliminar', icon: <Trash2 className="w-4 text-red-500" />, onClick: (r) => handleDeleteTemporal(r.id) }
-                                        ]}
-                                    />
+                                    {cargando ? (
+                                        <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-[#4B7BA7]" /></div>
+                                    ) : (
+                                        <Table
+                                            columns={columns}
+                                            data={registrosTemporales}
+                                            actions={[
+                                                { label: 'Asentar', icon: <BookOpen className="w-4 text-blue-600" />, onClick: (r) => navigate(`/parroquia/bautismo/sentar-registros`) },
+                                                { label: 'Eliminar', icon: <Trash2 className="w-4 text-red-500" />, onClick: (r) => handleDeleteTemporal(r.id) }
+                                            ]}
+                                        />
+                                    )}
+                                </TabsContent>
+                                <TabsContent value="permanentes" className="p-0 m-0">
+                                    {cargando ? (
+                                        <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-[#4B7BA7]" /></div>
+                                    ) : (
+                                        <Table
+                                            columns={columns}
+                                            data={registrosPermanentes}
+                                            actions={[
+                                                { label: 'Editar', icon: <Edit className="w-4" />, onClick: (r) => navigate(`/parroquia/bautismo/editar?id=${r.id}`) }
+                                            ]}
+                                        />
+                                    )}
                                 </TabsContent>
                             </div>
                         </div>
@@ -334,7 +371,7 @@ const BD_BautizosPage = () => {
 
                     <div className="p-4 bg-gray-50/80 flex justify-between items-center border-t border-gray-100">
                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                            Página Actual: {paginaActual} — Registros Totales: {tabActiva === 'permanentes' ? totalRegistros : registrosTemporales.length}
+                            Página Actual: {paginaActual} — Registros: {tabActiva === 'permanentes' ? totalRegistros : registrosTemporales.length}
                         </p>
                         <div className="flex gap-2">
                             <Button variant="ghost" onClick={() => setPaginaActual(p => p - 1)} disabled={paginaActual === 1} className="rounded-xl h-8"><ChevronLeft className="w-4 h-4" /></Button>

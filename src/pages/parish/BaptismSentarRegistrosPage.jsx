@@ -7,10 +7,10 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { 
-    ChevronLeft, ChevronRight, Save, LogOut, 
+    ChevronLeft, ChevronRight, Save, 
     CheckCircle2, AlertCircle, Loader2, Printer,
-    LayoutList, BookOpenCheck, Settings2, Database,
-    Layers, CheckSquare, Square, Users, Calendar, Hash, MapPin, Lock
+    LayoutList, BookOpenCheck,
+    Layers, CheckSquare, Square, Lock
 } from 'lucide-react';
 import BaptismTicket from '@/components/BaptismTicket';
 import { supabase } from '@/lib/supabaseClient'; 
@@ -21,19 +21,18 @@ const BaptismSentarRegistrosPage = () => {
         seatBaptism, 
         seatMultipleBaptisms, 
         getMisDatosList, 
-        purificarRegistroBautismo,
-        getPendingBaptisms 
+        purificarRegistroBautismo
     } = useAppData();
     const { toast } = useToast();
     const navigate = useNavigate();
 
-    // --- ESTADOS GLOBALES ---
+    const [resolvedParishId, setResolvedParishId] = useState(null);
+    const [nombreParroquia, setNombreParroquia] = useState('PARROQUIA');
     const [mode, setMode] = useState('individual'); 
     const [pendingBaptisms, setPendingBaptisms] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedIds, setSelectedIds] = useState([]);
     
-    // 🚀 ESTADO PARA LOS NÚMEROS DE SUPABASE
     const [nextNumbers, setNextNumbers] = useState({ book: '---', page: '---', entry: '---' });
     const [fullParamsCache, setFullParamsCache] = useState(null); 
 
@@ -41,7 +40,6 @@ const BaptismSentarRegistrosPage = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [parishInfo, setParishInfo] = useState(null); 
 
-    // --- VALIDACIÓN DE FECHA FUTURA ---
     const isDateInFuture = (dateString) => {
         if (!dateString) return false;
         const now = new Date();
@@ -49,33 +47,61 @@ const BaptismSentarRegistrosPage = () => {
         return sacramentDate > now; 
     };
 
-    // --- 1. CARGA DE DATOS ---
+    // 🚀 1. RASTREADOR DE PARROQUIA
+    useEffect(() => {
+        const resolveParish = async () => {
+            if (!user) return;
+            let pId = user.parish_id || user.parishId;
+
+            if (!pId && user.email) {
+                const { data: profile } = await supabase
+                    .from('user_profiles')
+                    .select('parish_id')
+                    .eq('email', user.email)
+                    .maybeSingle();
+                if (profile) pId = profile.parish_id;
+            }
+
+            if (pId) {
+                setResolvedParishId(pId);
+                const { data: pData } = await supabase
+                    .from('parishes')
+                    .select('name')
+                    .eq('id', pId)
+                    .maybeSingle();
+                if (pData?.name) setNombreParroquia(pData.name.toUpperCase());
+            } else {
+                setIsLoading(false);
+            }
+        };
+
+        resolveParish();
+    }, [user]);
+
+    // 🚀 2. CARGA DIRECTA DE BORRADORES DESDE SUPABASE
     const loadData = async () => {
-        const entityId = user?.parish_id || user?.parishId;
-        if (!entityId) {
-            setIsLoading(false);
-            return;
-        }
+        if (!resolvedParishId) return;
         setIsLoading(true);
 
         try {
-            // 🚀 1. OBTENER BORRADORES DIRECTO DESDE LA NUBE (SUPABASE)
-            const { data: temp_data, error: temp_error } = await supabase
+            const { data: tempData, error: tempError } = await supabase
                 .from('pending_baptisms')
                 .select('*')
-                .eq('parish_id', entityId)
+                .eq('parish_id', resolvedParishId)
                 .order('created_at', { ascending: false });
 
-            if (temp_error) throw temp_error;
+            if (tempError) throw tempError;
 
             let recordsMapped = [];
             
-            if (temp_data) {
-                // Sincronizamos la memoria local para que el Contexto Maestro pueda procesarlos al asentar
-                const cloudPending = temp_data.map(pb => ({ ...pb.raw_data, id: pb.id, status: 'pending' }));
-                localStorage.setItem(`pendingBaptisms_${entityId}`, JSON.stringify(cloudPending));
+            if (tempData) {
+                const cloudPending = tempData.map(pb => {
+                    const raw = typeof pb.raw_data === 'string' ? JSON.parse(pb.raw_data) : (pb.raw_data || {});
+                    return { ...raw, id: pb.id, status: 'pending' };
+                });
+                
+                localStorage.setItem(`pendingBaptisms_${resolvedParishId}`, JSON.stringify(cloudPending));
 
-                // Mapeamos los datos para inyectarlos en la pantalla
                 recordsMapped = cloudPending.map(r => {
                     const purificado = purificarRegistroBautismo(r);
                     return {
@@ -94,12 +120,12 @@ const BaptismSentarRegistrosPage = () => {
             const { data: paramData, error } = await supabase
                 .from('parish_parameters')
                 .select('bautizos_params')
-                .eq('parish_id', entityId)
+                .eq('parish_id', resolvedParishId)
                 .maybeSingle();
 
             if (error && error.code !== 'PGRST116') throw error;
 
-            if (paramData && paramData.bautizos_params) {
+            if (paramData?.bautizos_params) {
                 const p = paramData.bautizos_params;
                 setFullParamsCache(p);
                 setNextNumbers({
@@ -109,7 +135,7 @@ const BaptismSentarRegistrosPage = () => {
                 });
             }
 
-            const misDatos = getMisDatosList(entityId);
+            const misDatos = getMisDatosList(resolvedParishId);
             if (misDatos?.length > 0) {
                 setParishInfo({
                     diocesis: misDatos[0].diocesis,
@@ -121,22 +147,24 @@ const BaptismSentarRegistrosPage = () => {
             }
         } catch (error) {
             console.error("Error cargando datos:", error);
-            toast({ title: "Error", description: "No se pudieron cargar los datos", variant: "destructive" });
+            toast({ title: "Error", description: "No se pudieron cargar los borradores de la nube", variant: "destructive" });
         } finally {
             setIsLoading(false);
         }
     };
 
-    useEffect(() => { loadData(); }, [user]);
+    useEffect(() => { 
+        if (resolvedParishId) {
+            loadData(); 
+        }
+    }, [resolvedParishId]);
 
-    // 🚀 LÓGICA DE INCREMENTO DE PARÁMETROS EN SUPABASE (MANTIENE CEROS)
     const incrementParameters = async (count, bookType = 'ordinario') => {
-        const entityId = user?.parish_id || user?.parishId;
-        if (!fullParamsCache || !entityId) return;
+        if (!fullParamsCache || !resolvedParishId) return;
 
         try {
             let p = { ...fullParamsCache };
-            const prefix = bookType; // 'ordinario' o 'suplementario'
+            const prefix = bookType;
 
             let cFolio = parseInt(p[`${prefix}Folio`], 10) || 1;
             let cNumero = parseInt(p[`${prefix}Numero`], 10) || 1;
@@ -144,7 +172,6 @@ const BaptismSentarRegistrosPage = () => {
             let pPorFolio = parseInt(p[`${prefix}Partidas`], 10) || 2;
             let restart = p[`${prefix}RestartNumber`];
 
-            // Simular el ciclo de incrementos
             for (let i = 0; i < count; i++) {
                 if (restart) {
                     if (cNumero >= pPorFolio) {
@@ -161,7 +188,6 @@ const BaptismSentarRegistrosPage = () => {
                 }
             }
 
-            // Mantiene el formato con ceros a la izquierda (0001, 0002, etc.)
             const updatedParams = { 
                 ...p, 
                 [`${prefix}Folio`]: String(cFolio).padStart(4, '0'), 
@@ -172,7 +198,7 @@ const BaptismSentarRegistrosPage = () => {
             await supabase
                 .from('parish_parameters')
                 .update({ bautizos_params: updatedParams })
-                .eq('parish_id', entityId);
+                .eq('parish_id', resolvedParishId);
 
             setFullParamsCache(updatedParams);
             setNextNumbers({
@@ -186,7 +212,6 @@ const BaptismSentarRegistrosPage = () => {
         }
     };
 
-    // --- 2. LÓGICA MODO INDIVIDUAL ---
     const currentBaptism = pendingBaptisms[currentIndex];
     const currentIsFuture = currentBaptism ? isDateInFuture(currentBaptism.fechaSacramento) : false;
 
@@ -200,12 +225,10 @@ const BaptismSentarRegistrosPage = () => {
 
         setIsSaving(true);
         try {
-            const entityId = user?.parish_id || user?.parishId;
-            const result = await seatBaptism(currentBaptism.id, entityId, {});
+            const result = await seatBaptism(currentBaptism.id, resolvedParishId, {});
             if (result.success) {
-                // Incrementa Ordinario por defecto (puedes ajustar el 'ordinario'/'suplementario' si manejas la lógica de adultos)
                 await incrementParameters(1, 'ordinario'); 
-                toast({ title: "Éxito", description: "Bautismo asentado correctamente.", className: "bg-green-50 text-green-900 border-green-200" });
+                toast({ title: "Éxito", description: "Bautismo asentado permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
                 await loadData();
                 if (currentIndex >= pendingBaptisms.length - 1) setCurrentIndex(Math.max(0, pendingBaptisms.length - 2));
             }
@@ -213,7 +236,6 @@ const BaptismSentarRegistrosPage = () => {
         finally { setIsSaving(false); }
     };
 
-    // --- 3. LÓGICA MODO LOTE ---
     const handleSelectAll = (checked) => {
         if (checked) {
             const validIds = pendingBaptisms
@@ -233,12 +255,11 @@ const BaptismSentarRegistrosPage = () => {
 
     const handleBatchConfirm = async () => {
         if (selectedIds.length === 0 || isSaving) return;
-        if (!window.confirm(`¿Asentar ${selectedIds.length} registros en bloque?`)) return;
+        if (!window.confirm(`¿Asentar ${selectedIds.length} registros en bloque permanentemente?`)) return;
 
         setIsSaving(true);
         try {
-            const entityId = user?.parish_id || user?.parishId;
-            const result = await seatMultipleBaptisms(selectedIds, entityId);
+            const result = await seatMultipleBaptisms(selectedIds, resolvedParishId);
             if (result.success) {
                 await incrementParameters(selectedIds.length, 'ordinario'); 
                 toast({ title: "Lote Procesado", className: "bg-green-50 text-green-900 border-green-200" });
@@ -249,28 +270,26 @@ const BaptismSentarRegistrosPage = () => {
         finally { setIsSaving(false); }
     };
 
-    if (isLoading) return <DashboardLayout><div className="flex justify-center py-20"><Loader2 className="animate-spin text-[#4B7BA7]" /></div></DashboardLayout>;
+    if (isLoading) return <DashboardLayout entityName={nombreParroquia}><div className="flex justify-center py-20"><Loader2 className="animate-spin text-[#4B7BA7]" /></div></DashboardLayout>;
 
     if (pendingBaptisms.length === 0) return (
-        <DashboardLayout entityName={user?.parishName}>
+        <DashboardLayout entityName={nombreParroquia}>
             <div className="flex flex-col items-center justify-center min-h-[400px] bg-white rounded-[3rem] p-12 text-center border-2 border-dashed">
                 <CheckCircle2 className="w-16 h-16 text-green-200 mb-4" />
                 <h3 className="text-xl font-bold uppercase text-gray-400">Archivo al Día</h3>
-                <Button variant="outline" className="mt-6 rounded-xl" onClick={() => navigate('/parroquia/bautismo/base-datos')}>Ver Base de Datos Permanente</Button>
+                <p className="text-xs text-gray-400 mt-1">No hay borradores pendientes en la nube.</p>
+                <Button variant="outline" className="mt-6 rounded-xl" onClick={() => navigate('/parroquia/bautismo/partidas')}>Ver Actas Permanentes</Button>
             </div>
         </DashboardLayout>
     );
 
     return (
-        <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-            
+        <DashboardLayout entityName={nombreParroquia}>
             <div className="hidden print:block">
                 {currentBaptism && <BaptismTicket baptismData={currentBaptism} parishInfo={parishInfo} />}
             </div>
 
             <div className="print:hidden max-w-7xl mx-auto px-4 pb-20">
-                
-                {/* 🏛️ HEADER CON SWITCHER */}
                 <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-6">
                     <div className="flex items-center gap-5">
                         <Button variant="ghost" onClick={() => navigate('/parroquia/bautismo/partidas')} className="rounded-2xl bg-white shadow-sm h-12 w-12 border"><ChevronLeft /></Button>
@@ -290,7 +309,6 @@ const BaptismSentarRegistrosPage = () => {
                     </div>
                 </div>
 
-                {/* 📝 MODO INDIVIDUAL */}
                 {mode === 'individual' && (
                     <div className="animate-in fade-in duration-500 space-y-6">
                         <div className="bg-white p-4 rounded-t-[2rem] border shadow-sm flex items-center justify-between border-b-0">
@@ -301,7 +319,6 @@ const BaptismSentarRegistrosPage = () => {
 
                         <div className="bg-white p-10 rounded-b-[2rem] border shadow-sm space-y-8">
                             <div className="grid grid-cols-3 gap-6 p-6 bg-slate-50 border rounded-2xl text-center">
-                                {/* 🚀 VALORES RENDERIZADOS CON FORMATO 0000 */}
                                 <div><label className="text-[10px] font-black text-slate-400 uppercase">Libro Destino</label><div className="text-2xl font-black text-[#4B7BA7]">{String(nextNumbers.book).padStart(4, '0')}</div></div>
                                 <div><label className="text-[10px] font-black text-slate-400 uppercase">Folio Destino</label><div className="text-2xl font-black text-[#4B7BA7]">{String(nextNumbers.page).padStart(4, '0')}</div></div>
                                 <div><label className="text-[10px] font-black text-slate-400 uppercase">Acta Nº</label><div className="text-2xl font-black text-[#D4AF37]">{String(nextNumbers.entry).padStart(4, '0')}</div></div>
@@ -312,7 +329,6 @@ const BaptismSentarRegistrosPage = () => {
                                 <p className="text-2xl font-black uppercase text-gray-900">{currentBaptism.nombres} {currentBaptism.apellidos}</p>
                             </div>
 
-                            {/* 🚨 AVISO DE FECHA FUTURA */}
                             {currentIsFuture && (
                                 <div className="flex items-center gap-4 bg-red-50 p-6 rounded-2xl border border-red-100 text-red-700 animate-pulse">
                                     <AlertCircle className="w-8 h-8" />
@@ -346,7 +362,6 @@ const BaptismSentarRegistrosPage = () => {
                     </div>
                 )}
 
-                {/* 📊 MODO LOTE */}
                 {mode === 'batch' && (
                     <div className="animate-in fade-in duration-500 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden">
                         <table className="w-full text-left">
@@ -408,7 +423,6 @@ const BaptismSentarRegistrosPage = () => {
                         </div>
                     </div>
                 )}
-
             </div>
         </DashboardLayout>
     );
