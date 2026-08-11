@@ -7,13 +7,12 @@ import {
     FileText, Bell, AlertCircle, Mail, Landmark
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ROLE_TYPES } from '@/config/supabaseConfig';
 import { useAppData } from '@/context/AppDataContext';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 
 // =========================================================================
-// 🧩 COMPONENTE: ITEM INDIVIDUAL (Totalmente Blindado)
+// 🧩 COMPONENTE: ITEM INDIVIDUAL
 // =========================================================================
 const SidebarItem = ({ item, isActive, isChild = false, badgeCount }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -103,11 +102,9 @@ const SidebarItem = ({ item, isActive, isChild = false, badgeCount }) => {
     <Link
       to={item.path || '#'}
       onClick={(e) => {
-          // 🚀 FIX: Si el botón apunta a la pantalla en la que ya estás, bloqueamos el clic por completo.
           if (item.path === location.pathname) {
               e.preventDefault();
           }
-          // Si el botón tiene una función interna (ej. cambiar a pestaña Backup), la ejecuta.
           if (item.onClick) {
               item.onClick(e);
           }
@@ -149,18 +146,18 @@ const SidebarItem = ({ item, isActive, isChild = false, badgeCount }) => {
 // =========================================================================
 const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems }) => {
   const location = useLocation();
-  // 🚀 FIX: Extraemos "profile" directamente de la fuente de la verdad para no depender de props externas
-  const { user, profile } = useAuth(); 
+  const { user, profile, logout } = useAuth(); 
   const { getParishNotifications, matrimonialNotificationAvisos } = useAppData();
   
   const [notificationCount, setNotificationCount] = useState(0);
   const [avisosCount, setAvisosCount] = useState(0);
 
-  // 🚀 FIX: Construcción de un "Rol Seguro" blindado contra fallos de props
-  const safeRole = profile?.role || (typeof role === 'object' && role !== null ? (role.role || role.name) : role) || '';
+  // 🚀 Normalización de rol
+  const rawRole = profile?.role || user?.role || (typeof role === 'object' && role !== null ? (role.role || role.name) : role) || 'parish';
+  const safeRole = String(rawRole).toLowerCase().trim();
 
   useEffect(() => {
-    if (safeRole === ROLE_TYPES.PARISH && user?.parishId) {
+    if (safeRole === 'parish' && user?.parishId) {
         const notifications = getParishNotifications(user.parishId);
         setNotificationCount(notifications.length);
         const pendingAvisos = (matrimonialNotificationAvisos || []).filter(a => a.status === 'pendiente');
@@ -168,17 +165,17 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
     }
   }, [location, getParishNotifications, matrimonialNotificationAvisos, user, safeRole]);
 
-  // --- ESTRUCTURA DE MENÚS DINÁMICOS ---
   const getMenuItems = () => {
-    // Reconocimiento explícito del rol maestro
-    if (safeRole === ROLE_TYPES.ADMIN_GENERAL || safeRole === 'SuperAdmin') {
+    // 1. ADMIN / SUPERADMIN
+    if (safeRole === 'superadmin' || safeRole === 'admin' || safeRole === 'admin_general') {
         return [
             { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
             { label: 'Diócesis/Arquidiócesis', path: '/admin/dioceses', icon: Church },
             { label: 'Ajustes', path: '/admin/settings', icon: SettingsIcon }
         ];
     } 
-    if (safeRole === ROLE_TYPES.DIOCESE) {
+    // 2. DIÓCESIS
+    if (safeRole === 'diocese' || safeRole === 'diocesis') {
         return [
             { label: 'Dashboard', path: '/diocese/dashboard', icon: LayoutDashboard },
             { label: 'Organización Eclesiástica', path: '/diocese/ecclesiastical', icon: Network },
@@ -186,7 +183,8 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
             { label: 'Ajustes', path: '/diocese/settings', icon: SettingsIcon }
         ];
     } 
-    if (safeRole === ROLE_TYPES.PARISH) {
+    // 3. PARROQUIA
+    if (safeRole === 'parish' || safeRole === 'parroquia') {
         return [
             { label: 'Dashboard', path: '/parish/dashboard', icon: LayoutDashboard },
             { label: 'Notificaciones Cancillería', path: '/parish/notifications', icon: Bell, badgeCount: notificationCount },
@@ -199,8 +197,7 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
                     { label: 'Sentar Registros', path: '/parroquia/bautismo/sentar-registros' },
                     { label: 'Editar Bautizo', path: '/parroquia/bautismo/editar' },
                     { label: 'Partidas', path: '/parroquia/bautismo/partidas' },
-                    { label: 'Índice General', path: '/parroquia/bautismo/indice', icon: List },
-                    { label: 'Base de Datos', path: '/parroquia/bautismo/base-datos', icon: Database },
+                    { label: 'Índice General', path: '/parroquia/bautismo/indice', icon: List }
                 ]
             },
             { 
@@ -212,7 +209,7 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
                     { label: 'Sentar Registros', path: '/parroquia/confirmacion/sentar-registros' },
                     { label: 'Editar Confirmación', path: '/parroquia/confirmacion/editar' },
                     { label: 'Partidas', path: '/parroquia/confirmacion/partidas' },
-                    { label: 'Índice General', path: '/parroquia/confirmacion/indice', icon: List },
+                    { label: 'Índice General', path: '/parroquia/confirmacion/indice', icon: List }
                 ]
             },
             { 
@@ -227,7 +224,7 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
                     { label: 'Partidas', path: '/parroquia/matrimonio/partidas' },
                     { label: 'Índice General', path: '/parroquia/matrimonio/indice', icon: List },
                     { label: 'Notificación', path: '/parroquia/matrimonio/notificacion', icon: Mail },
-                    { label: 'Aviso Alerta', path: '/parroquia/matrimonio/aviso-notificacion', icon: AlertCircle, badgeCount: avisosCount },
+                    { label: 'Aviso Alerta', path: '/parroquia/matrimonio/aviso-notificacion', icon: AlertCircle, badgeCount: avisosCount }
                 ]
             },
             { label: 'Datos Auxiliares', path: '/datos-auxiliares', icon: Database },
@@ -249,7 +246,8 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
             { label: 'Ajustes', path: '/parroquia/ajustes', icon: SettingsIcon }
         ];
     } 
-    if (safeRole === ROLE_TYPES.CHANCERY) {
+    // 4. CANCILLERÍA
+    if (safeRole === 'chancery' || safeRole === 'cancilleria') {
         return [
             { label: 'Dashboard', path: '/chancery/dashboard', icon: LayoutDashboard },
             {
@@ -271,11 +269,18 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
         ];
     }
     
-    // 🚀 FIX: Fallback seguro que NO te expulsa al login, se queda en la ruta actual.
     return [{ label: 'Dashboard', path: location.pathname, icon: LayoutDashboard }];
   };
 
   const finalMenuItems = externalMenuItems && externalMenuItems.length > 0 ? externalMenuItems : getMenuItems();
+
+  const handleLogoutClick = () => {
+      if (onLogout) {
+          onLogout();
+      } else if (logout) {
+          logout();
+      }
+  };
 
   return (
     <>
@@ -307,7 +312,6 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
           <div className="flex-1 overflow-y-auto py-8 px-5 custom-scrollbar bg-white">
             <p className="text-[9px] font-black text-gray-300 uppercase tracking-[0.3em] mb-6 px-4">Centro de Operaciones</p>
             {finalMenuItems.map((item, idx) => {
-              // Verificación estricta para marcar el botón actual como Activo
               const isActive = location.pathname === item.path || 
                                (item.children && item.children.some(c => location.pathname.startsWith(c.path))) ||
                                (item.label === 'Dashboard' && location.pathname.includes('/admin/dashboard'));
@@ -328,21 +332,23 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
             <div className="bg-white p-4 rounded-[1.5rem] border border-gray-100 shadow-sm mb-4">
                 <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600 font-black text-xs uppercase">
-                        {user?.email?.substring(0, 2) || user?.username?.substring(0, 2) || 'AD'}
+                        {user?.email?.substring(0, 2) || user?.username?.substring(0, 2) || 'PA'}
                     </div>
                     <div className="flex flex-col overflow-hidden">
-                        <span className="text-[10px] font-black text-gray-900 uppercase truncate leading-none mb-1">{user?.username || user?.email?.split('@')[0]}</span>
+                        <span className="text-[10px] font-black text-gray-900 uppercase truncate leading-none mb-1">
+                            {user?.username || user?.email?.split('@')[0]}
+                        </span>
                         <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter truncate">
-                            {safeRole === ROLE_TYPES.ADMIN_GENERAL || safeRole === 'SuperAdmin' ? 'Súper Administrador' :
-                             safeRole === ROLE_TYPES.DIOCESE ? (user?.dioceseName || 'Gestión Diocesana') :
-                             safeRole === ROLE_TYPES.CHANCERY ? 'Cancillería' : 
+                            {safeRole === 'superadmin' || safeRole === 'admin' ? 'Súper Administrador' :
+                             safeRole === 'diocese' ? (user?.dioceseName || 'Gestión Diocesana') :
+                             safeRole === 'chancery' ? 'Cancillería' : 
                              (user?.parishName || 'Despacho Parroquial')}
                         </span>
                     </div>
                 </div>
             </div>
             <button 
-              onClick={onLogout}
+              onClick={handleLogoutClick}
               className="flex items-center justify-center gap-3 w-full px-4 py-4 text-[10px] font-black uppercase tracking-widest text-red-500 bg-red-50 hover:bg-red-100 rounded-2xl transition-all active:scale-95 border border-red-100/50 shadow-sm shadow-red-900/5"
             >
               <LogOut className="w-4 h-4" />

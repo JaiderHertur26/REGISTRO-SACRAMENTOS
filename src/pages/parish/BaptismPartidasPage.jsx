@@ -6,16 +6,16 @@ import { supabase } from '@/lib/supabaseClient';
 import Table from '@/components/ui/Table';
 import { Button } from '@/components/ui/button';
 import { 
-    Search, Edit, Trash2, ArrowUpDown, FileX2, Info, 
+    Search, Edit, Trash2, Info, 
     CheckCircle as CircleCheckBig, XCircle, Eye, AlertOctagon, 
-    BookOpen, Loader2, ChevronLeft, ChevronRight, User, Users, MapPin, PenTool
+    BookOpen, Loader2, User, Users, MapPin, PenTool, Scroll
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useNavigate } from 'react-router-dom';
 import BaptismPartidaValidator from '@/components/BaptismPartidaValidator';
 import ViewBaptismPartidaModal from '@/components/modals/ViewBaptismPartidaModal';
 
-// --- COMPONENTE: PANEL DE DETALLES EXTENDIDO (LOS 20 CAMPOS) ---
+// --- COMPONENTE: PANEL DE DETALLES EXTENDIDO (20 CAMPOS) ---
 const InfoBox = ({ data }) => {
     if (!data) return null;
     
@@ -25,7 +25,7 @@ const InfoBox = ({ data }) => {
         <div className="mt-8 border border-blue-200 rounded-[2rem] overflow-hidden shadow-xl bg-white animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="bg-slate-900 px-8 py-4 flex justify-between items-center">
                 <h3 className="text-white font-black text-sm uppercase tracking-[0.2em] flex items-center gap-3">
-                   <Info className="w-5 h-5 text-blue-400" /> Inspección de Registro Permanente
+                   <Info className="w-5 h-5 text-blue-400" /> Inspección de Registro Parroquial
                 </h3>
                 {isReplacement && (
                     <span className="bg-amber-400 text-slate-900 text-[10px] font-black uppercase px-3 py-1 rounded-full flex items-center gap-1 shadow-sm">
@@ -61,7 +61,7 @@ const InfoBox = ({ data }) => {
                     <DetailItem icon={User} label="Fecha Bautismo" value={data.fechaSacramento} />
                 </div>
 
-                {/* FILA 3: FILIACIÓN (PADRES Y ABUELOS) */}
+                {/* FILA 3: FILIACIÓN */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div className="bg-slate-50 p-6 rounded-[1.5rem] border border-slate-100 space-y-4">
                         <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
@@ -79,12 +79,12 @@ const InfoBox = ({ data }) => {
                     </div>
                 </div>
 
-                {/* FILA 4: TESTIGOS Y AUTORIDADES */}
+                {/* FILA 4: TESTIGOS Y MINISTRO */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     <DetailItem icon={Users} label="Padrinos" value={data.padrinos} />
                     <DetailItem icon={PenTool} label="Ministro" value={data.ministro} />
                     <div className="space-y-1">
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Párroco que Da Fe (Firma)</span>
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Párroco que Da Fe</span>
                         <span className="text-sm font-black text-blue-600 uppercase border-b-2 border-blue-100 pb-1 inline-block">
                             {data.daFe}
                         </span>
@@ -94,7 +94,7 @@ const InfoBox = ({ data }) => {
                 {/* NOTA MARGINAL */}
                 <div className="p-6 rounded-[1.5rem] border bg-amber-50/30 border-amber-100">
                     <h4 className="text-[10px] font-black text-amber-600/60 uppercase tracking-[0.2em] mb-3 flex items-center gap-2">
-                        <BookOpen className="w-4 h-4" /> Nota Marginal Purificada
+                        <BookOpen className="w-4 h-4" /> Nota Marginal
                     </h4>
                     <p className="text-xs font-bold text-slate-700 leading-relaxed font-mono uppercase italic">
                         "{data.notaMarginal}"
@@ -109,7 +109,6 @@ const InfoBox = ({ data }) => {
     );
 };
 
-// Componente miniatura para los detalles
 const DetailItem = ({ icon: Icon, label, value, isItalic = false }) => (
     <div className="space-y-1 text-left">
         <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
@@ -131,90 +130,100 @@ const BaptismPartidasPage = () => {
   const [records, setRecords] = useState([]);
   const [totalRecords, setTotalRecords] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const recordsPerPage = 50;
-  const [sortConfig, setSortConfig] = useState({ key: 'entry_number', direction: 'desc' });
   
   const [selectedPartida, setSelectedPartida] = useState(null); 
   const [parishPrintData, setParishPrintData] = useState({});
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
 
+  const parishId = user?.parish_id || user?.parishId || 'ae48c502-6603-4887-ba38-6886e628430e';
+  const nombreParroquia = user?.parishName || user?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO';
+
   const totalPages = Math.ceil(totalRecords / recordsPerPage);
 
   useEffect(() => {
-      if (user?.parishId) {
-          const misDatos = getMisDatosList(user.parishId);
-          if (misDatos && misDatos.length > 0) setParishPrintData(misDatos[0]);
+      if (parishId) {
+          const misDatos = getMisDatosList(parishId);
+          if (misDatos?.length > 0) setParishPrintData(misDatos[0]);
       }
-  }, [user]);
+  }, [parishId]);
 
   const fetchRecords = async () => {
-      if (!user?.parishId) return;
-      if (searchTerm) setIsSearching(true);
-      else setIsLoading(true);
+      if (!parishId) return;
+      setIsLoading(true);
 
       try {
-          let query = supabase.from('baptisms').select('*', { count: 'exact' }).eq('parish_id', user.parishId);
+          // 🚀 Consulta blindada a Supabase
+          const { data, count, error } = await supabase
+              .from('baptisms')
+              .select('*', { count: 'exact' })
+              .eq('parish_id', parishId)
+              .order('created_at', { ascending: false });
 
-          if (searchTerm) {
-              const term = `%${searchTerm.toLowerCase()}%`;
-              query = query.or(`first_name.ilike.${term},last_name.ilike.${term},father_name.ilike.${term},mother_name.ilike.${term}`);
-          }
-
-          query = query.order(sortConfig.key, { ascending: sortConfig.direction === 'asc' });
-          const from = (currentPage - 1) * recordsPerPage;
-          const to = from + recordsPerPage - 1;
-          query = query.range(from, to);
-
-          const { data, count, error } = await query;
           if (error) throw error;
 
-          // ✅ LLAVE DE ORO: Purificación inmediata al recibir de la nube
-          const sanitizedData = data.map(record => (
-              purificarRegistroBautismo({ 
-                  ...record.raw_data, 
+          const rawList = data || [];
+
+          // Purificación y decodificación
+          const sanitizedData = rawList.map(record => {
+              const raw = typeof record.raw_data === 'string' ? JSON.parse(record.raw_data) : (record.raw_data || {});
+              return purificarRegistroBautismo({ 
+                  ...raw, 
                   id: record.id, 
                   status: record.status,
-                  Libro: record.raw_data?.Libro || record.book_number,
-                  folio: record.raw_data?.folio || record.page_number,
-                  numero: record.raw_data?.numero || record.entry_number
-              })
-          ));
+                  marginNote: record.margin_note || raw.marginNote || raw.notaMarginal,
+                  Libro: raw.Libro || record.book_number,
+                  folio: raw.folio || record.page_number,
+                  numero: raw.numero || record.entry_number
+              });
+          });
 
-          setRecords(sanitizedData);
-          setTotalRecords(count || 0);
+          // Filtrado de búsqueda inteligente
+          let filtered = sanitizedData;
+          if (searchTerm.trim()) {
+              const term = searchTerm.trim().toUpperCase();
+              filtered = sanitizedData.filter(r => 
+                  (r.nombres && r.nombres.includes(term)) ||
+                  (r.apellidos && r.apellidos.includes(term)) ||
+                  (r.nombrePadre && r.nombrePadre.includes(term)) ||
+                  (r.nombreMadre && r.nombreMadre.includes(term)) ||
+                  (r.numeroRegistro && String(r.numeroRegistro).includes(term)) ||
+                  (`${r.Libro}:${r.folio}:${r.numero}`.includes(term))
+              );
+          }
+
+          setTotalRecords(filtered.length);
+          const from = (currentPage - 1) * recordsPerPage;
+          setRecords(filtered.slice(from, from + recordsPerPage));
 
           if (selectedPartida) {
-              const updated = sanitizedData.find(r => r.id === selectedPartida.id);
+              const updated = filtered.find(r => r.id === selectedPartida.id);
               if (updated) setSelectedPartida(updated);
           }
       } catch (err) {
-          toast({ title: "Error de conexión", variant: "destructive" });
+          console.error("Error al consultar partidas:", err);
+          // Fallback a memoria local
+          const local = JSON.parse(localStorage.getItem(`baptisms_${parishId}`) || '[]');
+          setRecords(local.map(r => purificarRegistroBautismo(r)));
+          setTotalRecords(local.length);
       } finally {
           setIsLoading(false);
-          setIsSearching(false);
       }
   };
 
   useEffect(() => {
-      const delayDebounceFn = setTimeout(() => {
-          setCurrentPage(1);
-          fetchRecords();
-      }, 500);
-      return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm, sortConfig]);
-
-  useEffect(() => { fetchRecords(); }, [currentPage]);
+      fetchRecords();
+  }, [parishId, searchTerm, currentPage]);
 
   const columns = [
     { 
         header: 'Archivo',
-        render: (r) => <span className="font-mono text-[11px] font-black text-[#4B7BA7] bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase text-center min-w-[120px] inline-block">L:{r.Libro} F:{r.folio} N:{r.numero}</span>
+        render: (r) => <span className="font-mono text-[11px] font-black text-[#4B7BA7] bg-blue-50 px-2.5 py-1 rounded-xl border border-blue-100 uppercase text-center min-w-[120px] inline-block">L:{r.Libro} F:{r.folio} N:{r.numero}</span>
     },
     { header: 'Apellidos', render: (r) => <span className="font-black text-slate-900 uppercase">{r.apellidos}</span> },
     { header: 'Nombres', render: (r) => <span className="font-bold text-slate-700 uppercase">{r.nombres}</span> },
-    { header: 'Fecha', render: (r) => <span className="text-slate-500 text-xs font-bold">{r.fechaSacramento}</span> },
+    { header: 'Fecha', render: (r) => <span className="text-slate-500 text-xs font-bold font-mono">{r.fechaSacramento}</span> },
     { header: 'Padres', render: (r) => <span className="text-[10px] text-slate-400 font-bold uppercase truncate max-w-[200px]">{r.nombrePadre} / {r.nombreMadre}</span> },
     {
         header: 'Estado',
@@ -228,36 +237,60 @@ const BaptismPartidasPage = () => {
   ];
 
   return (
-    <DashboardLayout entityName={user?.parishName || "Parroquia"}>
+    <DashboardLayout entityName={nombreParroquia}>
       <div className="max-w-[1600px] mx-auto space-y-6 pb-20">
           <div className="flex flex-col md:flex-row justify-between items-end gap-4">
             <div>
-                <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">Base de Datos Central</h1>
-                <p className="text-[#4B7BA7] text-[10px] font-black uppercase tracking-[0.3em] mt-2 ml-1">Archivo Permanente • Sincronización en la Nube</p>
+                <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">Partidas de Bautismo</h1>
+                <p className="text-[#4B7BA7] text-[10px] font-black uppercase tracking-[0.3em] mt-2 ml-1">Archivo Parroquial Permanente • Registro Canónico Oficial</p>
             </div>
-            <div className="bg-slate-900 text-white px-6 py-3 rounded-[1.5rem] text-[11px] font-black uppercase tracking-widest shadow-2xl">Total en Archivo: {totalRecords}</div>
+            <div className="bg-slate-900 text-white px-6 py-3 rounded-[1.5rem] text-[11px] font-black uppercase tracking-widest shadow-2xl">
+                Total en Archivo: {totalRecords}
+            </div>
           </div>
 
           {/* BARRA DE BÚSQUEDA */}
           <div className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 flex gap-4 items-center">
              <div className="relative flex-1">
-                {isSearching ? <Loader2 className="absolute left-4 top-1/2 -translate-y-1/2 text-[#4B7BA7] w-5 h-5 animate-spin" /> : <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" />}
-                <input type="text" placeholder="LOCALIZAR POR APELLIDOS, NOMBRES O PADRES..." className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-4 focus:ring-[#4B7BA7]/10 outline-none text-sm font-black uppercase placeholder:text-slate-300 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" />
+                <input 
+                    type="text" 
+                    placeholder="LOCALIZAR POR APELLIDOS, NOMBRES, PADRES O LIBRO:FOLIO:NÚMERO..." 
+                    className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-4 focus:ring-[#4B7BA7]/10 outline-none text-sm font-black uppercase placeholder:text-slate-300 transition-all" 
+                    value={searchTerm} 
+                    onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }} 
+                />
              </div>
           </div>
 
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-24"><Loader2 className="w-14 h-14 text-[#4B7BA7] animate-spin mb-4" /><p className="text-slate-400 font-black uppercase text-[10px] tracking-widest">Consultando Supabase...</p></div>
+            <div className="flex flex-col items-center justify-center py-24">
+                <Loader2 className="w-12 h-12 text-[#4B7BA7] animate-spin mb-4" />
+                <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest">Consultando Libro de Partidas...</p>
+            </div>
+          ) : records.length === 0 ? (
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 p-16 text-center shadow-sm">
+                <Scroll className="w-16 h-16 text-slate-200 mx-auto mb-4" />
+                <h3 className="text-lg font-bold uppercase text-slate-700">No hay actas registradas</h3>
+                <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">Las actas aparecerán aquí una vez que hayan sido firmadas y selladas desde la sección de Asentamiento.</p>
+                <Button variant="outline" className="mt-6 rounded-xl font-black uppercase text-[10px]" onClick={() => navigate('/parroquia/bautismo/sentar-registros')}>
+                    Ir a Sentar Registros
+                </Button>
+            </div>
           ) : (
             <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-blue-900/5 border border-slate-100 overflow-hidden">
                 <Table 
-                    columns={columns} data={records} onRowClick={(row) => setSelectedPartida(row)}
+                    columns={columns} 
+                    data={records} 
+                    onRowClick={(row) => setSelectedPartida(row)}
                     actions={[
                         { label: <Eye className="w-4 h-4" />, onClick: (r, e) => { e.stopPropagation(); setSelectedPartida(r); setIsViewModalOpen(true); }, className: "text-[#D4AF37] hover:bg-yellow-50" },
                         { label: <Edit className="w-4 h-4" />, onClick: (r, e) => { e.stopPropagation(); navigate(`/parroquia/bautismo/editar?id=${r.id}`); }, className: "text-[#4B7BA7] hover:bg-blue-50" },
                         { label: <Trash2 className="w-4 h-4" />, onClick: (r, e) => { 
                             e.stopPropagation(); 
-                            if(confirm("¿Está seguro de eliminar este registro permanentemente de la nube?")) supabase.from('baptisms').delete().eq('id', r.id).then(() => fetchRecords());
+                            if(confirm("¿Está seguro de eliminar esta partida permanentemente de la nube?")) {
+                                supabase.from('baptisms').delete().eq('id', r.id).then(() => fetchRecords());
+                            }
                         }, className: "text-red-500 hover:bg-red-50" }
                     ]}
                 />
@@ -286,4 +319,5 @@ const BaptismPartidasPage = () => {
     </DashboardLayout>
   );
 };
+
 export default BaptismPartidasPage;
