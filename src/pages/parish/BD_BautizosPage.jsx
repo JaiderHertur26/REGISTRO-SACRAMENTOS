@@ -17,7 +17,7 @@ import {
 const BD_BautizosPage = () => {
     const navigate = useNavigate();
     const { user } = useAuth();
-    const { getPendingBaptisms, obtenerNotasAlMargen, getParrocos } = useAppData();
+    const { obtenerNotasAlMargen, getParrocos } = useAppData();
     const { toast } = useToast();
 
     const topScrollRef = useRef(null);
@@ -32,11 +32,12 @@ const BD_BautizosPage = () => {
     const [cargando, setCargando] = useState(true);
     const [tabActiva, setTabActiva] = useState('permanentes');
 
-    const parishId = user?.parishId;
+    // 🚀 1. IDENTIFICADOR NORMALIZADO
+    const entityId = user?.parish_id || user?.parishId;
 
     const getNombreParrocoActual = () => {
-        if (!parishId) return '---';
-        const lista = getParrocos(parishId) || [];
+        if (!entityId) return '---';
+        const lista = getParrocos(entityId) || [];
         const actual = lista.find(p => String(p.estado) === '1');
         return actual ? `${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase() : '---';
     };
@@ -44,17 +45,15 @@ const BD_BautizosPage = () => {
     const getFechaHoyLetras = () => {
         try {
             const hoy = new Date().toISOString().split('T')[0];
-            // 🚀 Se elimina el "EL" inicial del formato de fecha natural para evitar la duplicación
             return convertDateToSpanishTextNatural(hoy).replace(/^EL\s+/i, '').toUpperCase();
         } catch (e) { return "FECHA ACTUAL"; }
     };
 
     const purificarRegistro = (raw) => {
         if (!raw) return null;
-        const pId = raw.parishId || raw.parish_id || parishId;
+        const pId = raw.parishId || raw.parish_id || entityId;
         const config = obtenerNotasAlMargen(pId) || {};
         
-        // 🚀 OBTENER LA NOTA ORIGINAL DE LA BASE DE DATOS SIN MANIPULAR
         const noteTextRaw = raw.notaMarginal || raw.margin_note || raw.marginNote || '';
         const noteText = String(noteTextRaw).toUpperCase();
 
@@ -84,11 +83,9 @@ const BD_BautizosPage = () => {
 
         let notaCalculada = "";
         
-        // 🚀 SI EL REGISTRO YA TRAÍA UNA NOTA (REEMPLAZADA) DESDE EL GUARDADO, LA RESPETAMOS A MUERTE
         if (noteTextRaw && String(noteTextRaw).trim() !== '' && !String(noteTextRaw).includes('[NUMERO_DECRETO]')) {
             notaCalculada = String(noteTextRaw).toUpperCase();
         } else {
-            // SOLO si la nota viene vacía o con corchetes (errores viejos), calculamos una nueva usando el catálogo
             switch (identityId) {
                 case 'id_anulada_correccion': 
                     notaCalculada = (config.porCorreccion?.anulada || "ANULADA POR CORRECCIÓN.")
@@ -111,7 +108,6 @@ const BD_BautizosPage = () => {
             }
         }
 
-        // Siempre reemplazamos la fecha de expedición porque esta es dinámica y cambia el día de la impresión
         const notaFinalConFecha = notaCalculada.replace(/\[FECHA_EXPEDICION\]/g, getFechaHoyLetras());
 
         return {
@@ -149,13 +145,9 @@ const BD_BautizosPage = () => {
         };
     };
 
-    // 🚀 LÓGICA DE ELIMINACIÓN CON REGRESO DE CORRELATIVO EN SUPABASE
     const handleDeleteTemporal = async (id) => {
         if (!window.confirm("¿Está seguro de eliminar este borrador de la nube? El número de registro regresará al anterior.")) return;
 
-        const entityId = user.parishId;
-
-        // 1. Eliminar de la tabla temporal en Supabase
         try {
             const { error: deleteError } = await supabase
                 .from('pending_baptisms')
@@ -163,21 +155,13 @@ const BD_BautizosPage = () => {
                 .eq('id', id);
                 
             if (deleteError) throw deleteError;
-        } catch (err) {
-            console.error("Error borrando registro temporal en Supabase:", err);
-            toast({ title: "Error", description: "No se pudo eliminar de la nube.", variant: "destructive" });
-            return;
-        }
 
-        // 2. Decrementar el correlativo en parámetros (Supabase)
-        try {
-            const { data, error: fetchError } = await supabase
+            // Decrementar correlativo en parámetros
+            const { data } = await supabase
                 .from('parish_parameters')
                 .select('bautizos_params')
                 .eq('parish_id', entityId)
                 .maybeSingle();
-
-            if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
 
             if (data && data.bautizos_params && data.bautizos_params.numeroRegistroActual) {
                 const currentParams = data.bautizos_params;
@@ -191,50 +175,79 @@ const BD_BautizosPage = () => {
 
                 await supabase.from('parish_parameters').update({ bautizos_params: updatedParams }).eq('parish_id', entityId);
             }
-        } catch (error) {
-            console.error("Error al restaurar el correlativo en Supabase:", error);
-        }
 
-        // 3. Actualizar UI
-        setRegistrosTemporales(prev => prev.filter(r => r.id !== id));
-        toast({
-            title: "Borrador Eliminado",
-            description: "Eliminado de la nube y correlativo restaurado.",
-            className: "bg-amber-50 border-amber-200 text-amber-900"
-        });
+            setRegistrosTemporales(prev => prev.filter(r => r.id !== id));
+            toast({
+                title: "Borrador Eliminado",
+                description: "Eliminado de la nube y correlativo restaurado.",
+                className: "bg-amber-50 border-amber-200 text-amber-900"
+            });
+        } catch (err) {
+            console.error("Error borrando registro temporal:", err);
+            toast({ title: "Error", description: "No se pudo eliminar de la nube.", variant: "destructive" });
+        }
     };
 
     const fetchData = async () => {
-        if (!parishId) return;
+        if (!entityId) {
+            setCargando(false);
+            return;
+        }
         setCargando(true);
         try {
             // 1. Obtener Registros Permanentes
-            let query = supabase.from('baptisms').select('*', { count: 'exact' }).eq('parish_id', parishId);
-            const { data, count, error } = await query.order('entry_number', { ascending: false }).range((paginaActual - 1) * registrosPorPagina, paginaActual * registrosPorPagina - 1);
-            if (error) throw error;
+            const { data: permData, count, error: permError } = await supabase
+                .from('baptisms')
+                .select('*', { count: 'exact' })
+                .eq('parish_id', entityId)
+                .order('entry_number', { ascending: false })
+                .range((paginaActual - 1) * registrosPorPagina, paginaActual * registrosPorPagina - 1);
 
-            setRegistrosPermanentes(data.map(r => purificarRegistro({
-                ...r.raw_data, id: r.id, status: r.status, 
-                tipo_union_padres: r.tipo_union_padres, margin_note: r.margin_note
-            })));
-            setTotalRegistros(count || 0);
+            if (permError) throw permError;
 
-            // 2. Obtener Registros Temporales Directo de Supabase (Nube)
-            const { data: temp_data, error: temp_error } = await supabase
+            if (permData) {
+                setRegistrosPermanentes(permData.map(r => {
+                    const raw = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : (r.raw_data || {});
+                    return purificarRegistro({
+                        ...raw, 
+                        id: r.id, 
+                        status: r.status, 
+                        tipo_union_padres: r.tipo_union_padres, 
+                        margin_note: r.margin_note
+                    });
+                }));
+                setTotalRegistros(count || 0);
+            }
+
+            // 2. Obtener Registros Temporales (Borradores)
+            const { data: tempData, error: tempError } = await supabase
                 .from('pending_baptisms')
                 .select('*')
-                .eq('parish_id', parishId)
+                .eq('parish_id', entityId)
                 .order('created_at', { ascending: false });
                 
-            if (!temp_error && temp_data) {
-                setRegistrosTemporales(temp_data.map(r => purificarRegistro({
-                    ...r.raw_data, id: r.id, status: 'pending'
-                })));
+            if (tempError) throw tempError;
+
+            if (tempData) {
+                setRegistrosTemporales(tempData.map(r => {
+                    const raw = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : (r.raw_data || {});
+                    return purificarRegistro({
+                        ...raw, 
+                        id: r.id, 
+                        status: 'pending'
+                    });
+                }));
             }
-        } catch (err) { console.error("Error cargando base de datos:", err); } finally { setCargando(false); }
+        } catch (err) { 
+            console.error("Error cargando base de datos:", err); 
+        } finally { 
+            setCargando(false); 
+        }
     };
 
-    useEffect(() => { fetchData(); }, [parishId, paginaActual]);
+    useEffect(() => { 
+        fetchData(); 
+    }, [entityId, paginaActual]);
 
     const handleTopScroll = () => { if (topScrollRef.current && tableContainerRef.current) tableContainerRef.current.scrollLeft = topScrollRef.current.scrollLeft; };
     const handleTableScroll = () => { if (topScrollRef.current && tableContainerRef.current) topScrollRef.current.scrollLeft = tableContainerRef.current.scrollLeft; };
@@ -282,8 +295,12 @@ const BD_BautizosPage = () => {
                 <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-xl overflow-hidden flex flex-col">
                     <Tabs value={tabActiva} onValueChange={setTabActiva}>
                         <TabsList className="w-full justify-start rounded-none border-b bg-gray-50/50 p-2 h-14">
-                            <TabsTrigger value="permanentes" className="px-8 rounded-xl font-black uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-sm">Permanentes</TabsTrigger>
-                            <TabsTrigger value="temporales" className="px-8 rounded-xl font-black uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-sm">Borradores (Temporales)</TabsTrigger>
+                            <TabsTrigger value="permanentes" className="px-8 rounded-xl font-black uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                                Permanentes ({totalRegistros})
+                            </TabsTrigger>
+                            <TabsTrigger value="temporales" className="px-8 rounded-xl font-black uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                                Borradores (Temporales) ({registrosTemporales.length})
+                            </TabsTrigger>
                         </TabsList>
 
                         <div ref={topScrollRef} onScroll={handleTopScroll} className="overflow-x-auto overflow-y-hidden h-4 bg-gray-100/50 border-b border-gray-200">
@@ -302,12 +319,11 @@ const BD_BautizosPage = () => {
                                     />
                                 </TabsContent>
                                 <TabsContent value="temporales" className="p-0 m-0">
-                                    {/* 🚀 ACCIONES DE TEMPORALES: ASENTAR Y ELIMINAR */}
                                     <Table
                                         columns={columns}
                                         data={registrosTemporales}
                                         actions={[
-                                            { label: 'Asentar', icon: <BookOpen className="w-4 text-blue-600" />, onClick: (r) => navigate(`/parroquia/bautismo/asentar?id=${r.id}`) },
+                                            { label: 'Asentar', icon: <BookOpen className="w-4 text-blue-600" />, onClick: (r) => navigate(`/parroquia/bautismo/sentar-registros`) },
                                             { label: 'Eliminar', icon: <Trash2 className="w-4 text-red-500" />, onClick: (r) => handleDeleteTemporal(r.id) }
                                         ]}
                                     />
@@ -317,7 +333,9 @@ const BD_BautizosPage = () => {
                     </Tabs>
 
                     <div className="p-4 bg-gray-50/80 flex justify-between items-center border-t border-gray-100">
-                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Página Actual: {paginaActual} — Registros Totales: {tabActiva === 'permanentes' ? totalRegistros : registrosTemporales.length}</p>
+                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                            Página Actual: {paginaActual} — Registros Totales: {tabActiva === 'permanentes' ? totalRegistros : registrosTemporales.length}
+                        </p>
                         <div className="flex gap-2">
                             <Button variant="ghost" onClick={() => setPaginaActual(p => p - 1)} disabled={paginaActual === 1} className="rounded-xl h-8"><ChevronLeft className="w-4 h-4" /></Button>
                             <Button variant="ghost" onClick={() => setPaginaActual(p => p + 1)} disabled={paginaActual * registrosPorPagina >= totalRegistros} className="rounded-xl h-8"><ChevronRight className="w-4 h-4" /></Button>
