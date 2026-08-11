@@ -10,14 +10,12 @@ export const AuthProvider = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
 
-    // 🚀 CONSULTA BLINDADA (Sin relaciones complejas que puedan fallar)
-    const fetchAndEnrichProfile = async (authUser) => {
+    const enrichUserProfile = async (authUser) => {
         if (!authUser) return null;
 
         try {
-            // 1. Obtener perfil del usuario
             let prof = null;
-            
+
             const { data: byAuthId } = await supabase
                 .from('user_profiles')
                 .select('*')
@@ -46,7 +44,6 @@ export const AuthProvider = ({ children }) => {
             const pId = prof?.parish_id || authUser.user_metadata?.parish_id || 'ae48c502-6603-4887-ba38-6886e628430e';
             let pName = 'PARROQUIA PADRE MISERICORDIOSO';
 
-            // 2. Obtener nombre de parroquia por separado
             if (pId) {
                 try {
                     const { data: pData } = await supabase
@@ -58,7 +55,7 @@ export const AuthProvider = ({ children }) => {
                 } catch (e) {}
             }
 
-            const userRole = prof?.role || authUser.user_metadata?.role || 'parish';
+            const rawRole = prof?.role || authUser.user_metadata?.role || 'parish';
 
             const enrichedUser = {
                 ...authUser,
@@ -68,12 +65,12 @@ export const AuthProvider = ({ children }) => {
                 parish_id: pId,
                 parishName: pName,
                 parish_name: pName,
-                role: userRole
+                role: rawRole
             };
 
             return { prof: prof || {}, enrichedUser };
         } catch (error) {
-            console.error("Error cargando perfil:", error);
+            console.error("Error en enrichUserProfile:", error);
             const fallbackUser = {
                 ...authUser,
                 parishId: 'ae48c502-6603-4887-ba38-6886e628430e',
@@ -87,26 +84,28 @@ export const AuthProvider = ({ children }) => {
     };
 
     useEffect(() => {
+        let isMounted = true;
+
         const initSession = async () => {
             try {
                 const { data: { session } } = await supabase.auth.getSession();
                 
-                if (session?.user) {
-                    const result = await fetchAndEnrichProfile(session.user);
-                    if (result?.enrichedUser) {
+                if (session?.user && isMounted) {
+                    const result = await enrichUserProfile(session.user);
+                    if (result?.enrichedUser && isMounted) {
                         setUser(result.enrichedUser);
                         setProfile(result.prof);
                         setIsAuthenticated(true);
                         localStorage.setItem('sacraments_user_profile', JSON.stringify(result.prof || {}));
                         localStorage.setItem('currentUser', JSON.stringify(result.enrichedUser));
                     }
-                } else {
+                } else if (isMounted) {
                     setIsAuthenticated(false);
                 }
             } catch (error) {
-                console.error("Error al inicializar sesión:", error);
+                console.error("Error inicializando sesión:", error);
             } finally {
-                setIsLoading(false);
+                if (isMounted) setIsLoading(false);
             }
         };
 
@@ -114,22 +113,26 @@ export const AuthProvider = ({ children }) => {
 
         const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
             if (event === 'SIGNED_IN' && session?.user) {
-                const result = await fetchAndEnrichProfile(session.user);
-                if (result?.enrichedUser) {
+                const result = await enrichUserProfile(session.user);
+                if (result?.enrichedUser && isMounted) {
                     setUser(result.enrichedUser);
                     setProfile(result.prof);
                     setIsAuthenticated(true);
+                    localStorage.setItem('currentUser', JSON.stringify(result.enrichedUser));
                 }
             } else if (event === 'SIGNED_OUT') {
-                setUser(null);
-                setProfile(null);
-                setIsAuthenticated(false);
-                localStorage.removeItem('sacraments_user_profile');
-                localStorage.removeItem('currentUser');
+                if (isMounted) {
+                    setUser(null);
+                    setProfile(null);
+                    setIsAuthenticated(false);
+                    localStorage.removeItem('sacraments_user_profile');
+                    localStorage.removeItem('currentUser');
+                }
             }
         });
 
         return () => {
+            isMounted = false;
             authListener?.subscription?.unsubscribe();
         };
     }, []);
@@ -139,7 +142,7 @@ export const AuthProvider = ({ children }) => {
             const { data, error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) throw error;
             
-            const result = await fetchAndEnrichProfile(data.user);
+            const result = await enrichUserProfile(data.user);
             if (result?.enrichedUser) {
                 setUser(result.enrichedUser);
                 setProfile(result.prof);

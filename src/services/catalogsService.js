@@ -1,9 +1,19 @@
 import { supabase } from '@/lib/supabaseClient';
 import { generateUUID } from '@/utils/supabaseHelpers';
 
+const safeJsonParse = (str, fallback = []) => {
+    if (!str || str === 'undefined' || str === 'null') return fallback;
+    try {
+        const parsed = JSON.parse(str);
+        return Array.isArray(fallback) && !Array.isArray(parsed) ? fallback : parsed;
+    } catch (e) {
+        return fallback;
+    }
+};
+
 export const getAuxData = (key, contextId) => {
     const storageKey = contextId ? `${key}_${contextId}` : key;
-    return JSON.parse(localStorage.getItem(storageKey) || '[]');
+    return safeJsonParse(localStorage.getItem(storageKey), []);
 };
 
 export const saveAuxData = (key, contextId, data) => {
@@ -44,7 +54,7 @@ export const getParrocoActual = (parishId) => {
 export const actualizarParrocoActual = async (parishId) => {
     if (!parishId) return;
     const key = `parrocos_${parishId}`;
-    const currentList = JSON.parse(localStorage.getItem(key) || '[]');
+    const currentList = safeJsonParse(localStorage.getItem(key), []);
     if (currentList.length === 0) return;
 
     const sorted = [...currentList].sort((a, b) => {
@@ -71,7 +81,7 @@ export const actualizarParrocoActual = async (parishId) => {
         }));
         await supabase.from('parrocos').upsert(upsertPayload, { onConflict: 'id' });
     } catch(e) {
-        console.error("Error sincronizando actualización de párrocos en Nube", e);
+        console.error("Error sincronizando párrocos con Supabase:", e);
     }
 };
 
@@ -85,7 +95,7 @@ export const addParroco = async (item, parishId) => {
         await actualizarParrocoActual(parishId); 
         return { success: true, data: newItem }; 
     } catch (e) {
-        return { success: false, message: "Error al guardar en la Nube: " + e.message };
+        return { success: false, message: "Error al guardar: " + e.message };
     }
 };
 
@@ -100,7 +110,7 @@ export const updateParroco = async (id, item, parishId) => {
         await actualizarParrocoActual(parishId); 
         return { success: true }; 
     } catch (e) {
-        return { success: false, message: "Error al actualizar en la Nube: " + e.message };
+        return { success: false, message: "Error al actualizar: " + e.message };
     }
 };
 
@@ -118,11 +128,11 @@ export const deleteParroco = async (id, parishId) => {
 };
 
 export const importParrocos = async (payload, parishId, append = false) => {
-    if (!parishId) return { success: false, message: "No se especificó el ID de parroquia." };
+    if (!parishId) return { success: false, message: "Falta ID de parroquia." };
     try {
         const key = `parrocos_${parishId}`;
-        const currentData = append ? JSON.parse(localStorage.getItem(key) || '[]') : [];
-        const newItems = payload.data.map(item => ({
+        const currentData = append ? safeJsonParse(localStorage.getItem(key), []) : [];
+        const newItems = (payload.data || []).map(item => ({
             ...item,
             id: generateUUID(),
             createdAt: new Date().toISOString()
@@ -139,13 +149,71 @@ export const importParrocos = async (payload, parishId, append = false) => {
     }
 };
 
+// --- MIS DATOS (MEMBRETES) ---
+export const getMisDatosList = (contextId) => {
+    if (!contextId) return [];
+    const local = safeJsonParse(localStorage.getItem('mis_datos'), []);
+    const match = local.find(md => String(md.entity_id) === String(contextId));
+    if (!match) return [];
+    let rawPayload = match.payload;
+    if (typeof rawPayload === 'string') rawPayload = safeJsonParse(rawPayload, {});
+    if (Array.isArray(rawPayload)) rawPayload = rawPayload[0] || {};
+    return [{ ...rawPayload, id: match.id }];
+};
+
+export const addMisDatosRecord = async (item, contextId) => {
+    try {
+        if (!contextId) throw new Error("Falta ID de entidad.");
+        const cleanPayload = Array.isArray(item) ? item[0] : item;
+        const { data: saved, error } = await supabase.from('mis_datos').insert([{ entity_id: contextId, payload: cleanPayload }]).select().single();
+        if (error) throw error;
+        
+        const local = safeJsonParse(localStorage.getItem('mis_datos'), []);
+        localStorage.setItem('mis_datos', JSON.stringify([...local, saved]));
+        return { success: true, message: "Guardado exitosamente" };
+    } catch (error) { 
+        return { success: false, message: error.message }; 
+    }
+};
+
+export const updateMisDatosRecord = async (id, updates, contextId) => {
+    try {
+        const local = safeJsonParse(localStorage.getItem('mis_datos'), []);
+        const current = local.find(md => md.id === id);
+        let oldPayload = current?.payload || {};
+        if (typeof oldPayload === 'string') oldPayload = safeJsonParse(oldPayload, {});
+        if (Array.isArray(oldPayload)) oldPayload = oldPayload[0] || {};
+
+        const cleanUpdates = Array.isArray(updates) ? updates[0] : updates;
+        const updatedPayload = { ...oldPayload, ...cleanUpdates };
+
+        const { error } = await supabase.from('mis_datos').update({ payload: updatedPayload }).eq('id', id);
+        if (error) throw error;
+
+        localStorage.setItem('mis_datos', JSON.stringify(local.map(md => md.id === id ? { ...md, payload: updatedPayload } : md)));
+        return { success: true, message: "Actualizado exitosamente" };
+    } catch (error) { 
+        return { success: false, message: error.message }; 
+    }
+};
+
+export const deleteMisDatosRecord = async (id) => {
+    try {
+        const { error } = await supabase.from('mis_datos').delete().eq('id', id);
+        if (error) throw error;
+        const local = safeJsonParse(localStorage.getItem('mis_datos'), []);
+        localStorage.setItem('mis_datos', JSON.stringify(local.filter(md => md.id !== id)));
+        return { success: true, message: "Eliminado exitosamente" };
+    } catch (error) { return { success: false, message: error.message }; }
+};
+
 // --- DIÓCESIS, IGLESIAS, OBISPOS, CIUDADES, PAÍSES ---
 export const getDiocesis = (parishId) => genericAuxCRUD('diocesis', parishId).get();
 export const addDiocesis = (item, parishId) => genericAuxCRUD('diocesis', parishId).add(item);
 export const updateDiocesis = (id, item, parishId) => genericAuxCRUD('diocesis', parishId).update(id, item);
 export const deleteDiocesis = (id, parishId) => genericAuxCRUD('diocesis', parishId).delete(id);
 
-export const getIglesiasList = (parishId) => JSON.parse(localStorage.getItem(`iglesias_${parishId}`) || '[]');
+export const getIglesiasList = (parishId) => safeJsonParse(localStorage.getItem(`iglesias_${parishId}`), []);
 export const getIglesias = (parishId) => getIglesiasList(parishId);
 export const addIglesia = (item, parishId) => {
     const list = getIglesiasList(parishId);
@@ -172,34 +240,34 @@ export const addObispo = (item, parishId) => genericAuxCRUD('obispos', parishId)
 export const updateObispo = (id, item, parishId) => genericAuxCRUD('obispos', parishId).update(id, item);
 export const deleteObispo = (id, parishId) => genericAuxCRUD('obispos', parishId).delete(id);
 
-export const getCiudadesList = (contextId) => JSON.parse(localStorage.getItem(`ciudades_${contextId}`) || '[]');
+export const getCiudadesList = (contextId) => safeJsonParse(localStorage.getItem(`ciudades_${contextId}`), []);
 export const addCiudad = (item, contextId) => {
-    if (!contextId) return { success: false, message: "ID de contexto no proporcionado" };
+    if (!contextId) return { success: false, message: "Falta ID de contexto" };
     const list = getCiudadesList(contextId);
     const newItem = { ...item, id: generateUUID(), createdAt: new Date().toISOString() };
     localStorage.setItem(`ciudades_${contextId}`, JSON.stringify([...list, newItem]));
     return { success: true, message: "Ciudad agregada" };
 };
 export const updateCiudad = (id, updates, contextId) => {
-    if (!contextId) return { success: false, message: "ID de contexto no proporcionado" };
+    if (!contextId) return { success: false, message: "Falta ID de contexto" };
     const list = getCiudadesList(contextId);
     const updated = list.map(i => i.id === id ? { ...i, ...updates, updatedAt: new Date().toISOString() } : i);
     localStorage.setItem(`ciudades_${contextId}`, JSON.stringify(updated));
     return { success: true, message: "Ciudad actualizada" };
 };
 export const deleteCiudad = (id, contextId) => {
-    if (!contextId) return { success: false, message: "ID de contexto no proporcionado" };
+    if (!contextId) return { success: false, message: "Falta ID de contexto" };
     const list = getCiudadesList(contextId);
     const filtered = list.filter(i => i.id !== id);
     localStorage.setItem(`ciudades_${contextId}`, JSON.stringify(filtered));
     return { success: true, message: "Ciudad eliminada" };
 };
 export const importCiudades = (jsonData, contextId, append = false) => {
-    if (!contextId) return { success: false, message: "No se especificó el ID de contexto." };
+    if (!contextId) return { success: false, message: "Falta ID de contexto." };
     try {
         const key = `ciudades_${contextId}`;
-        const currentData = append ? JSON.parse(localStorage.getItem(key) || '[]') : [];
-        const newItems = jsonData.data.map(item => ({
+        const currentData = append ? safeJsonParse(localStorage.getItem(key), []) : [];
+        const newItems = (jsonData.data || []).map(item => ({
             id: generateUUID(), nombre: (item.data || item.nombre || '').trim(),
             source: item.source || 'import', count: item.count || 0, weight: item.weight || 0, createdAt: new Date().toISOString()
         })).filter(item => item.nombre);
@@ -213,7 +281,6 @@ export const importCiudades = (jsonData, contextId, append = false) => {
 export const getPaises = (parishId) => getAuxData('paises', parishId);
 export const getParroquiasExternas = (parishId) => getAuxData('parroquias_externas', parishId);
 
-// Placeholders de importación
 export const importDiocesis = () => ({ success: true });
 export const importIglesias = () => ({ success: true });
 export const importObispos = () => ({ success: true });
