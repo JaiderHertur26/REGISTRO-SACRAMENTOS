@@ -57,8 +57,6 @@ import BaptismNewPage from '@/pages/parish/BaptismNewPage';
 import BaptismEditPage from '@/pages/parish/BaptismEditPage';
 import BaptismCelebratedPage from '@/pages/parish/BaptismCelebratedPage';
 import BaptismSentarRegistrosPage from '@/pages/parish/BaptismSentarRegistrosPage';
-import BaptismSeatIndividualPage from '@/pages/parish/BaptismSeatIndividualPage';
-import BaptismSeatBatchPage from '@/pages/parish/BaptismSeatBatchPage';
 import BaptismIndexPage from '@/pages/parish/BaptismIndexPage';
 import BaptismParametersPage from '@/pages/parish/BaptismParametersPage';
 import BaptismPartidasPage from '@/pages/parish/BaptismPartidasPage';
@@ -185,8 +183,7 @@ const AppContent = () => {
                 <Route path="/parroquia/bautismo/editar" element={<ProtectedRoute requiredRole="parish"><BaptismEditPage /></ProtectedRoute>} />
                 <Route path="/parroquia/bautismo/celebrado" element={<ProtectedRoute requiredRole="parish"><BaptismCelebratedPage /></ProtectedRoute>} />
                 <Route path="/parroquia/bautismo/sentar-registros" element={<ProtectedRoute requiredRole="parish"><BaptismSentarRegistrosPage /></ProtectedRoute>} />
-                <Route path="/parroquia/bautismo/sentar-registros/individual" element={<ProtectedRoute requiredRole="parish"><BaptismSeatIndividualPage /></ProtectedRoute>} />
-                <Route path="/parroquia/bautismo/sentar-registros/lote" element={<ProtectedRoute requiredRole="parish"><BaptismSeatBatchPage /></ProtectedRoute>} />
+                <Route path="/parroquia/bautismo/asentar" element={<ProtectedRoute requiredRole="parish"><BaptismSentarRegistrosPage /></ProtectedRoute>} />
                 <Route path="/parroquia/bautismo/partidas" element={<ProtectedRoute requiredRole="parish"><BaptismPartidasPage /></ProtectedRoute>} />
                 <Route path="/parroquia/bautismo/indice" element={<ProtectedRoute requiredRole="parish"><BaptismIndexPage /></ProtectedRoute>} />
                 <Route path="/parroquia/bautismo/parametros" element={<ProtectedRoute requiredRole="parish"><BaptismParametersPage /></ProtectedRoute>} />
