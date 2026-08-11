@@ -13,12 +13,11 @@ import {
     ChevronRight, Zap
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
-import { generateBackup } from '@/lib/backupHelpers';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 const ParishDashboard = () => {
-  const { data } = useAppData();
+  const { createUniversalBackup } = useAppData();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -28,57 +27,9 @@ const ParishDashboard = () => {
   const [stats, setStats] = useState({ baptisms: 0, confirmations: 0, marriages: 0, total: 0 });
   const [hasPending, setHasPending] = useState(false);
   
-  // Estados Cloud-Native
-  const [currentParishId, setCurrentParishId] = useState(null);
-  const [nombreParroquia, setNombreParroquia] = useState(''); // Lo dejamos en blanco para que no se vea feo mientras carga
+  const currentParishId = user?.parish_id || user?.parishId || 'ae48c502-6603-4887-ba38-6886e628430e';
+  const nombreParroquia = user?.parishName || user?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO';
 
-  // 1. RASTREADOR: OBTENER ID REAL Y NOMBRE DE LA PARROQUIA
-  useEffect(() => {
-      const initializeParish = async () => {
-          if (!user) return;
-
-          // Buscamos el ID real directo en la base de datos
-          let pId = user.parish_id || user.parishId;
-          
-          if (!pId && user.email) {
-              const { data: profile } = await supabase
-                  .from('user_profiles')
-                  .select('parish_id')
-                  .eq('email', user.email)
-                  .single();
-              if (profile) pId = profile.parish_id;
-          }
-
-          if (!pId) {
-              setNombreParroquia('PARROQUIA NO ASIGNADA');
-              setIsSyncing(false);
-              return;
-          }
-
-          setCurrentParishId(pId);
-
-          // Descargar nombre real desde la tabla parishes
-          try {
-              const { data: pData } = await supabase
-                  .from('parishes')
-                  .select('name')
-                  .eq('id', pId)
-                  .single();
-              
-              if (pData && pData.name) {
-                  setNombreParroquia(pData.name.toUpperCase());
-              } else {
-                  setNombreParroquia('PARROQUIA');
-              }
-          } catch (e) {
-              setNombreParroquia('PARROQUIA');
-          }
-      };
-
-      initializeParish();
-  }, [user]);
-
-  // 2. BLINDAJE DE FECHAS (Evita que un borrador sin fecha rompa la tabla)
   const parseSortDate = (dateStr) => {
     if (!dateStr) return 0;
     const str = String(dateStr);
@@ -90,29 +41,48 @@ const ParishDashboard = () => {
     return new Date(str).getTime() || 0;
   };
 
-  // 3. MOTOR CLOUD-NATIVE DE SINCRONIZACIÓN
+  // 🚀 CONSULTA PARALELA BLINDADA CONTRA NULOS
   const updateDashboardData = useCallback(async () => {
-    if (!currentParishId) return;
+    if (!currentParishId) {
+        setIsSyncing(false);
+        return;
+    }
     setIsSyncing(true);
 
     try {
-        // Descarga paralela 100% desde Supabase
-        const [bRes, cRes, mRes] = await Promise.all([
-            supabase.from('baptisms').select('id, raw_data, status, created_at').eq('parish_id', currentParishId).in('status', ['seated', 'confirmed', 'anulada']),
-            supabase.from('confirmations').select('id, raw_data, status, created_at').eq('parish_id', currentParishId).in('status', ['seated', 'confirmed', 'anulada']),
-            supabase.from('marriages').select('id, raw_data, status, created_at').eq('parish_id', currentParishId).in('status', ['seated', 'confirmed', 'anulada'])
+        const [bRes, cRes, mRes, bPendingRes] = await Promise.all([
+            supabase.from('baptisms').select('id, raw_data, status, created_at').eq('parish_id', currentParishId),
+            supabase.from('confirmations').select('id, raw_data, status, created_at').eq('parish_id', currentParishId),
+            supabase.from('marriages').select('id, raw_data, status, created_at').eq('parish_id', currentParishId),
+            supabase.from('pending_baptisms').select('id, raw_data, created_at').eq('parish_id', currentParishId)
         ]);
         
-        const bSeated = bRes.error ? [] : bRes.data.map(r => ({ ...r.raw_data, id: r.id, status: r.status, createdAt: r.created_at }));
-        const cSeated = cRes.error ? [] : cRes.data.map(r => ({ ...r.raw_data, id: r.id, status: r.status, createdAt: r.created_at }));
-        const mSeated = mRes.error ? [] : mRes.data.map(r => ({ ...r.raw_data, id: r.id, status: r.status, createdAt: r.created_at }));
+        // Protecciones contra null
+        const bData = bRes.data || [];
+        const cData = cRes.data || [];
+        const mData = mRes.data || [];
+        const bPendingData = bPendingRes.data || [];
 
-        // Borradores locales
-        const bPending = JSON.parse(localStorage.getItem(`pendingBaptisms_${currentParishId}`) || '[]');
-        const cPending = JSON.parse(localStorage.getItem(`pendingConfirmations_${currentParishId}`) || '[]');
-        const mPending = JSON.parse(localStorage.getItem(`pendingMatrimonios_${currentParishId}`) || '[]');
+        const bSeated = bData.map(r => {
+            const raw = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : (r.raw_data || {});
+            return { ...raw, id: r.id, status: r.status, createdAt: r.created_at };
+        });
 
-        // Actualizamos Estadísticas
+        const cSeated = cData.map(r => {
+            const raw = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : (r.raw_data || {});
+            return { ...raw, id: r.id, status: r.status, createdAt: r.created_at };
+        });
+
+        const mSeated = mData.map(r => {
+            const raw = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : (r.raw_data || {});
+            return { ...raw, id: r.id, status: r.status, createdAt: r.created_at };
+        });
+
+        const bPending = bPendingData.map(r => {
+            const raw = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : (r.raw_data || {});
+            return { ...raw, id: r.id, status: 'pending', createdAt: r.created_at };
+        });
+
         setStats({
           baptisms: bSeated.length,
           confirmations: cSeated.length,
@@ -120,11 +90,10 @@ const ParishDashboard = () => {
           total: bSeated.length + cSeated.length + mSeated.length
         });
 
-        const pendingTotal = bPending.length + cPending.length + mPending.length;
-        setHasPending(pendingTotal > 0);
+        setHasPending(bPending.length > 0);
 
-        // Mapeo seguro de registros para la tabla
         const mapRecord = (r, type, label, isPending) => {
+            if (!r) return null;
             let nombres = r.firstName || r.nombres;
             let apellidos = r.lastName || r.apellidos;
 
@@ -146,14 +115,11 @@ const ParishDashboard = () => {
 
         const allRecords = [
             ...bPending.map(r => mapRecord(r, 'baptism', 'Bautismo', true)),
-            ...cPending.map(r => mapRecord(r, 'confirmation', 'Confirmación', true)),
-            ...mPending.map(r => mapRecord(r, 'marriage', 'Matrimonio', true)),
             ...bSeated.map(r => mapRecord(r, 'baptism', 'Bautismo', false)),
             ...cSeated.map(r => mapRecord(r, 'confirmation', 'Confirmación', false)),
             ...mSeated.map(r => mapRecord(r, 'marriage', 'Matrimonio', false))
-        ];
+        ].filter(Boolean);
 
-        // Ordenar: Primero borradores pendientes, luego por fecha más reciente
         allRecords.sort((a, b) => {
             if (a.isPending && !b.isPending) return -1;
             if (!a.isPending && b.isPending) return 1;
@@ -163,22 +129,17 @@ const ParishDashboard = () => {
         setRecentRecords(allRecords.slice(0, 10));
     } catch (err) {
         console.error("Dashboard Sync Error:", err);
-        toast({ title: 'Aviso', description: 'Trabajando en modo sin conexión.', variant: 'default' });
     } finally {
         setIsSyncing(false);
     }
-  }, [currentParishId, toast]);
+  }, [currentParishId]);
 
-  // Ejecutar sincronización solo cuando ya tenemos el currentParishId
   useEffect(() => {
-    if (currentParishId) {
-        updateDashboardData();
-    }
+    updateDashboardData();
     window.addEventListener('storage', updateDashboardData);
     return () => window.removeEventListener('storage', updateDashboardData);
-  }, [updateDashboardData, currentParishId]);
+  }, [updateDashboardData]);
 
-  // Configuración UI de Tarjetas
   const statsCards = [
     { label: 'Bautizos', value: stats.baptisms, icon: Church, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Confirmaciones', value: stats.confirmations, icon: ScrollText, color: 'text-purple-600', bg: 'bg-purple-50' },
@@ -186,7 +147,6 @@ const ParishDashboard = () => {
     { label: 'Total Libros', value: stats.total, icon: FileStack, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ];
 
-  // Columnas de la Tabla Principal
   const columns = [
     { 
         header: 'Titular', 
@@ -230,8 +190,6 @@ const ParishDashboard = () => {
   return (
     <DashboardLayout entityName={nombreParroquia}>
       <div className="max-w-7xl mx-auto pb-12">
-        
-        {/* Cabecera del Panel */}
         <div className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div>
                 <div className="flex items-center gap-3 mb-2 text-[#4B7BA7]">
@@ -241,7 +199,7 @@ const ParishDashboard = () => {
                 <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif">Panel Parroquial</h1>
                 <div className="flex items-center gap-3 mt-3">
                     <p className="text-gray-500 font-bold uppercase text-[11px] tracking-widest">
-                        {nombreParroquia || <Loader2 className="w-4 h-4 animate-spin text-gray-300" />}
+                        {nombreParroquia}
                     </p>
                     {hasPending && (
                         <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-100 shadow-sm">
@@ -256,14 +214,13 @@ const ParishDashboard = () => {
                     <RefreshCcw className={cn("w-4 h-4 mr-2 text-gray-400 group-hover:rotate-180 transition-transform duration-500", isSyncing && "animate-spin")} />
                     <span className="text-[10px] font-black uppercase tracking-widest">Sincronizar</span>
                 </Button>
-                <Button variant="outline" onClick={() => generateBackup(data, user)} className="h-12 px-6 rounded-2xl border-gray-200 hover:bg-gray-50">
+                <Button variant="outline" onClick={() => createUniversalBackup && createUniversalBackup("Backup_Manual")} className="h-12 px-6 rounded-2xl border-gray-200 hover:bg-gray-50">
                     <Download className="w-4 h-4 mr-2 text-[#4B7BA7]" />
                     <span className="text-[10px] font-black uppercase tracking-widest text-gray-700">Exportar Backup</span>
                 </Button>
             </div>
         </div>
 
-        {/* Tarjetas Estadísticas */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
             {statsCards.map((stat, idx) => (
                 <motion.div 
@@ -284,10 +241,7 @@ const ParishDashboard = () => {
             ))}
         </div>
 
-        {/* Área Principal Inferior */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            {/* Columna Izquierda: Botones Rápidos */}
             <div className="lg:col-span-1 space-y-6">
                 <div className="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm">
                     <h2 className="text-xs font-black text-gray-400 uppercase tracking-[0.3em] mb-8 flex items-center gap-2">
@@ -310,15 +264,14 @@ const ParishDashboard = () => {
                 </div>
             </div>
 
-            {/* Columna Derecha: Tabla Reciente */}
             <div className="lg:col-span-2">
                 <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden h-full flex flex-col">
                     <div className="px-10 py-8 border-b border-gray-50 flex items-center justify-between bg-gray-50/50">
                         <div>
                             <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest">Actividad Reciente</h3>
-                            <p className="text-[10px] text-gray-400 font-bold uppercase mt-1">Últimos 10 registros procesados</p>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase mt-1">Últimos registros procesados en la nube</p>
                         </div>
-                        <Button variant="ghost" className="text-[10px] font-black uppercase tracking-widest text-[#4B7BA7]">Ver Historial</Button>
+                        <Button variant="ghost" onClick={() => navigate('/parroquia/bautismo/sentar-registros')} className="text-[10px] font-black uppercase tracking-widest text-[#4B7BA7]">Sentar Borradores</Button>
                     </div>
                     
                     <div className="p-4 flex-1">
@@ -327,7 +280,7 @@ const ParishDashboard = () => {
                         ) : recentRecords.length === 0 ? (
                             <div className="py-24 text-center">
                                 <Activity className="w-16 h-16 text-gray-100 mx-auto mb-4" />
-                                <p className="text-gray-400 font-black uppercase tracking-widest text-[10px]">Sin movimientos registrados hoy</p>
+                                <p className="text-gray-400 font-black uppercase tracking-widest text-[10px]">Sin movimientos registrados</p>
                             </div>
                         ) : (
                             <Table columns={columns} data={recentRecords} className="border-none shadow-none" />
@@ -341,7 +294,6 @@ const ParishDashboard = () => {
   );
 };
 
-// Subcomponente de Botones Rápidos
 const QuickActionButton = ({ color, label, onClick }) => (
     <button 
         onClick={onClick}

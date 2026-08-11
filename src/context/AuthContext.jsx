@@ -10,30 +10,54 @@ export const AuthProvider = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
 
-    // 🚀 FUNCIÓN MAESTRA: Obtiene perfil y enriquece el objeto user con parish_id y parishName
+    // 🚀 CONSULTA BLINDADA (Sin relaciones complejas que puedan fallar)
     const fetchAndEnrichProfile = async (authUser) => {
         if (!authUser) return null;
 
         try {
-            // 1. Buscar en user_profiles vinculando el nombre de la parroquia
-            let { data: prof, error } = await supabase
+            // 1. Obtener perfil del usuario
+            let prof = null;
+            
+            const { data: byAuthId } = await supabase
                 .from('user_profiles')
-                .select('*, parishes:parish_id(id, name)')
-                .or(`auth_user_id.eq.${authUser.id},id.eq.${authUser.id}`)
+                .select('*')
+                .eq('auth_user_id', authUser.id)
                 .maybeSingle();
+            prof = byAuthId;
 
-            // 2. Fallback de búsqueda por email si no coincidió por ID
-            if (!prof && authUser.email) {
-                const { data: emailProf } = await supabase
+            if (!prof) {
+                const { data: byId } = await supabase
                     .from('user_profiles')
-                    .select('*, parishes:parish_id(id, name)')
-                    .eq('email', authUser.email)
+                    .select('*')
+                    .eq('id', authUser.id)
                     .maybeSingle();
-                prof = emailProf;
+                prof = byId;
             }
 
-            const pId = prof?.parish_id || authUser.user_metadata?.parish_id || null;
-            const pName = prof?.parishes?.name || prof?.parish_name || authUser.user_metadata?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO';
+            if (!prof && authUser.email) {
+                const { data: byEmail } = await supabase
+                    .from('user_profiles')
+                    .select('*')
+                    .eq('email', authUser.email)
+                    .maybeSingle();
+                prof = byEmail;
+            }
+
+            const pId = prof?.parish_id || authUser.user_metadata?.parish_id || 'ae48c502-6603-4887-ba38-6886e628430e';
+            let pName = 'PARROQUIA PADRE MISERICORDIOSO';
+
+            // 2. Obtener nombre de parroquia por separado
+            if (pId) {
+                try {
+                    const { data: pData } = await supabase
+                        .from('parishes')
+                        .select('name')
+                        .eq('id', pId)
+                        .maybeSingle();
+                    if (pData?.name) pName = pData.name.toUpperCase();
+                } catch (e) {}
+            }
+
             const userRole = prof?.role || authUser.user_metadata?.role || 'parish';
 
             const enrichedUser = {
@@ -42,15 +66,23 @@ export const AuthProvider = ({ children }) => {
                 id: authUser.id,
                 parishId: pId,
                 parish_id: pId,
-                parishName: pName?.toUpperCase(),
-                parish_name: pName?.toUpperCase(),
+                parishName: pName,
+                parish_name: pName,
                 role: userRole
             };
 
-            return { prof, enrichedUser };
+            return { prof: prof || {}, enrichedUser };
         } catch (error) {
-            console.error("Error cargando perfil de usuario:", error);
-            return null;
+            console.error("Error cargando perfil:", error);
+            const fallbackUser = {
+                ...authUser,
+                parishId: 'ae48c502-6603-4887-ba38-6886e628430e',
+                parish_id: 'ae48c502-6603-4887-ba38-6886e628430e',
+                parishName: 'PARROQUIA PADRE MISERICORDIOSO',
+                parish_name: 'PARROQUIA PADRE MISERICORDIOSO',
+                role: 'parish'
+            };
+            return { prof: fallbackUser, enrichedUser: fallbackUser };
         }
     };
 
@@ -61,30 +93,18 @@ export const AuthProvider = ({ children }) => {
                 
                 if (session?.user) {
                     const result = await fetchAndEnrichProfile(session.user);
-                    
                     if (result?.enrichedUser) {
                         setUser(result.enrichedUser);
                         setProfile(result.prof);
                         setIsAuthenticated(true);
                         localStorage.setItem('sacraments_user_profile', JSON.stringify(result.prof || {}));
                         localStorage.setItem('currentUser', JSON.stringify(result.enrichedUser));
-                        localStorage.setItem('user', JSON.stringify(result.enrichedUser));
-                    } else {
-                        setUser(session.user);
-                        setIsAuthenticated(true);
                     }
                 } else {
                     setIsAuthenticated(false);
                 }
             } catch (error) {
                 console.error("Error al inicializar sesión:", error);
-                const cachedUser = localStorage.getItem('currentUser');
-                if (cachedUser) {
-                    const parsed = JSON.parse(cachedUser);
-                    setUser(parsed);
-                    setProfile(parsed);
-                    setIsAuthenticated(true);
-                }
             } finally {
                 setIsLoading(false);
             }
@@ -99,7 +119,6 @@ export const AuthProvider = ({ children }) => {
                     setUser(result.enrichedUser);
                     setProfile(result.prof);
                     setIsAuthenticated(true);
-                    localStorage.setItem('currentUser', JSON.stringify(result.enrichedUser));
                 }
             } else if (event === 'SIGNED_OUT') {
                 setUser(null);
@@ -107,12 +126,11 @@ export const AuthProvider = ({ children }) => {
                 setIsAuthenticated(false);
                 localStorage.removeItem('sacraments_user_profile');
                 localStorage.removeItem('currentUser');
-                localStorage.removeItem('user');
             }
         });
 
         return () => {
-            authListener.subscription.unsubscribe();
+            authListener?.subscription?.unsubscribe();
         };
     }, []);
 
@@ -122,17 +140,12 @@ export const AuthProvider = ({ children }) => {
             if (error) throw error;
             
             const result = await fetchAndEnrichProfile(data.user);
-            
             if (result?.enrichedUser) {
                 setUser(result.enrichedUser);
                 setProfile(result.prof);
                 setIsAuthenticated(true);
-                localStorage.setItem('sacraments_user_profile', JSON.stringify(result.prof || {}));
-                localStorage.setItem('currentUser', JSON.stringify(result.enrichedUser));
-                localStorage.setItem('user', JSON.stringify(result.enrichedUser));
                 return { success: true, role: result.enrichedUser.role };
             }
-            
             return { success: true, role: 'parish' };
         } catch (error) {
             return { success: false, error: "Credenciales incorrectas." };
@@ -140,15 +153,12 @@ export const AuthProvider = ({ children }) => {
     };
 
     const logout = async () => {
-        try {
-            await supabase.auth.signOut();
-        } catch (e) {}
+        try { await supabase.auth.signOut(); } catch (e) {}
         setUser(null);
         setProfile(null);
         setIsAuthenticated(false);
         localStorage.removeItem('sacraments_user_profile');
         localStorage.removeItem('currentUser');
-        localStorage.removeItem('user');
         window.location.href = '/'; 
     };
 
@@ -158,11 +168,11 @@ export const AuthProvider = ({ children }) => {
             profile, 
             isAuthenticated, 
             isLoading,
-            role: user?.role || profile?.role || null,
-            parishId: user?.parish_id || profile?.parish_id || null,
-            parish_id: user?.parish_id || profile?.parish_id || null,
-            parishName: user?.parishName || profile?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO',
-            parish_name: user?.parish_name || profile?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO',
+            role: user?.role || profile?.role || 'parish',
+            parishId: user?.parish_id || profile?.parish_id || 'ae48c502-6603-4887-ba38-6886e628430e',
+            parish_id: user?.parish_id || profile?.parish_id || 'ae48c502-6603-4887-ba38-6886e628430e',
+            parishName: user?.parishName || 'PARROQUIA PADRE MISERICORDIOSO',
+            parish_name: user?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO',
             login, 
             logout
         }}>
