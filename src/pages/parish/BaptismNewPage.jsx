@@ -1,405 +1,197 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
-import { 
-    Save, X, Calendar, User, Users, BookOpen, PenTool, 
-    CheckCircle, Loader2, ScrollText, MapPin, Hash, Search, AlertCircle 
-} from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import Input from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
+import { 
+    Save, ArrowLeft, Loader2, Printer 
+} from 'lucide-react';
 import BaptismTicket from '@/components/BaptismTicket';
-import CityAutocomplete from '@/components/CityAutocomplete';
-import useParroquiaFromMisDatos from '@/hooks/useParroquiaFromMisDatos';
-import { generateUUID } from '@/utils/supabaseHelpers';
-import { supabase } from '@/lib/supabaseClient'; 
-
-// 🚀 IMPORTACIONES DEL NUEVO MOTOR OFFLINE-FIRST
-import { saveToLocalMirror, addToSyncQueue } from '@/lib/offlineDatabase';
 
 const BaptismNewPage = () => {
-    const { user, profile } = useAuth(); // Usamos profile para mayor seguridad
-    const { getMisDatosList, getCiudadesList } = useAppData();
-    const navigate = useNavigate();
+    const { user } = useAuth();
+    const { saveBaptismToSource, getMisDatosList } = useAppData();
     const { toast } = useToast();
-    const parishNameFromMisDatos = useParroquiaFromMisDatos();
-    
-    const [isSuccess, setIsSuccess] = useState(false);
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [ticketData, setTicketData] = useState(null);
-    const [parishInfo, setParishInfo] = useState(null); 
-    const [ciudades, setCiudades] = useState([]); 
-    const [fullParamsCache, setFullParamsCache] = useState(null); 
+    const navigate = useNavigate();
 
-    const initialFormData = {
-        numeroRegistro: '', Libro: '', folio: '', numero: '',
-        fechaSacramento: '', lugarBautismo: '',
-        apellidos: '', nombres: '', sexo: '', 
-        fechaNacimiento: '', lugarNacimiento: '', 
-        tipoUnionPadres: '', 
-        nombrePadre: '', cedulaPadre: '', 
-        nombreMadre: '', cedulaMadre: '', 
-        abuelosPaternos: '', abuelosMaternos: '', 
-        padrinos: '', 
-        direccion: '', 
+    const parishId = user?.parish_id || user?.parishId || 'ae48c502-6603-4887-ba38-6886e628430e';
+    const nombreParroquia = user?.parishName || user?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO';
+
+    const [isSaving, setIsSaving] = useState(false);
+    const [savedDataForTicket, setSavedDataForTicket] = useState(null);
+    const [parishInfo, setParishInfo] = useState(null);
+
+    const [formData, setFormData] = useState({
+        numeroRegistro: '---',
+        lugarBautismo: nombreParroquia,
+        fechaSacramento: '',
+        horaSacramento: '10:00',
+        nombres: '',
+        apellidos: '',
+        sexo: 'MASCULINO',
+        fechaNacimiento: '',
+        lugarNacimiento: '',
+        nuip: '',
+        serialRegistro: '',
+        oficinaRegistro: '',
+        fechaExpedicionRegistro: '',
+        nombrePadre: '',
+        cedulaPadre: '',
+        nombreMadre: '',
+        cedulaMadre: '',
+        tipoUnionPadres: 'MATRIMONIO CATÓLICO',
+        abuelosPaternos: '',
+        abuelosMaternos: '',
+        direccion: '',
+        padrinos: '',
         ministro: '',
-        serialRegistro: '', nuip: '', oficinaRegistro: '', fechaExpedicionRegistro: '', 
-    };
+        daFe: ''
+    });
 
-    const [formData, setFormData] = useState(initialFormData);
-
-    // --- 1. CARGA DE NOMBRE DE PARROQUIA ---
     useEffect(() => {
-        if (parishNameFromMisDatos && !formData.lugarBautismo) {
-            setFormData(prev => ({ ...prev, lugarBautismo: parishNameFromMisDatos.toUpperCase() }));
-        }
-    }, [parishNameFromMisDatos]);
-
-    // --- 2. CARGA DE DATOS ---
-    useEffect(() => {
-        const loadInitialData = async () => {
-            // Usamos parishId del profile o de user para mantener compatibilidad
-            const entityId = profile?.parish_id || user?.parishId; 
-            
-            if (entityId) {
-                const misDatos = getMisDatosList(entityId);
-                
-                if (misDatos?.length > 0) {
-                    setParishInfo({ 
-                        diocesis: misDatos[0].diocesis || '',
-                        nombre: misDatos[0].nombre || '', 
-                        direccion: misDatos[0].direccion || '', 
-                        telefono: misDatos[0].telefono || '', 
-                        ciudad: misDatos[0].ciudad || '' 
-                    });
-                    
-                    if (!formData.lugarBautismo) {
-                        setFormData(prev => ({ ...prev, lugarBautismo: (misDatos[0].nombre || '').toUpperCase() }));
-                    }
-                }
-
-                const contextId = user?.dioceseId || entityId;
-                const listaCiudadesRaw = getCiudadesList(contextId) || [];
-                setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
-                
-                const storedMinisters = localStorage.getItem(`parrocos_${entityId}`);
-                if (storedMinisters) {
-                    const parsed = JSON.parse(storedMinisters);
-                    const active = parsed.find(p => String(p.estado) === '1');
-                    if (active) setFormData(prev => ({ ...prev, ministro: `${active.nombre} ${active.apellido || ''}`.trim().toUpperCase() }));
-                }
-
-                try {
-                    const { data, error } = await supabase
-                        .from('parish_parameters')
-                        .select('bautizos_params')
-                        .eq('parish_id', entityId)
-                        .maybeSingle();
-
-                    if (error && error.code !== 'PGRST116') throw error;
-
-                    if (data && data.bautizos_params) {
-                        setFullParamsCache(data.bautizos_params);
-                        
-                        setFormData(prev => ({
-                            ...prev,
-                            Libro: data.bautizos_params.ordinarioLibro || '',
-                            folio: data.bautizos_params.ordinarioFolio || '',
-                            numero: data.bautizos_params.ordinarioNumero || '',
-                            numeroRegistro: data.bautizos_params.numeroRegistroActual || '' 
-                        }));
-                    }
-                } catch (e) {
-                    console.error("Error cargando parámetros de registro desde Supabase:", e);
-                }
+        if (parishId) {
+            const misDatos = getMisDatosList(parishId);
+            if (misDatos?.length > 0) {
+                setParishInfo(misDatos[0]);
             }
-        };
+        }
+    }, [parishId]);
 
-        loadInitialData();
-    }, [user, profile, getMisDatosList, getCiudadesList]);
-
-    // --- 3. MANEJADORES DE ENTRADA ---
     const handleChange = (e) => {
         const { name, value } = e.target;
-        const finalValue = ['nombres', 'apellidos', 'lugarNacimiento', 'lugarBautismo', 'direccion', 'oficinaRegistro', 'padrinos', 'nombrePadre', 'nombreMadre'].includes(name) 
-            ? value.toUpperCase() 
-            : value;
-            
-        setFormData(prev => ({ ...prev, [name]: finalValue }));
+        setFormData(prev => ({ ...prev, [name]: value }));
     };
-
-    const handleCityChange = (data) => {
-        let value = "";
-        
-        if (data && data.target) {
-            value = data.target.value;
-        } 
-        else if (typeof data === 'string') {
-            value = data;
-        }
-        else if (data && data.nombre) {
-            value = data.nombre;
-        }
-
-        setFormData(prev => ({ 
-            ...prev, 
-            lugarNacimiento: value.toUpperCase() 
-        }));
-    };
-
-    // --- 4. ENVÍO BLINDADO OFFLINE-FIRST ---  
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setIsSubmitting(true);
-        
+        if (!formData.nombres || !formData.apellidos) {
+            toast({ title: "Campos Requeridos", description: "Ingrese nombres y apellidos.", variant: "destructive" });
+            return;
+        }
+
+        setIsSaving(true);
         try {
-            const entityId = profile?.parish_id || user?.parishId;
-            const newRecordId = generateUUID();
-            
-            // 1. Construimos el Payload del Borrador
-            const registroAEnviar = {
+            const nextReg = String(Date.now()).slice(-6);
+            const dataToSave = {
                 ...formData,
-                id: newRecordId,
-                parishId: entityId,
-                status: 'pending',
-                creadoPorDecreto: false,
-                createdAt: new Date().toISOString()
+                numeroRegistro: nextReg,
+                status: 'pending'
             };
 
-            // 🚀 PASO 1: Guardar DIRECTO en la tabla temporal de Supabase (Nube)
-            const dbRecord = {
-                id: newRecordId,
-                parish_id: entityId,
-                status: 'pending',
-                raw_data: registroAEnviar,
-                created_at: new Date().toISOString()
-            };
+            const res = await saveBaptismToSource(dataToSave, parishId, 'pending');
 
-            const { error: insertError } = await supabase
-                .from('pending_baptisms')
-                .insert([dbRecord]);
-
-            if (insertError) throw insertError;
-
-            // 🚀 PASO 2: Mantener copia local rápida (Para que el carrusel de firmas lo vea al instante)
-            const localKey = `pendingBaptisms_${entityId}`;
-            const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
-            localStorage.setItem(localKey, JSON.stringify([registroAEnviar, ...localData]));
-
-            // 🚀 PASO 3: Actualizar el correlativo directamente en Supabase
-            if (fullParamsCache && fullParamsCache.numeroRegistroActual) {
-                const currentNum = parseInt(fullParamsCache.numeroRegistroActual, 10) || 0;
-                const nextNum = String(currentNum + 1).padStart(6, '0');
-                
-                const updatedParams = { ...fullParamsCache, numeroRegistroActual: nextNum };
-                setFullParamsCache(updatedParams);
-                
-                await supabase
-                    .from('parish_parameters')
-                    .update({ bautizos_params: updatedParams })
-                    .eq('parish_id', entityId);
+            if (res.success) {
+                setSavedDataForTicket(dataToSave);
+                toast({ title: "Inscripción Guardada", description: "Borrador temporal guardado en la nube con éxito.", className: "bg-green-50 text-green-900 border-green-200" });
+                setTimeout(() => {
+                    navigate('/parroquia/bautismo/sentar-registros');
+                }, 1500);
+            } else {
+                throw new Error(res.message);
             }
-            
-            window.dispatchEvent(new Event('storage'));
-            await new Promise(resolve => setTimeout(resolve, 600)); 
-            
-            setTicketData(registroAEnviar);
-            setIsSuccess(true);
-            toast({ title: "Guardado en Nube ☁️", description: "Borrador enviado a Supabase exitosamente.", className: "bg-green-50 text-green-900 border-green-200" });
-            
-            setTimeout(() => window.print(), 500);
-
-        } catch (error) {
-            console.error("Error crítico al guardar en Nube:", error);
-            toast({ title: "Error de conexión", description: "No se pudo guardar en la nube. Verifique su internet.", variant: "destructive" });
+        } catch (err) {
+            toast({ title: "Error", description: err.message, variant: "destructive" });
         } finally {
-            setIsSubmitting(false);
+            setIsSaving(false);
         }
     };
 
-    const SectionHeader = ({ icon: Icon, title, number }) => (
-        <div className="flex items-center gap-3 mb-8 pb-3 border-b border-gray-100 mt-10 first:mt-2">
-            <div className="w-8 h-8 rounded-2xl bg-[#4B7BA7] text-white flex items-center justify-center text-xs font-black shadow-lg shadow-blue-900/20">{number}</div>
-            <h3 className="text-sm font-black text-gray-800 uppercase tracking-[0.2em] flex items-center gap-2">{Icon && <Icon className="w-4 h-4 text-[#D4AF37]" />} {title}</h3>
-        </div>
-    );
-
-    if (isSuccess) {
-        return (
-            <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-                <div className="print:hidden max-w-xl mx-auto bg-white p-12 rounded-[3rem] shadow-xl border border-gray-100 text-center mt-12 animate-in fade-in duration-500">
-                    <div className="w-24 h-24 bg-green-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border border-green-100"><CheckCircle className="w-12 h-12 text-green-500" /></div>
-                    <h2 className="text-3xl font-black text-gray-900 mb-3 tracking-tighter uppercase">Borrador Guardado</h2>
-                    <p className="text-gray-500 mb-10 text-sm font-medium leading-relaxed">Documento guardado localmente. La sincronización se hará en segundo plano.</p>
-                    <div className="grid grid-cols-2 gap-4">
-    {/* 👇 Aquí cambiamos text-gray-50 por text-slate-700 para que se vea */}
-    <Button onClick={() => window.location.reload()} variant="outline" className="py-7 rounded-2xl border-gray-200 text-slate-700 font-black uppercase text-[10px] hover:bg-slate-50">Nueva Inscripción</Button>
-    <Button onClick={() => navigate('/parroquia/bautismo/sentar-registros')} className="py-7 rounded-2xl bg-[#4B7BA7] text-white font-black uppercase text-[10px] shadow-xl shadow-blue-900/20">Sentar Libros</Button>
-</div>
-                </div>
-                <div className="hidden print:block bg-white">
-                     {ticketData && <BaptismTicket baptismData={ticketData} parishInfo={parishInfo} />}
-                </div>
-            </DashboardLayout>
-        );
-    }
-
     return (
-        <div className="print:hidden bg-gray-50 min-h-screen">
-            <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-                <div className="max-w-5xl mx-auto pb-20">
-                    <div className="mb-10 flex flex-col md:flex-row justify-between items-end gap-6">
+        <DashboardLayout entityName={nombreParroquia}>
+            <div className="hidden print:block">
+                {savedDataForTicket && <BaptismTicket baptismData={savedDataForTicket} parishInfo={parishInfo} />}
+            </div>
+
+            <div className="print:hidden max-w-5xl mx-auto space-y-8 pb-20">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-2xl bg-white border h-12 w-12"><ArrowLeft /></Button>
                         <div>
-                            <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif uppercase">Inscripción Previa</h1>
-                            <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest">Borrador Seguro con Auto-Sincronización</p>
+                            <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Inscribir Nuevo Bautizo</h1>
+                            <p className="text-[#4B7BA7] text-[10px] font-black uppercase tracking-[0.3em] mt-1">Generación de Boleta y Registro Temporal</p>
                         </div>
-                        <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-full w-12 h-12 p-0 bg-white border border-gray-200 text-gray-400 hover:text-gray-900 hover:bg-gray-100 shadow-sm transition-all"><X className="w-5 h-5"/></Button>
+                    </div>
+                </div>
+
+                <form onSubmit={handleSubmit} className="bg-white p-10 rounded-[2.5rem] border shadow-xl space-y-8">
+                    
+                    {/* SECCIÓN 1: SACRAMENTO */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <Input label="Lugar del Sacramento" name="lugarBautismo" value={formData.lugarBautismo} onChange={handleChange} required />
+                        <Input label="Fecha Programada" type="date" name="fechaSacramento" value={formData.fechaSacramento} onChange={handleChange} required />
+                        <Input label="Hora" type="time" name="horaSacramento" value={formData.horaSacramento} onChange={handleChange} />
                     </div>
 
-                    <form onSubmit={handleSubmit} className="bg-white rounded-[2.5rem] shadow-2xl shadow-blue-900/5 border border-gray-100 overflow-hidden relative">
-                        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#D4AF37] to-[#4B7BA7]"></div>
-                        <div className="p-12 space-y-10">
-                            
-                            <section>
-                                <SectionHeader number="01" title="Archivo y Control (Automático)" icon={Hash} />
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50 p-8 rounded-[2rem] border border-slate-100">
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nº Registro Previo</label>
-                                        <input type="text" name="numeroRegistro" value={formData.numeroRegistro} disabled className="w-full px-4 py-4 bg-slate-100 border border-slate-200 rounded-xl outline-none font-black text-[#4B7BA7] text-center cursor-not-allowed opacity-80" />
-                                    </div>
-                                    <div className="md:col-span-2 flex items-center px-4">
-                                        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest leading-relaxed">
-                                            <AlertCircle className="w-4 h-4 inline-block mr-2 mb-0.5 text-amber-500" />
-                                            Libro, Folio y Acta se asignarán al asentar oficialmente.
-                                        </p>
-                                    </div>
-                                </div>
-                            </section>
-
-                            <section>
-                                <SectionHeader number="02" title="Datos de la Celebración" icon={Calendar} />
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Fecha y Hora Sacramento</label>
-                                        <input type="datetime-local" name="fechaSacramento" required value={formData.fechaSacramento} onChange={handleChange} className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl outline-none font-bold text-gray-800 transition-all" />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Parroquia / Lugar</label>
-                                        <input type="text" name="lugarBautismo" required value={formData.lugarBautismo} onChange={handleChange} className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl outline-none font-black uppercase text-gray-700 focus:ring-4 focus:ring-blue-500/5" />
-                                    </div>
-                                </div>
-                            </section>
-
-                            <section>
-                                <SectionHeader number="03" title="Identidad del Bautizado" icon={User} />
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Apellidos</label><input type="text" name="apellidos" required value={formData.apellidos} onChange={handleChange} className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl uppercase font-black text-gray-900 text-lg outline-none focus:ring-4 focus:ring-blue-500/5" /></div>
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Nombres</label><input type="text" name="nombres" required value={formData.nombres} onChange={handleChange} className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl uppercase font-black text-gray-900 text-lg outline-none focus:ring-4 focus:ring-blue-500/5" /></div>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Sexo</label>
-                                        <select name="sexo" required value={formData.sexo} onChange={handleChange} className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl font-black text-gray-700 uppercase outline-none cursor-pointer focus:ring-4 focus:ring-blue-500/5">
-                                            <option value="">SELECCIONE...</option>
-                                            <option value="MASCULINO">MASCULINO</option>
-                                            <option value="FEMENINO">FEMENINO</option>
-                                        </select>
-                                    </div>
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Fecha Nacimiento</label><input type="date" name="fechaNacimiento" required value={formData.fechaNacimiento} onChange={handleChange} className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl outline-none font-bold text-gray-700 focus:ring-4 focus:ring-blue-500/5" /></div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Lugar Nacimiento</label>
-                                        <CityAutocomplete 
-                                            name="lugarNacimiento" 
-                                            value={formData.lugarNacimiento} 
-                                            onChange={handleCityChange} 
-                                            cities={ciudades} 
-                                            className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl font-black text-gray-700 uppercase focus:ring-4 focus:ring-blue-500/5 outline-none"
-                                        />
-                                    </div>
-                                </div>
-                            </section>
-
-                            <section>
-                                <SectionHeader number="04" title="Residencia y Filiación" icon={Users} />
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-8">
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1 flex items-center gap-1"><MapPin className="w-3 h-3"/> Dirección de Residencia</label>
-                                        <input type="text" name="direccion" value={formData.direccion} onChange={handleChange} className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl uppercase font-bold text-gray-700 outline-none focus:ring-4 focus:ring-blue-500/5" />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Estado Civil de los Padres</label>
-                                        <select name="tipoUnionPadres" value={formData.tipoUnionPadres} onChange={handleChange} className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl font-black text-gray-600 uppercase outline-none focus:ring-4 focus:ring-blue-500/5">
-                                            <option value="">SELECCIONE TIPO DE UNIÓN...</option>
-                                            <option value="MATRIMONIO CATÓLICO">MATRIMONIO CATÓLICO</option>
-                                            <option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option>
-                                            <option value="UNIÓN LIBRE">UNIÓN LIBRE</option>
-                                            <option value="MADRE SOLTERA">MADRE SOLTERA</option>
-                                            <option value="PADRE SOLTERO">PADRE SOLTERO</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                    <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-5">
-                                        <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Datos del Padre</p>
-                                        <input type="text" name="nombrePadre" placeholder="NOMBRE COMPLETO" value={formData.nombrePadre} onChange={handleChange} className="w-full px-5 py-4 bg-white border border-blue-100 rounded-2xl text-sm font-black text-gray-800 uppercase outline-none focus:ring-4 focus:ring-blue-500/5" />
-                                        <input type="text" name="cedulaPadre" placeholder="CÉDULA" value={formData.cedulaPadre} onChange={handleChange} className="w-full px-5 py-4 bg-white border border-blue-100 rounded-2xl text-sm font-bold text-gray-500 outline-none focus:ring-4 focus:ring-blue-500/5" />
-                                    </div>
-                                    <div className="bg-pink-50/30 p-8 rounded-[2rem] border border-pink-100/50 space-y-5">
-                                        <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Datos de la Madre</p>
-                                        <input type="text" name="nombreMadre" placeholder="NOMBRE COMPLETO" value={formData.nombreMadre} onChange={handleChange} className="w-full px-5 py-4 bg-white border border-pink-100 rounded-2xl text-sm font-black text-gray-800 uppercase outline-none focus:ring-4 focus:ring-pink-500/5" />
-                                        <input type="text" name="cedulaMadre" placeholder="CÉDULA" value={formData.cedulaMadre} onChange={handleChange} className="w-full px-5 py-4 bg-white border border-pink-100 rounded-2xl text-sm font-bold text-gray-500 outline-none focus:ring-4 focus:ring-pink-500/5" />
-                                    </div>
-                                </div>
-                            </section>
-
-                            <section>
-                                <SectionHeader number="05" title="Genealogía y Testigos" icon={PenTool} />
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                    <div className="space-y-3">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Abuelos Paternos</label>
-                                        <textarea name="abuelosPaternos" value={formData.abuelosPaternos} onChange={handleChange} className="w-full px-6 py-4 bg-gray-50 border border-gray-100 rounded-[1.5rem] h-28 outline-none resize-none uppercase text-xs font-bold text-gray-600 focus:ring-4 focus:ring-blue-500/5" placeholder="NOMBRES COMPLETOS..." />
-                                    </div>
-                                    <div className="space-y-3">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Abuelos Maternos</label>
-                                        <textarea name="abuelosMaternos" value={formData.abuelosMaternos} onChange={handleChange} className="w-full px-6 py-4 bg-gray-50 border border-gray-100 rounded-[1.5rem] h-28 outline-none resize-none uppercase text-xs font-bold text-gray-600 focus:ring-4 focus:ring-blue-500/5" placeholder="NOMBRES COMPLETOS..." />
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                    <div className="space-y-3">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Padrinos</label>
-                                        <input type="text" name="padrinos" value={formData.padrinos} onChange={handleChange} className="w-full px-6 py-5 bg-gray-50 border border-gray-100 rounded-2xl outline-none uppercase font-black text-gray-800 focus:ring-4 focus:ring-blue-500/5" placeholder="NOMBRES SEPARADOS POR COMAS" />
-                                    </div>
-                                    <div className="space-y-3">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Ministro Celebrante</label>
-                                        <input type="text" name="ministro" required value={formData.ministro} onChange={handleChange} className="w-full px-6 py-5 bg-gray-50 border border-gray-100 rounded-2xl outline-none uppercase font-black text-blue-900 border-l-8 border-l-[#4B7BA7] focus:ring-4 focus:ring-blue-500/5" />
-                                    </div>
-                                </div>
-                            </section>
-
-                            <section>
-                                <SectionHeader number="06" title="Registro Civil (Opcional)" icon={ScrollText} />
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 bg-slate-50 p-8 rounded-[2rem] border border-slate-100">
-                                    <div className="space-y-2"><label className="text-[9px] font-black text-slate-400 uppercase ml-1">Serial Acta</label><input type="text" name="serialRegistro" value={formData.serialRegistro} onChange={handleChange} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none font-bold focus:ring-4 focus:ring-blue-500/5" /></div>
-                                    <div className="space-y-2"><label className="text-[9px] font-black text-slate-400 uppercase ml-1">NUIP / NIP</label><input type="text" name="nuip" value={formData.nuip} onChange={handleChange} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none font-bold focus:ring-4 focus:ring-blue-500/5" /></div>
-                                    <div className="space-y-2"><label className="text-[9px] font-black text-slate-400 uppercase ml-1">Notaría/Oficina</label><input type="text" name="oficinaRegistro" value={formData.oficinaRegistro} onChange={handleChange} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none uppercase font-bold focus:ring-4 focus:ring-blue-500/5" /></div>
-                                    <div className="space-y-2"><label className="text-[9px] font-black text-slate-400 uppercase ml-1">F. Expedición</label><input type="date" name="fechaExpedicionRegistro" value={formData.fechaExpedicionRegistro} onChange={handleChange} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none font-bold focus:ring-4 focus:ring-blue-500/5" /></div>
-                                </div>
-                            </section>
-
-                            <div className="flex justify-end gap-4 border-t border-gray-100 pt-12">
-                                <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] hover:bg-gray-50 transition-all">Cancelar</Button>
-                                <Button type="submit" disabled={isSubmitting} className="bg-gradient-to-r from-[#D4AF37] to-[#B4932A] text-white px-12 py-8 rounded-2xl transform active:scale-95 transition-all font-black uppercase tracking-[0.2em] text-xs shadow-xl shadow-yellow-900/10">
-                                    {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Save className="w-5 h-5 mr-2" /> Guardar Borrador</>}
-                                </Button>
-                            </div>
+                    {/* SECCIÓN 2: BAUTIZANDO */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <Input label="Nombres" name="nombres" value={formData.nombres} onChange={handleChange} required />
+                        <Input label="Apellidos" name="apellidos" value={formData.apellidos} onChange={handleChange} required />
+                        <div>
+                            <label className="text-[10px] font-black uppercase text-gray-400 block mb-2">Sexo</label>
+                            <select name="sexo" value={formData.sexo} onChange={handleChange} className="w-full bg-slate-50 border-none rounded-xl p-3.5 text-xs font-black uppercase">
+                                <option value="MASCULINO">MASCULINO</option>
+                                <option value="FEMENINO">FEMENINO</option>
+                            </select>
                         </div>
-                    </form>
-                </div>
-            </DashboardLayout>
-        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <Input label="Fecha de Nacimiento" type="date" name="fechaNacimiento" value={formData.fechaNacimiento} onChange={handleChange} />
+                        <Input label="Lugar de Nacimiento" name="lugarNacimiento" value={formData.lugarNacimiento} onChange={handleChange} />
+                    </div>
+
+                    {/* SECCIÓN 3: REGISTRO CIVIL */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-blue-50/30 p-6 rounded-2xl border border-blue-100">
+                        <Input label="NUIP" name="nuip" value={formData.nuip} onChange={handleChange} />
+                        <Input label="Serial Registro" name="serialRegistro" value={formData.serialRegistro} onChange={handleChange} />
+                        <Input label="Oficina Registro" name="oficinaRegistro" value={formData.oficinaRegistro} onChange={handleChange} />
+                        <Input label="Fecha Expedición" type="date" name="fechaExpedicionRegistro" value={formData.fechaExpedicionRegistro} onChange={handleChange} />
+                    </div>
+
+                    {/* SECCIÓN 4: FILIACIÓN */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-4">
+                            <Input label="Nombre del Padre" name="nombrePadre" value={formData.nombrePadre} onChange={handleChange} />
+                            <Input label="Cédula del Padre" name="cedulaPadre" value={formData.cedulaPadre} onChange={handleChange} />
+                            <Input label="Abuelos Paternos" name="abuelosPaternos" value={formData.abuelosPaternos} onChange={handleChange} />
+                        </div>
+                        <div className="space-y-4">
+                            <Input label="Nombre de la Madre" name="nombreMadre" value={formData.nombreMadre} onChange={handleChange} />
+                            <Input label="Cédula de la Madre" name="cedulaMadre" value={formData.cedulaMadre} onChange={handleChange} />
+                            <Input label="Abuelos Maternos" name="abuelosMaternos" value={formData.abuelosMaternos} onChange={handleChange} />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label className="text-[10px] font-black uppercase text-gray-400 block mb-2">Unión de los Padres</label>
+                            <select name="tipoUnionPadres" value={formData.tipoUnionPadres} onChange={handleChange} className="w-full bg-slate-50 border-none rounded-xl p-3.5 text-xs font-black uppercase">
+                                <option value="MATRIMONIO CATÓLICO">MATRIMONIO CATÓLICO</option>
+                                <option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option>
+                                <option value="UNIÓN LIBRE">UNIÓN LIBRE</option>
+                                <option value="MADRE SOLTERA">MADRE SOLTERA</option>
+                            </select>
+                        </div>
+                        <Input label="Dirección" name="direccion" value={formData.direccion} onChange={handleChange} />
+                    </div>
+
+                    {/* SECCIÓN 5: TESTIGOS Y MINISTRO */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <Input label="Padrinos" name="padrinos" value={formData.padrinos} onChange={handleChange} />
+                        <Input label="Ministro" name="ministro" value={formData.ministro} onChange={handleChange} />
+                    </div>
+
+                    <div className="pt-6 border-t flex justify-end">
+                        <Button type="submit" disabled={isSaving} className="px-12 py-8 bg-[#D4AF37] text-slate-950 hover:bg-[#B4932A] rounded-2xl font-black uppercase text-[11px] shadow-xl">
+                            {isSaving ? <Loader2 className="animate-spin mr-2" /> : <Save className="mr-2" />} Inscribir y Guardar Borrador
+                        </Button>
+                    </div>
+                </form>
+            </div>
+        </DashboardLayout>
     );
 };
 
