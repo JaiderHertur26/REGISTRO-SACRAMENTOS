@@ -6,12 +6,11 @@ import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { 
-    Save, X, Calendar, User, Users, BookOpen, PenTool, 
+    Save, ArrowLeft, Calendar, User, Users, BookOpen, PenTool, 
     CheckCircle, Loader2, ScrollText, MapPin, Hash, AlertCircle 
 } from 'lucide-react';
 import BaptismTicket from '@/components/BaptismTicket';
 import CityAutocomplete from '@/components/CityAutocomplete';
-import { generateUUID } from '@/utils/supabaseHelpers';
 
 const BaptismNewPage = () => {
     const { user } = useAuth(); 
@@ -29,7 +28,7 @@ const BaptismNewPage = () => {
     const [ciudades, setCiudades] = useState([]); 
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
 
-    // 📖 DICCIONARIO CANÓNICO EXACTO PARA EL ESTADO
+    // 📖 DICCIONARIO CANÓNICO EXACTO
     const [formData, setFormData] = useState({
         numeroRegistro: '', Libro: '---', folio: '---', numero: '---',
         fechaSacramento: '', horaSacramento: '10:00', lugarBautismo: nombreParroquia,
@@ -213,6 +212,7 @@ const BaptismNewPage = () => {
                                     <option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option>
                                     <option value="UNIÓN LIBRE">UNIÓN LIBRE</option>
                                     <option value="MADRE SOLTERA">MADRE SOLTERA</option>
+                                    <option value="PADRE SOLTERO">PADRE SOLTERO</option>
                                 </select>
                             </div>
                             <div><label className={labelClass}>Dirección de Residencia</label><input type="text" name="direccion" value={formData.direccion} onChange={handleChange} className={inputClass} /></div>
