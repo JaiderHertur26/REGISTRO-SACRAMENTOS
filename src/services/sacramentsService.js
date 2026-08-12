@@ -142,12 +142,14 @@ export const saveBaptismToSource = async (data, parishId, mode) => {
             return { success: true, id: purificado.id };
         }
 
-        // GUARDADO A PRUEBA DE FALLOS: Respeta estrictamente la tabla Supabase actual
+        // GUARDADO A PRUEBA DE FALLOS
         const dbRecord = {
             id: purificado.id,
             parish_id: targetParishId,
             folio: String(purificado.folio || '0000'),
             number: String(purificado.numero || '0000'),
+            // 🚀 ENVIAMOS EL LIBRO A LA NUEVA COLUMNA DE TEXTO (Si la creaste)
+            book_number: String(purificado.Libro || '0000'), 
             celebration_date: cleanDateOnly(purificado.fechaSacramento),
             status: statusFinal,
             raw_data: purificado,
