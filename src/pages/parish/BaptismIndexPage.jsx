@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
-import { supabase } from '@/lib/supabaseClient'; // <-- IMPORTANTE: NUBE
+import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import Table from '@/components/ui/Table';
 import { Search, Printer, Loader2 } from 'lucide-react';
@@ -33,45 +33,52 @@ const BaptismIndexPage = () => {
     const printRef = useRef();
 
     useEffect(() => {
-        if (user?.parishId) {
-            const misDatos = getMisDatosList(user.parishId);
+        if (user?.parishId || user?.parish_id) {
+            const currentId = user.parishId || user.parish_id;
+            const misDatos = getMisDatosList(currentId);
             if (misDatos && misDatos.length > 0) setParishInfo(misDatos[0]);
-            fetchCloudRecords();
+            fetchCloudRecords(currentId);
         }
-    }, [user]);
+    }, [user, getMisDatosList]);
 
-    const fetchCloudRecords = async () => {
+    const fetchCloudRecords = async (parishId) => {
         setLoading(true);
         try {
-            // Descargar todos los registros de la parroquia desde la Nube
+            // 🚀 LECTURA SEGURA ALINEADA CON EL CSV: 
+            // Solo pedimos las columnas físicas que existen (id, status, folio, number) y nuestro JSON maestro (raw_data).
             const { data, error } = await supabase
                 .from('baptisms')
-                .select('raw_data, book_number, page_number, entry_number, status')
-                .eq('parish_id', user.parishId)
-                .in('status', ['seated', 'confirmed', 'anulada']); // Incluir anuladas para el índice histórico
+                .select('id, raw_data, status, folio, number')
+                .eq('parish_id', parishId)
+                .in('status', ['seated', 'confirmed', 'anulada']);
 
             if (error) throw error;
 
-            const sanitizedData = data.map(r => ({
-                ...r.raw_data,
-                book_number: r.book_number,
-                page_number: r.page_number,
-                entry_number: r.entry_number,
-                status: r.status
-            }));
+            const sanitizedData = data.map(r => {
+                const raw = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : (r.raw_data || {});
+                return {
+                    ...raw,
+                    id: r.id,
+                    status: r.status,
+                    // Garantizamos que use nuestro lenguaje (Libro, folio, numero)
+                    Libro: raw.Libro || '---',
+                    folio: raw.folio || r.folio || '---',
+                    numero: raw.numero || r.number || '---'
+                };
+            });
 
-            // Ordenar alfabéticamente por Apellidos y Nombres (Requisito para Índices)
+            // Ordenar alfabéticamente por Apellidos y Nombres
             sanitizedData.sort((a, b) => {
-                const nameA = `${a.apellidos || a.lastName || ''} ${a.nombres || a.firstName || ''}`.trim().toUpperCase();
-                const nameB = `${b.apellidos || b.lastName || ''} ${b.nombres || b.firstName || ''}`.trim().toUpperCase();
+                const nameA = `${a.apellidos || ''} ${a.nombres || ''}`.trim().toUpperCase();
+                const nameB = `${b.apellidos || ''} ${b.nombres || ''}`.trim().toUpperCase();
                 return nameA.localeCompare(nameB);
             });
 
             setRecords(sanitizedData);
             setFilteredRecords(sanitizedData);
 
-            // Extraer los libros únicos disponibles
-            const books = [...new Set(sanitizedData.map(r => r.book_number || r.libro).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
+            // Extraer los libros únicos disponibles basándonos exclusivamente en "Libro"
+            const books = [...new Set(sanitizedData.map(r => r.Libro).filter(val => val !== '---'))].sort((a, b) => Number(a) - Number(b));
             setAvailableBooks(books);
             if (books.length > 0) setSelectedBook(books[0]);
 
@@ -90,13 +97,12 @@ const BaptismIndexPage = () => {
         }
         const term = searchTerm.toLowerCase();
         const filtered = records.filter(r => {
-            const fullName = `${r.apellidos || r.lastName || ''} ${r.nombres || r.firstName || ''}`.toLowerCase();
-            return fullName.includes(term) || String(r.book_number).includes(term);
+            const fullName = `${r.apellidos || ''} ${r.nombres || ''}`.toLowerCase();
+            return fullName.includes(term) || String(r.Libro).includes(term);
         });
         setFilteredRecords(filtered);
     }, [searchTerm, records]);
 
-    // Lógica de Impresión
     const handlePrintAction = useReactToPrint({
         content: () => printRef.current,
         documentTitle: `Indice_Bautismos_Libro_${currentPrintFilter || 'Todos'}`
@@ -106,22 +112,22 @@ const BaptismIndexPage = () => {
         setCurrentPrintFilter(bookFilter);
         let dataToPrint = records;
         if (bookFilter) {
-            dataToPrint = records.filter(r => String(r.book_number || r.libro) === String(bookFilter));
+            dataToPrint = records.filter(r => String(r.Libro) === String(bookFilter));
         }
         setPrintData(dataToPrint);
 
-        // Dar tiempo a que el DOM oculto se actualice antes de abrir la ventana de impresión
         setTimeout(() => {
             handlePrintAction();
         }, 500);
     };
 
+    // 🚀 DICCIONARIO APLICADO A LA TABLA
     const columns = [
-        { header: 'Apellidos y Nombres', render: (row) => <span className="font-bold uppercase text-gray-900">{row.apellidos || row.lastName} {row.nombres || row.firstName}</span> },
-        { header: 'Libro', render: (row) => <span className="font-mono text-gray-700">{row.book_number || row.libro || '-'}</span> },
-        { header: 'Folio', render: (row) => <span className="font-mono text-gray-700">{row.page_number || row.folio || '-'}</span> },
-        { header: 'Número', render: (row) => <span className="font-mono text-gray-700">{row.entry_number || row.numero || '-'}</span> },
-        { header: 'Fecha Bautismo', render: (row) => <span className="text-gray-600">{row.fechaSacramento || row.sacramentDate || '-'}</span> },
+        { header: 'Apellidos y Nombres', render: (row) => <span className="font-bold uppercase text-gray-900">{row.apellidos} {row.nombres}</span> },
+        { header: 'Libro', render: (row) => <span className="font-mono text-gray-700">{row.Libro}</span> },
+        { header: 'Folio', render: (row) => <span className="font-mono text-gray-700">{row.folio}</span> },
+        { header: 'Número', render: (row) => <span className="font-mono text-gray-700">{row.numero}</span> },
+        { header: 'Fecha Bautismo', render: (row) => <span className="text-gray-600">{row.fechaSacramento || '-'}</span> },
     ];
 
     return (

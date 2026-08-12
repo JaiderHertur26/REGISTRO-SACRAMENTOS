@@ -113,6 +113,7 @@ const BaptismCelebratedPage = () => {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
+        // 🚀 LIMPIEZA: Solo los campos exactos de este formulario
         const uppercaseFields = ['nombres', 'apellidos', 'lugarNacimiento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'abuelosPaternos', 'abuelosMaternos', 'ministro', 'daFe'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));

@@ -65,7 +65,6 @@ const BaptismSentarRegistrosPage = () => {
         setIsLoading(true);
 
         try {
-            // A. Cargar borradores desde Supabase
             const { data: tempData, error: tempError } = await supabase
                 .from('pending_baptisms')
                 .select('*')
@@ -82,15 +81,21 @@ const BaptismSentarRegistrosPage = () => {
                 
                 localStorage.setItem(`pendingBaptisms_${resolvedParishId}`, JSON.stringify(cloudPending));
 
-                // 🚀 AQUÍ APLICAMOS EL PURIFICADOR PARA RESPETAR EL DICCIONARIO
                 recordsMapped = cloudPending.map(r => {
-                    return purificarRegistroBautismo(r);
+                    const purificado = purificarRegistroBautismo(r);
+                    return {
+                        ...purificado,
+                        numeroRegistro: r.numeroRegistro || r.inscripcionNumero || purificado.numeroRegistro || '---',
+                        direccion: r.direccion || purificado.direccion || '---',
+                        nuip: r.nuip || purificado.nuip || '---',
+                        oficinaRegistro: r.oficinaRegistro || purificado.oficinaRegistro || '---',
+                        fechaSacramento: r.fechaSacramento || r.sacramentDate || purificado.fechaSacramento 
+                    };
                 });
             }
             
             setPendingBaptisms(recordsMapped);
 
-            // B. Cargar Parámetros directamente desde Supabase
             const p = await getBaptismParameters(resolvedParishId);
             setFullParamsCache(p);
             setNextNumbers({
@@ -99,7 +104,6 @@ const BaptismSentarRegistrosPage = () => {
                 entry: String(p.ordinarioNumero || 1).padStart(4, '0')
             });
 
-            // C. Membrete
             const misDatos = getMisDatosList(resolvedParishId);
             if (misDatos?.length > 0) {
                 setParishInfo({
@@ -184,7 +188,7 @@ const BaptismSentarRegistrosPage = () => {
 
         setIsSaving(true);
         try {
-            // 🚀 Llamamos a seatBaptism pasándole directamente los datos actuales
+            // 🚀 LIMPIEZA: Enviamos el registro entero para no perder ni un solo campo.
             const result = await seatBaptism(currentBaptism.id, resolvedParishId, currentBaptism);
             if (result.success) {
                 await incrementParameters(1, 'ordinario'); 
