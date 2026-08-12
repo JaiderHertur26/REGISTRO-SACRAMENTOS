@@ -6,15 +6,15 @@ import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { 
-    Save, ArrowLeft, Calendar, User, Users, BookOpen, PenTool, 
-    CheckCircle, Loader2, ScrollText, MapPin, Hash, AlertCircle 
+    Save, X, Calendar, User, Users, BookOpen, PenTool, 
+    CheckCircle2, Loader2, ScrollText, MapPin, Hash, AlertCircle 
 } from 'lucide-react';
 import BaptismTicket from '@/components/BaptismTicket';
 import CityAutocomplete from '@/components/CityAutocomplete';
 
 const BaptismNewPage = () => {
     const { user } = useAuth(); 
-    const { getMisDatosList, getCiudadesList, getParrocos, saveBaptismToSource } = useAppData();
+    const { getMisDatosList, getCiudadesList, getParrocos, saveBaptismToSource, getBaptismParameters } = useAppData();
     const navigate = useNavigate();
     const { toast } = useToast();
     
@@ -27,8 +27,9 @@ const BaptismNewPage = () => {
     const [parishInfo, setParishInfo] = useState(null); 
     const [ciudades, setCiudades] = useState([]); 
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
+    const [fullParamsCache, setFullParamsCache] = useState(null); 
 
-    // 📖 DICCIONARIO CANÓNICO EXACTO
+    // 📖 DICCIONARIO COMPLETO (25 CAMPOS DE LA VERSIÓN NEW)
     const [formData, setFormData] = useState({
         numeroRegistro: '', Libro: '---', folio: '---', numero: '---',
         fechaSacramento: '', horaSacramento: '10:00', lugarBautismo: nombreParroquia,
@@ -55,9 +56,15 @@ const BaptismNewPage = () => {
             
             const listaParrocos = getParrocos(parishId) || [];
             setParrocosSugeridos(listaParrocos.map(p => `${p.nombre} ${p.apellido || ''}`.trim().toUpperCase()));
+
+            const p = await getBaptismParameters(parishId);
+            if (p) {
+                setFullParamsCache(p);
+                setFormData(prev => ({ ...prev, numeroRegistro: p.numeroRegistroActual || '' }));
+            }
         };
         loadInitialData();
-    }, [parishId, nombreParroquia, getMisDatosList, getCiudadesList, getParrocos]);
+    }, [parishId, nombreParroquia, getMisDatosList, getCiudadesList, getParrocos, getBaptismParameters]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -100,7 +107,7 @@ const BaptismNewPage = () => {
         return (
             <DashboardLayout entityName={nombreParroquia}>
                 <div className="print:hidden max-w-xl mx-auto bg-white p-12 rounded-[3rem] shadow-xl border border-gray-100 text-center mt-12 animate-in fade-in duration-500">
-                    <div className="w-24 h-24 bg-green-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border border-green-100"><CheckCircle className="w-12 h-12 text-green-500" /></div>
+                    <div className="w-24 h-24 bg-green-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border border-green-100"><CheckCircle2 className="w-12 h-12 text-green-500" /></div>
                     <h2 className="text-3xl font-black text-gray-900 mb-3 tracking-tighter uppercase">Borrador Creado</h2>
                     <p className="text-gray-500 mb-10 text-sm font-medium leading-relaxed">El registro está en la nube listo para ser asentado oficialmente.</p>
                     <div className="grid grid-cols-2 gap-4">
@@ -120,132 +127,142 @@ const BaptismNewPage = () => {
     const sectionHeaderClass = "text-[11px] font-black text-[#4B7BA7] uppercase tracking-[0.2em] border-b border-gray-100 pb-3 mb-6 flex items-center gap-2 mt-8";
 
     return (
-        <DashboardLayout entityName={nombreParroquia}>
-            <div className="max-w-5xl mx-auto pb-24 pt-6">
-                <datalist id="lista-parrocos">
-                    {parrocosSugeridos.map((nombre, index) => <option key={index} value={nombre} />)}
-                </datalist>
+        <div className="print:hidden bg-gray-50 min-h-screen">
+            <DashboardLayout entityName={nombreParroquia}>
+                <div className="max-w-5xl mx-auto pb-20 pt-6">
+                    <datalist id="lista-parrocos">
+                        {parrocosSugeridos.map((nombre, index) => <option key={index} value={nombre} />)}
+                    </datalist>
 
-                <div className="flex items-center justify-between mb-10">
-                    <div className="flex items-center gap-4">
-                        <Button variant="ghost" onClick={() => navigate(-1)} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><ArrowLeft className="w-6 h-6 text-gray-400" /></Button>
-                        <div>
-                            <h1 className="text-3xl font-black text-gray-900 tracking-tighter uppercase leading-none">Inscripción Previa</h1>
-                            <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest mt-2 flex items-center gap-2"><BookOpen className="w-3 h-3" /> Borrador Temporal Exclusivo</p>
+                    <div className="mb-10 flex flex-col md:flex-row justify-between items-end gap-6">
+                        <div className="flex items-center gap-4">
+                            <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-full w-12 h-12 p-0 bg-white border border-gray-200 text-gray-400 hover:text-gray-900 hover:bg-gray-100 shadow-sm transition-all"><X className="w-5 h-5"/></Button>
+                            <div>
+                                <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif uppercase">Inscripción Previa</h1>
+                                <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest">Borrador Seguro con Auto-Sincronización</p>
+                            </div>
                         </div>
                     </div>
+
+                    <form onSubmit={handleSubmit} className="bg-white rounded-[2.5rem] shadow-2xl shadow-blue-900/5 border border-gray-100 overflow-hidden relative">
+                        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#D4AF37] to-[#4B7BA7]"></div>
+                        <div className="p-12 space-y-10">
+                            
+                            <section>
+                                <SectionHeader number="01" title="Archivo y Control (Automático)" icon={Hash} />
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50 p-8 rounded-[2rem] border border-slate-100">
+                                    <div><label className={labelClass}>Nº Registro Previo</label><input type="text" name="numeroRegistro" value={formData.numeroRegistro} disabled className={`${inputClass} text-center cursor-not-allowed opacity-80 text-[#4B7BA7]`} /></div>
+                                    <div className="md:col-span-2 flex items-center px-4">
+                                        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest leading-relaxed"><AlertCircle className="w-4 h-4 inline-block mr-2 mb-0.5 text-amber-500" /> Libro, Folio y Acta se asignarán al asentar oficialmente.</p>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section>
+                                <SectionHeader number="02" title="Datos de la Celebración" icon={Calendar} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                    <div><label className={labelClass}>Fecha y Hora Sacramento</label><input type="datetime-local" name="fechaSacramento" required value={formData.fechaSacramento} onChange={handleChange} className={inputClass} /></div>
+                                    <div><label className={labelClass}>Parroquia / Lugar</label><input type="text" name="lugarBautismo" required value={formData.lugarBautismo} onChange={handleChange} className={inputClass} /></div>
+                                </div>
+                            </section>
+
+                            <section>
+                                <SectionHeader number="03" title="Identidad del Bautizado" icon={User} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    <div><label className={labelClass}>Apellidos</label><input type="text" name="apellidos" required value={formData.apellidos} onChange={handleChange} className={`${inputClass} text-lg`} /></div>
+                                    <div><label className={labelClass}>Nombres</label><input type="text" name="nombres" required value={formData.nombres} onChange={handleChange} className={`${inputClass} text-lg`} /></div>
+                                    <div>
+                                        <label className={labelClass}>Sexo</label>
+                                        <select name="sexo" required value={formData.sexo} onChange={handleChange} className={inputClass}>
+                                            <option value="">SELECCIONE...</option>
+                                            <option value="MASCULINO">MASCULINO</option>
+                                            <option value="FEMENINO">FEMENINO</option>
+                                        </select>
+                                    </div>
+                                    <div><label className={labelClass}>Fecha Nacimiento</label><input type="date" name="fechaNacimiento" required value={formData.fechaNacimiento} onChange={handleChange} className={inputClass} /></div>
+                                    <div className="md:col-span-2">
+                                        <label className={labelClass}>Lugar Nacimiento</label>
+                                        <CityAutocomplete name="lugarNacimiento" value={formData.lugarNacimiento} onChange={handleCityChange} cities={ciudades} className={inputClass} />
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section>
+                                <SectionHeader number="04" title="Registro Civil" icon={ScrollText} />
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
+                                    <div><label className={labelClass}>NUIP / NIP</label><input type="text" name="nuip" value={formData.nuip} onChange={handleChange} className={inputClass} /></div>
+                                    <div><label className={labelClass}>Serial Acta</label><input type="text" name="serialRegistro" value={formData.serialRegistro} onChange={handleChange} className={inputClass} /></div>
+                                    <div><label className={labelClass}>Notaría/Oficina</label><input type="text" name="oficinaRegistro" value={formData.oficinaRegistro} onChange={handleChange} className={inputClass} /></div>
+                                    <div><label className={labelClass}>F. Expedición</label><input type="date" name="fechaExpedicionRegistro" value={formData.fechaExpedicionRegistro} onChange={handleChange} className={inputClass} /></div>
+                                </div>
+                            </section>
+
+                            <section>
+                                <SectionHeader number="05" title="Residencia y Filiación" icon={Users} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-8">
+                                    <div><label className={labelClass}><MapPin className="w-3 h-3 inline mb-0.5"/> Dirección de Residencia</label><input type="text" name="direccion" value={formData.direccion} onChange={handleChange} className={inputClass} /></div>
+                                    <div>
+                                        <label className={labelClass}>Estado Civil de los Padres</label>
+                                        <select name="tipoUnionPadres" value={formData.tipoUnionPadres} onChange={handleChange} className={inputClass}>
+                                            <option value="">SELECCIONE...</option>
+                                            <option value="MATRIMONIO CATÓLICO">MATRIMONIO CATÓLICO</option>
+                                            <option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option>
+                                            <option value="UNIÓN LIBRE">UNIÓN LIBRE</option>
+                                            <option value="MADRE SOLTERA">MADRE SOLTERA</option>
+                                            <option value="PADRE SOLTERO">PADRE SOLTERO</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                    <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-5">
+                                        <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Datos del Padre</p>
+                                        <div><label className={labelClass}>Nombre del Padre</label><input type="text" name="nombrePadre" value={formData.nombrePadre} onChange={handleChange} className={inputClass} /></div>
+                                        <div><label className={labelClass}>Cédula Padre</label><input type="text" name="cedulaPadre" value={formData.cedulaPadre} onChange={handleChange} className={inputClass} /></div>
+                                    </div>
+                                    <div className="bg-pink-50/30 p-8 rounded-[2rem] border border-pink-100/50 space-y-5">
+                                        <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Datos de la Madre</p>
+                                        <div><label className={labelClass}>Nombre de la Madre</label><input type="text" name="nombreMadre" value={formData.nombreMadre} onChange={handleChange} className={inputClass} /></div>
+                                        <div><label className={labelClass}>Cédula Madre</label><input type="text" name="cedulaMadre" value={formData.cedulaMadre} onChange={handleChange} className={inputClass} /></div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section>
+                                <SectionHeader number="06" title="Genealogía y Testigos" icon={PenTool} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                    <div><label className={labelClass}>Abuelos Paternos</label><textarea name="abuelosPaternos" value={formData.abuelosPaternos} onChange={handleChange} className={`${inputClass} h-24 py-3 resize-none`} /></div>
+                                    <div><label className={labelClass}>Abuelos Maternos</label><textarea name="abuelosMaternos" value={formData.abuelosMaternos} onChange={handleChange} className={`${inputClass} h-24 py-3 resize-none`} /></div>
+                                    <div className="md:col-span-2"><label className={labelClass}>Padrinos</label><textarea name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} h-16 resize-none`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
+                                </div>
+                            </section>
+
+                            <section>
+                                <SectionHeader number="07" title="Ministros" icon={BookOpen} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                    <div><label className={labelClass}>Sacerdote Celebrante</label><input type="text" name="ministro" value={formData.ministro} onChange={handleChange} className={inputClass} list="lista-parrocos" /></div>
+                                    <div><label className={labelClass}>Párroco que Da Fe</label><input type="text" name="daFe" value={formData.daFe} onChange={handleChange} className={inputClass} list="lista-parrocos" placeholder="DEJAR EN BLANCO PARA USAR PÁRROCO ACTUAL" /></div>
+                                </div>
+                            </section>
+
+                            <div className="flex justify-end gap-4 pt-8 border-t border-gray-100">
+                                <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] tracking-widest hover:bg-gray-50 transition-all">Cancelar</Button>
+                                <Button type="submit" disabled={isSubmitting} className="bg-gradient-to-r from-[#D4AF37] to-[#B4932A] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl transition-all transform active:scale-95">
+                                    {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Save className="w-5 h-5 mr-2" />} Generar Borrador
+                                </Button>
+                            </div>
+                        </div>
+                    </form>
                 </div>
-
-                <form onSubmit={handleSubmit} className="bg-white rounded-[2.5rem] shadow-2xl shadow-blue-900/5 border border-gray-100 p-8 md:p-12 space-y-8 relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#D4AF37] via-[#4B7BA7] to-[#D4AF37]"></div>
-                    
-                    <section>
-                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 01. Archivo y Control</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                            <div><label className={labelClass}>Libro</label><input disabled className={`${inputClass} text-center opacity-60 cursor-not-allowed`} value="AUTO" /></div>
-                            <div><label className={labelClass}>Folio</label><input disabled className={`${inputClass} text-center opacity-60 cursor-not-allowed`} value="AUTO" /></div>
-                            <div><label className={labelClass}>Acta Nº</label><input disabled className={`${inputClass} text-center opacity-60 cursor-not-allowed`} value="AUTO" /></div>
-                            <div className="md:col-span-3 text-center"><p className="text-[9px] text-amber-500 uppercase font-bold"><AlertCircle className="w-3 h-3 inline mr-1"/> Se asignarán automáticamente al asentar oficialmente.</p></div>
-                        </div>
-                    </section>
-
-                    <section>
-                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 02. Datos de la Celebración</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div><label className={labelClass}>Fecha Sacramento</label><input type="date" name="fechaSacramento" required value={formData.fechaSacramento} onChange={handleChange} className={inputClass} /></div>
-                            <div><label className={labelClass}>Hora</label><input type="time" name="horaSacramento" value={formData.horaSacramento} onChange={handleChange} className={inputClass} /></div>
-                            <div><label className={labelClass}>Parroquia / Lugar</label><input type="text" name="lugarBautismo" required value={formData.lugarBautismo} onChange={handleChange} className={inputClass} /></div>
-                        </div>
-                    </section>
-
-                    <section>
-                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 03. Identidad del Bautizado</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            <div><label className={labelClass}>Apellidos</label><input type="text" name="apellidos" required value={formData.apellidos} onChange={handleChange} className={inputClass} /></div>
-                            <div><label className={labelClass}>Nombres</label><input type="text" name="nombres" required value={formData.nombres} onChange={handleChange} className={inputClass} /></div>
-                            <div>
-                                <label className={labelClass}>Sexo</label>
-                                <select name="sexo" required value={formData.sexo} onChange={handleChange} className={inputClass}>
-                                    <option value="">SELECCIONE...</option>
-                                    <option value="MASCULINO">MASCULINO</option>
-                                    <option value="FEMENINO">FEMENINO</option>
-                                </select>
-                            </div>
-                            <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="fechaNacimiento" value={formData.fechaNacimiento} onChange={handleChange} className={inputClass} /></div>
-                            <div className="md:col-span-2">
-                                <label className={labelClass}>Lugar de Nacimiento</label>
-                                <CityAutocomplete name="lugarNacimiento" value={formData.lugarNacimiento} onChange={handleCityChange} cities={ciudades} className={inputClass} />
-                            </div>
-                        </div>
-                    </section>
-
-                    <section>
-                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 04. Registro Civil</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                            <div><label className={labelClass}>NUIP / NIP</label><input type="text" name="nuip" value={formData.nuip} onChange={handleChange} className={inputClass} /></div>
-                            <div><label className={labelClass}>Serial Acta</label><input type="text" name="serialRegistro" value={formData.serialRegistro} onChange={handleChange} className={inputClass} /></div>
-                            <div><label className={labelClass}>Notaría/Oficina</label><input type="text" name="oficinaRegistro" value={formData.oficinaRegistro} onChange={handleChange} className={inputClass} /></div>
-                            <div><label className={labelClass}>F. Expedición</label><input type="date" name="fechaExpedicionRegistro" value={formData.fechaExpedicionRegistro} onChange={handleChange} className={inputClass} /></div>
-                        </div>
-                    </section>
-
-                    <section>
-                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 05. Filiación y Residencia</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                            <div className="bg-blue-50/30 p-6 rounded-[2rem] border border-blue-100/50 space-y-4">
-                                <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-2">Padre</p>
-                                <div><label className={labelClass}>Nombre del Padre</label><input type="text" name="nombrePadre" value={formData.nombrePadre} onChange={handleChange} className={inputClass} /></div>
-                                <div><label className={labelClass}>Cédula Padre</label><input type="text" name="cedulaPadre" value={formData.cedulaPadre} onChange={handleChange} className={inputClass} /></div>
-                            </div>
-                            <div className="bg-pink-50/30 p-6 rounded-[2rem] border border-pink-100/50 space-y-4">
-                                <p className="text-[9px] font-black text-pink-600 uppercase tracking-widest mb-2">Madre</p>
-                                <div><label className={labelClass}>Nombre de la Madre</label><input type="text" name="nombreMadre" value={formData.nombreMadre} onChange={handleChange} className={inputClass} /></div>
-                                <div><label className={labelClass}>Cédula Madre</label><input type="text" name="cedulaMadre" value={formData.cedulaMadre} onChange={handleChange} className={inputClass} /></div>
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label className={labelClass}>Tipo de Unión de Padres</label>
-                                <select name="tipoUnionPadres" value={formData.tipoUnionPadres} onChange={handleChange} className={inputClass}>
-                                    <option value="">SELECCIONE...</option>
-                                    <option value="MATRIMONIO CATÓLICO">MATRIMONIO CATÓLICO</option>
-                                    <option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option>
-                                    <option value="UNIÓN LIBRE">UNIÓN LIBRE</option>
-                                    <option value="MADRE SOLTERA">MADRE SOLTERA</option>
-                                    <option value="PADRE SOLTERO">PADRE SOLTERO</option>
-                                </select>
-                            </div>
-                            <div><label className={labelClass}>Dirección de Residencia</label><input type="text" name="direccion" value={formData.direccion} onChange={handleChange} className={inputClass} /></div>
-                        </div>
-                    </section>
-
-                    <section>
-                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 06. Genealogía y Testigos</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div><label className={labelClass}>Abuelos Paternos</label><textarea name="abuelosPaternos" value={formData.abuelosPaternos} onChange={handleChange} className={`${inputClass} h-20 resize-none`} /></div>
-                            <div><label className={labelClass}>Abuelos Maternos</label><textarea name="abuelosMaternos" value={formData.abuelosMaternos} onChange={handleChange} className={`${inputClass} h-20 resize-none`} /></div>
-                            <div className="md:col-span-2"><label className={labelClass}>Padrinos</label><textarea name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} h-16 resize-none`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
-                        </div>
-                    </section>
-
-                    <section>
-                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 07. Ministros</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div><label className={labelClass}>Sacerdote Celebrante</label><input type="text" name="ministro" value={formData.ministro} onChange={handleChange} className={inputClass} list="lista-parrocos" /></div>
-                            <div><label className={labelClass}>Párroco que Da Fe</label><input type="text" name="daFe" value={formData.daFe} onChange={handleChange} className={inputClass} list="lista-parrocos" placeholder="DEJAR EN BLANCO PARA USAR PÁRROCO ACTUAL" /></div>
-                        </div>
-                    </section>
-
-                    <div className="flex justify-end gap-4 pt-8 border-t border-gray-100">
-                        <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="px-8 py-6 rounded-2xl text-gray-400 font-black uppercase text-[10px] tracking-widest hover:bg-gray-50 transition-all">Cancelar</Button>
-                        <Button type="submit" disabled={isSubmitting} className="bg-[#D4AF37] hover:bg-[#B4932A] text-slate-900 px-10 py-6 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl transition-all">
-                            {isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} Generar Borrador
-                        </Button>
-                    </div>
-                </form>
-            </div>
-        </DashboardLayout>
+            </DashboardLayout>
+        </div>
     );
 };
+
+const SectionHeader = ({ icon: Icon, title, number }) => (
+    <div className="flex items-center gap-3 mb-8 pb-3 border-b border-gray-100 mt-10 first:mt-2">
+        <div className="w-8 h-8 rounded-2xl bg-[#D4AF37] text-slate-900 flex items-center justify-center text-xs font-black shadow-lg shadow-yellow-900/20">{number}</div>
+        <h3 className="text-sm font-black text-gray-800 uppercase tracking-[0.2em] flex items-center gap-2">{Icon && <Icon className="w-4 h-4 text-[#D4AF37]" />} {title}</h3>
+    </div>
+);
 
 export default BaptismNewPage;
