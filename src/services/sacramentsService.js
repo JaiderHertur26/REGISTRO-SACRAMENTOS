@@ -35,7 +35,7 @@ export const cleanDateOnly = (d) => {
 };
 
 // ============================================================================
-// 🧠 DICCIONARIO CANÓNICO Y PURIFICADOR MAESTRO DE BAUTISMOS
+// 🕊️ BAUTISMOS: MOTOR INTELIGENTE (Respeta campos comunes y únicos)
 // ============================================================================
 export const purificarRegistroBautismo = (raw) => {
     if (!raw) return null;
@@ -68,61 +68,53 @@ export const purificarRegistroBautismo = (raw) => {
         return actual ? `${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase() : 'PÁRROCO ENCARGADO';
     };
 
-    const sLibro = String(raw.Libro || raw.book_number || raw.libro || '0').padStart(4, '0');
-    const sFolio = String(raw.folio || raw.page_number || '0').padStart(4, '0');
-    const sNumero = String(raw.numero || raw.entry_number || raw.number || '0').padStart(4, '0');
-
-    // 🚀 DICCIONARIO EXACTO QUE HABLARÁN TODOS LOS COMPONENTES
-    return {
+    // 1. DICCIONARIO BASE (Común para todos los archivos)
+    const purificado = {
         id: raw.id || generateUUID(),
         parishId: pId,
         parish_id: pId,
         tipoIdentidad: identityId,
 
-        // 1. Archivo
-        numeroRegistro: String(raw.numeroRegistro || raw.inscripcionNumero || raw.numero_registro || '---'),
-        Libro: sLibro,
-        folio: sFolio,
-        numero: sNumero,
+        Libro: String(raw.Libro || raw.book_number || raw.libro || '0').padStart(4, '0'),
+        folio: String(raw.folio || raw.page_number || '0').padStart(4, '0'),
+        numero: String(raw.numero || raw.entry_number || raw.number || '0').padStart(4, '0'),
 
-        // 2. Sacramento
-        lugarBautismo: String(raw.lugarBautismo || raw.placeOfSacrament || '---').trim().toUpperCase(),
+        lugarBautismo: String(raw.lugarBautismo || raw.placeOfSacrament || '').trim().toUpperCase(),
         fechaSacramento: raw.fechaSacramento || raw.sacramentDate || '',
-        horaSacramento: raw.horaSacramento || '10:00',
-
-        // 3. Identidad
+        
         apellidos: String(raw.apellidos || raw.lastName || '').trim().toUpperCase(),
         nombres: String(raw.nombres || raw.firstName || '').trim().toUpperCase(),
         sexo: String(raw.sexo || raw.gender || 'MASCULINO').toUpperCase(),
-        fechaNacimiento: cleanDateOnly(raw.fechaNacimiento || raw.birthDate) || '',
-        lugarNacimiento: String(raw.lugarNacimiento || raw.placeOfBirth || '---').trim().toUpperCase(),
+        fechaNacimiento: raw.fechaNacimiento || raw.birthDate || '',
+        lugarNacimiento: String(raw.lugarNacimiento || raw.placeOfBirth || '').trim().toUpperCase(),
 
-        // 4. Registro Civil
-        nuip: String(raw.nuip || raw.documentNumber || raw.nuipNuit || ''),
-        serialRegistro: String(raw.serialRegistro || raw.serialRegCivil || ''),
-        oficinaRegistro: String(raw.oficinaRegistro || raw.registryOffice || '').trim().toUpperCase(),
-        fechaExpedicionRegistro: cleanDateOnly(raw.fechaExpedicionRegistro || raw.fechaExpedicion) || '',
-
-        // 5. Filiación
-        nombrePadre: String(raw.nombrePadre || raw.fatherName || '').trim().toUpperCase(),
-        cedulaPadre: String(raw.cedulaPadre || raw.fatherId || ''),
-        nombreMadre: String(raw.nombreMadre || raw.motherName || '').trim().toUpperCase(),
-        cedulaMadre: String(raw.cedulaMadre || raw.motherId || ''),
         tipoUnionPadres: String(raw.tipoUnionPadres || raw.parentalUnion || '').trim().toUpperCase(),
+        nombrePadre: String(raw.nombrePadre || raw.fatherName || '').trim().toUpperCase(),
+        cedulaPadre: raw.cedulaPadre || raw.fatherId || '',
+        nombreMadre: String(raw.nombreMadre || raw.motherName || '').trim().toUpperCase(),
+        cedulaMadre: raw.cedulaMadre || raw.motherId || '',
         abuelosPaternos: String(raw.abuelosPaternos || raw.paternalGrandparents || '').trim().toUpperCase(),
         abuelosMaternos: String(raw.abuelosMaternos || raw.maternalGrandparents || '').trim().toUpperCase(),
-        direccion: String(raw.direccion || raw.address || '').trim().toUpperCase(),
 
-        // 6. Testigos y Firma
         padrinos: String(raw.padrinos || raw.godparents || '').trim().toUpperCase(),
         ministro: String(raw.ministro || raw.minister || '').trim().toUpperCase(),
         daFe: raw.daFe || getNombreParrocoActual(),
 
-        // 7. Auditoría
         notaMarginal: notaFinalConFecha,
         status: raw.status || raw.estado || 'seated',
         updatedAt: new Date().toISOString()
     };
+
+    // 2. DICCIONARIO CONDICIONAL (Solo se inyectan si el archivo específico los envió)
+    if (raw.numeroRegistro !== undefined) purificado.numeroRegistro = raw.numeroRegistro;
+    if (raw.horaSacramento !== undefined) purificado.horaSacramento = raw.horaSacramento;
+    if (raw.nuip !== undefined) purificado.nuip = raw.nuip;
+    if (raw.serialRegistro !== undefined) purificado.serialRegistro = raw.serialRegistro;
+    if (raw.oficinaRegistro !== undefined) purificado.oficinaRegistro = String(raw.oficinaRegistro).toUpperCase();
+    if (raw.fechaExpedicionRegistro !== undefined) purificado.fechaExpedicionRegistro = raw.fechaExpedicionRegistro;
+    if (raw.direccion !== undefined) purificado.direccion = String(raw.direccion).toUpperCase();
+
+    return purificado;
 };
 
 export const saveBaptismToSource = async (data, parishId, mode) => {
@@ -140,7 +132,8 @@ export const saveBaptismToSource = async (data, parishId, mode) => {
                 created_at: new Date().toISOString()
             };
             
-            await supabase.from('pending_baptisms').upsert(tempRecord, { onConflict: 'id' });
+            const { error: insertErr } = await supabase.from('pending_baptisms').upsert(tempRecord, { onConflict: 'id' });
+            if (insertErr) throw insertErr;
 
             const storageKey = `pendingBaptisms_${targetParishId}`;
             const currentLocal = safeJsonParse(localStorage.getItem(storageKey), []);
@@ -149,19 +142,20 @@ export const saveBaptismToSource = async (data, parishId, mode) => {
             return { success: true, id: purificado.id };
         }
 
-        // 🚀 MODO BULLETPROOF: Solo inyectamos columnas que existen en tu BD. Todo lo demás va en raw_data
+        // GUARDADO A PRUEBA DE FALLOS: Respeta estrictamente la tabla Supabase actual
         const dbRecord = {
             id: purificado.id,
             parish_id: targetParishId,
-            folio: purificado.folio,
-            number: purificado.numero,
+            folio: String(purificado.folio || '0000'),
+            number: String(purificado.numero || '0000'),
+            celebration_date: cleanDateOnly(purificado.fechaSacramento),
             status: statusFinal,
             raw_data: purificado,
             created_at: new Date().toISOString()
         };
 
-        const { error: insertErr } = await supabase.from('baptisms').upsert(dbRecord, { onConflict: 'id' });
-        if (insertErr) throw insertErr;
+        const { error } = await supabase.from('baptisms').upsert(dbRecord, { onConflict: 'id' });
+        if (error) throw error;
 
         const storageKey = `baptisms_${targetParishId}`;
         const currentLocal = safeJsonParse(localStorage.getItem(storageKey), []);
@@ -173,7 +167,7 @@ export const saveBaptismToSource = async (data, parishId, mode) => {
         window.dispatchEvent(new Event('storage'));
         return { success: true, id: purificado.id };
     } catch (e) {
-        console.error("Error guardando en Supabase:", e);
+        console.error("Supabase Error:", e);
         return { success: false, message: e.message };
     }
 };
@@ -191,9 +185,11 @@ export const getPendingBaptisms = async (parishId) => {
 
         if (data && data.length > 0) {
             const cloudPending = data.map(pb => {
-                const raw = typeof pb.raw_data === 'string' ? safeJsonParse(pb.raw_data, {}) : (pb.raw_data || {});
+                let raw = pb.raw_data;
+                if (typeof raw === 'string') raw = safeJsonParse(raw, {});
                 return purificarRegistroBautismo({ ...raw, id: pb.id, status: 'pending' });
             });
+            
             localStorage.setItem(`pendingBaptisms_${parishId}`, JSON.stringify(cloudPending));
             return cloudPending;
         }
@@ -231,6 +227,7 @@ export const fetchBaptismsFromSource = async (parishId) => {
                 Libro: raw.Libro || b.book_number || '0001',
                 folio: raw.folio || b.folio || b.page_number || '0001',
                 numero: raw.numero || b.number || b.entry_number || '0001',
+                fechaSacramento: raw.fechaSacramento || b.celebration_date
             });
         });
 
@@ -272,9 +269,10 @@ export const seatBaptism = async (originalId, parishId, updates = {}) => {
         const dbRecord = {
             id: safeId,
             parish_id: parishId,
+            folio: String(folioAsignado),
+            number: String(numeroAsignado),
+            celebration_date: cleanDateOnly(rawDate),
             status: 'seated',
-            folio: folioAsignado,
-            number: numeroAsignado,
             raw_data: finalRecord,
             created_at: new Date().toISOString()
         };
@@ -295,7 +293,8 @@ export const seatBaptism = async (originalId, parishId, updates = {}) => {
         window.dispatchEvent(new Event('storage'));
         return { success: true, message: "Registro asentado permanentemente." };
     } catch (err) {
-        return { success: false, message: "Error al guardar: " + err.message };
+        console.error("Error en seatBaptism:", err);
+        return { success: false, message: "Error al guardar en la nube: " + err.message };
     }
 };
 
@@ -303,7 +302,7 @@ export const seatMultipleBaptisms = async (ids, parishId) => {
     try {
         const pending = await getPendingBaptisms(parishId);
         const recordsToSeat = pending.filter(r => ids.includes(r.id));
-        if (recordsToSeat.length === 0) return { success: false, message: "No hay registros." };
+        if (recordsToSeat.length === 0) return { success: false, message: "No hay registros seleccionados." };
 
         let params = await getBaptismParameters(parishId);
         let currentLibro = parseInt(params.ordinarioLibro || 1, 10);
@@ -319,7 +318,8 @@ export const seatMultipleBaptisms = async (ids, parishId) => {
             const sFolio = String(currentFolio).padStart(4, '0');
             const sNumero = String(currentNumero).padStart(4, '0');
             const safeId = record.id || generateUUID();
-            
+            const rawDate = record.fechaSacramento || record.sacramentDate || '';
+
             const finalRecord = purificarRegistroBautismo({
                 ...record,
                 id: safeId,
@@ -335,9 +335,10 @@ export const seatMultipleBaptisms = async (ids, parishId) => {
             dbRecords.push({
                 id: safeId,
                 parish_id: parishId,
+                folio: String(sFolio),
+                number: String(sNumero),
+                celebration_date: cleanDateOnly(rawDate),
                 status: 'seated',
-                folio: sFolio,
-                number: sNumero,
                 raw_data: finalRecord,
                 created_at: new Date().toISOString()
             });
@@ -362,6 +363,7 @@ export const seatMultipleBaptisms = async (ids, parishId) => {
         window.dispatchEvent(new Event('storage'));
         return { success: true, message: `¡Se asentaron ${dbRecords.length} registros!` };
     } catch (error) {
+        console.error("Error en seatMultipleBaptisms:", error);
         return { success: false, message: "Error: " + error.message };
     }
 };
@@ -369,7 +371,7 @@ export const seatMultipleBaptisms = async (ids, parishId) => {
 export const validateBaptismNumbers = async (libro, folio, numero, parishId) => {
     const list = getBaptisms(parishId);
     const exists = list.some(r => String(r.Libro) === String(libro) && String(r.folio) === String(folio) && String(r.numero) === String(numero));
-    if (exists) return { valid: false, message: "Esta numeración ya existe." };
+    if (exists) return { valid: false, message: "Ya existe un registro con esta numeración." };
     return { valid: true };
 };
 
