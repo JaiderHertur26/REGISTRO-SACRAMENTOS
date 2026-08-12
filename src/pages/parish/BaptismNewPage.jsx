@@ -29,7 +29,7 @@ const BaptismNewPage = () => {
     const [ciudades, setCiudades] = useState([]); 
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
 
-    // 📖 DICCIONARIO CANÓNICO EXACTO
+    // 📖 DICCIONARIO CANÓNICO EXACTO PARA EL ESTADO
     const [formData, setFormData] = useState({
         numeroRegistro: '', Libro: '---', folio: '---', numero: '---',
         fechaSacramento: '', horaSacramento: '10:00', lugarBautismo: nombreParroquia,
@@ -155,7 +155,7 @@ const BaptismNewPage = () => {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div><label className={labelClass}>Fecha Sacramento</label><input type="date" name="fechaSacramento" required value={formData.fechaSacramento} onChange={handleChange} className={inputClass} /></div>
                             <div><label className={labelClass}>Hora</label><input type="time" name="horaSacramento" value={formData.horaSacramento} onChange={handleChange} className={inputClass} /></div>
-                            <div><label className={labelClass}>Parroquia</label><input type="text" name="lugarBautismo" required value={formData.lugarBautismo} onChange={handleChange} className={inputClass} /></div>
+                            <div><label className={labelClass}>Parroquia / Lugar</label><input type="text" name="lugarBautismo" required value={formData.lugarBautismo} onChange={handleChange} className={inputClass} /></div>
                         </div>
                     </section>
 
