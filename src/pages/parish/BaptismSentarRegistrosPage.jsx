@@ -82,16 +82,9 @@ const BaptismSentarRegistrosPage = () => {
                 
                 localStorage.setItem(`pendingBaptisms_${resolvedParishId}`, JSON.stringify(cloudPending));
 
+                // 🚀 AQUÍ APLICAMOS EL PURIFICADOR PARA RESPETAR EL DICCIONARIO
                 recordsMapped = cloudPending.map(r => {
-                    const purificado = purificarRegistroBautismo(r);
-                    return {
-                        ...purificado,
-                        numeroRegistro: r.numeroRegistro || r.inscripcionNumero || purificado.numeroRegistro || '---',
-                        direccion: r.direccion || purificado.direccion || '---',
-                        nuip: r.nuip || purificado.nuip || '---',
-                        oficinaRegistro: r.oficinaRegistro || purificado.oficinaRegistro || '---',
-                        fechaSacramento: r.fechaSacramento || r.sacramentDate || purificado.fechaSacramento 
-                    };
+                    return purificarRegistroBautismo(r);
                 });
             }
             
@@ -191,12 +184,15 @@ const BaptismSentarRegistrosPage = () => {
 
         setIsSaving(true);
         try {
-            const result = await seatBaptism(currentBaptism.id, resolvedParishId, {});
+            // 🚀 Llamamos a seatBaptism pasándole directamente los datos actuales
+            const result = await seatBaptism(currentBaptism.id, resolvedParishId, currentBaptism);
             if (result.success) {
                 await incrementParameters(1, 'ordinario'); 
                 toast({ title: "Éxito", description: "Bautismo asentado permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
                 await loadData();
                 if (currentIndex >= pendingBaptisms.length - 1) setCurrentIndex(Math.max(0, pendingBaptisms.length - 2));
+            } else {
+                throw new Error(result.message);
             }
         } catch (error) { 
             toast({ title: "Error", description: error.message, variant: "destructive" }); 
@@ -234,6 +230,8 @@ const BaptismSentarRegistrosPage = () => {
                 toast({ title: "Lote Procesado", className: "bg-green-50 text-green-900 border-green-200" });
                 setSelectedIds([]);
                 await loadData();
+            } else {
+                throw new Error(result.message);
             }
         } catch (err) { 
             toast({ title: "Error", description: err.message, variant: "destructive" }); 
@@ -377,12 +375,12 @@ const BaptismSentarRegistrosPage = () => {
                                             </td>
                                             <td className="px-6 py-4">
                                                 <p className="font-black uppercase text-xs text-gray-800">{baptism.apellidos}, {baptism.nombres}</p>
-                                                <p className="text-[9px] font-bold text-gray-400 uppercase">#{baptism.numeroRegistro}</p>
+                                                <p className="text-[9px] font-bold text-gray-400 uppercase">#{baptism.numeroRegistro || '---'}</p>
                                             </td>
                                             <td className={cn("px-6 py-4 text-[11px] font-black uppercase", isFuture ? "text-red-500" : "text-gray-600")}>
                                                 {baptism.fechaSacramento}
                                             </td>
-                                            <td className="px-6 py-4 text-[11px] font-bold text-gray-400 uppercase">{baptism.direccion}</td>
+                                            <td className="px-6 py-4 text-[11px] font-bold text-gray-400 uppercase">{baptism.direccion || '---'}</td>
                                         </tr>
                                     );
                                 })}
