@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { 
     Save, X, Calendar, User, Users, BookOpen, PenTool, 
-    CheckCircle, Loader2, ScrollText, MapPin, Hash, AlertCircle 
+    CheckCircle2, Loader2, ScrollText, MapPin, Hash, AlertCircle 
 } from 'lucide-react';
 import BaptismTicket from '@/components/BaptismTicket';
 import CityAutocomplete from '@/components/CityAutocomplete';
@@ -107,7 +107,7 @@ const BaptismNewPage = () => {
         return (
             <DashboardLayout entityName={nombreParroquia}>
                 <div className="print:hidden max-w-xl mx-auto bg-white p-12 rounded-[3rem] shadow-xl border border-gray-100 text-center mt-12 animate-in fade-in duration-500">
-                    <div className="w-24 h-24 bg-green-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border border-green-100"><CheckCircle className="w-12 h-12 text-green-500" /></div>
+                    <div className="w-24 h-24 bg-green-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border border-green-100"><CheckCircle2 className="w-12 h-12 text-green-500" /></div>
                     <h2 className="text-3xl font-black text-gray-900 mb-3 tracking-tighter uppercase">Borrador Creado</h2>
                     <p className="text-gray-500 mb-10 text-sm font-medium leading-relaxed">El registro está en la nube listo para ser asentado oficialmente.</p>
                     <div className="grid grid-cols-2 gap-4">
@@ -168,11 +168,9 @@ const BaptismNewPage = () => {
 
                             <section>
                                 <SectionHeader number="03" title="Identidad del Bautizado" icon={User} />
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                     <div><label className={labelClass}>Apellidos</label><input type="text" name="apellidos" required value={formData.apellidos} onChange={handleChange} className={`${inputClass} text-lg`} /></div>
                                     <div><label className={labelClass}>Nombres</label><input type="text" name="nombres" required value={formData.nombres} onChange={handleChange} className={`${inputClass} text-lg`} /></div>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                                     <div>
                                         <label className={labelClass}>Sexo</label>
                                         <select name="sexo" required value={formData.sexo} onChange={handleChange} className={inputClass}>
@@ -182,7 +180,7 @@ const BaptismNewPage = () => {
                                         </select>
                                     </div>
                                     <div><label className={labelClass}>Fecha Nacimiento</label><input type="date" name="fechaNacimiento" required value={formData.fechaNacimiento} onChange={handleChange} className={inputClass} /></div>
-                                    <div>
+                                    <div className="md:col-span-2">
                                         <label className={labelClass}>Lugar Nacimiento</label>
                                         <CityAutocomplete name="lugarNacimiento" value={formData.lugarNacimiento} onChange={handleCityChange} cities={ciudades} className={inputClass} />
                                     </div>
