@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Save, ArrowLeft, Loader2, BookOpen } from 'lucide-react';
 import CityAutocomplete from '@/components/CityAutocomplete';
-import { cleanDateOnly } from '@/services/sacramentsService';
 
 const BaptismEditPage = () => {
     const { user } = useAuth();
@@ -26,6 +25,16 @@ const BaptismEditPage = () => {
     const [formData, setFormData] = useState(null);
     const [ciudades, setCiudades] = useState([]); 
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
+
+    const toInputDate = (dateStr) => {
+        if (!dateStr) return '';
+        if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) return dateStr.split('T')[0];
+        if (dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+            const [d, m, y] = dateStr.split('/');
+            return `${y}-${m}-${d}`;
+        }
+        return '';
+    };
 
     useEffect(() => {
         if (!recordId) {
@@ -46,7 +55,6 @@ const BaptismEditPage = () => {
 
                 const raw = typeof dbRecord.raw_data === 'string' ? JSON.parse(dbRecord.raw_data) : (dbRecord.raw_data || {});
                 
-                // Extraemos exactamente el mismo Diccionario
                 const purificado = purificarRegistroBautismo({
                     ...raw,
                     id: dbRecord.id,
@@ -59,7 +67,6 @@ const BaptismEditPage = () => {
 
                 setFormData(purificado);
 
-                // Cargar Auxiliares
                 const listaCiudadesRaw = getCiudadesList(parishId) || [];
                 setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
                 
@@ -75,7 +82,7 @@ const BaptismEditPage = () => {
         };
 
         loadRecord();
-    }, [recordId, parishId]);
+    }, [recordId, parishId, getCiudadesList, getParrocos, navigate, purificarRegistroBautismo, toast]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -91,10 +98,13 @@ const BaptismEditPage = () => {
 
     const handleSave = async (e) => {
         e.preventDefault();
-        setIsSubmitting(true);
+        if (!formData.nombres || !formData.apellidos) {
+            toast({ title: "Campos Requeridos", description: "Nombres y Apellidos obligatorios.", variant: "destructive" });
+            return;
+        }
 
+        setIsSubmitting(true);
         try {
-            // Guardamos usando el motor blindado de sacramentsService
             const res = await saveBaptismToSource(formData, parishId, formData.status || 'seated');
             
             if (res.success) {
@@ -155,7 +165,7 @@ const BaptismEditPage = () => {
                     <section>
                         <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 02. Datos de la Celebración</h3>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div><label className={labelClass}>Fecha Sacramento</label><input type="date" name="fechaSacramento" required value={cleanDateOnly(formData.fechaSacramento) || ''} onChange={handleChange} className={inputClass} /></div>
+                            <div><label className={labelClass}>Fecha Sacramento</label><input type="date" name="fechaSacramento" required value={toInputDate(formData.fechaSacramento) || ''} onChange={handleChange} className={inputClass} /></div>
                             <div><label className={labelClass}>Hora</label><input type="time" name="horaSacramento" value={formData.horaSacramento || ''} onChange={handleChange} className={inputClass} /></div>
                             <div><label className={labelClass}>Parroquia</label><input type="text" name="lugarBautismo" required value={formData.lugarBautismo || ''} onChange={handleChange} className={inputClass} /></div>
                         </div>
@@ -174,7 +184,7 @@ const BaptismEditPage = () => {
                                     <option value="FEMENINO">FEMENINO</option>
                                 </select>
                             </div>
-                            <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="fechaNacimiento" value={cleanDateOnly(formData.fechaNacimiento) || ''} onChange={handleChange} className={inputClass} /></div>
+                            <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="fechaNacimiento" value={toInputDate(formData.fechaNacimiento) || ''} onChange={handleChange} className={inputClass} /></div>
                             <div className="md:col-span-2">
                                 <label className={labelClass}>Lugar de Nacimiento</label>
                                 <CityAutocomplete name="lugarNacimiento" value={formData.lugarNacimiento || ''} onChange={handleCityChange} cities={ciudades} className={inputClass} />
@@ -188,7 +198,7 @@ const BaptismEditPage = () => {
                             <div><label className={labelClass}>NUIP / NIP</label><input type="text" name="nuip" value={formData.nuip || ''} onChange={handleChange} className={inputClass} /></div>
                             <div><label className={labelClass}>Serial Acta</label><input type="text" name="serialRegistro" value={formData.serialRegistro || ''} onChange={handleChange} className={inputClass} /></div>
                             <div><label className={labelClass}>Notaría/Oficina</label><input type="text" name="oficinaRegistro" value={formData.oficinaRegistro || ''} onChange={handleChange} className={inputClass} /></div>
-                            <div><label className={labelClass}>F. Expedición</label><input type="date" name="fechaExpedicionRegistro" value={cleanDateOnly(formData.fechaExpedicionRegistro) || ''} onChange={handleChange} className={inputClass} /></div>
+                            <div><label className={labelClass}>F. Expedición</label><input type="date" name="fechaExpedicionRegistro" value={toInputDate(formData.fechaExpedicionRegistro) || ''} onChange={handleChange} className={inputClass} /></div>
                         </div>
                     </section>
 
