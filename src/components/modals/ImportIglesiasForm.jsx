@@ -31,34 +31,29 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
         try {
             const json = JSON.parse(event.target.result);
             
-            // 🚀 SALTAMOS EL VALIDADOR ESTRICTO Y VERIFICAMOS MANUALMENTE
             if (!json || !json.data || !Array.isArray(json.data)) {
                 throw new Error("El archivo no tiene la estructura requerida: { \"data\": [...] }");
             }
 
-            setJsonContent(json);
-
-            // 🚀 Usar parishId si no hay dioceseId
             const contextId = user?.parishId || user?.dioceseId;
             const existingData = getIglesiasList(contextId) || [];
             
             const errors = [];
             const warnings = [];
             let validCount = 0;
+            const validData = []; // 🚀 Nuevo arreglo para guardar solo las válidas
 
             json.data.forEach((item, index) => {
                 const idx = index + 1;
-                // Extraemos tolerando mayúsculas, minúsculas y nulos
                 const nombre = (item.Nombre || item.nombre || '').trim();
                 const codigo = (item.Codigo || item.codigo || '').toString().trim();
 
-                // Validación Básica
+                // 🚀 SOLUCIÓN: Si no tiene nombre, la omitimos silenciosamente como Advertencia, NO como Error Crítico.
                 if (!nombre) {
-                    errors.push({ index: idx, message: `Fila ${idx}: La iglesia no tiene nombre asignado.` });
-                    return;
+                    warnings.push({ index: idx, message: `Fila ${idx}: Omitida (No tiene nombre de iglesia).` });
+                    return; // Salta al siguiente registro
                 }
 
-                // Detector de Duplicados 
                 const isDuplicate = existingData.some(ex => {
                     const matchCodigo = (codigo && ex.codigo && String(ex.codigo) === String(codigo));
                     const matchNombre = (ex.nombre && String(ex.nombre).toLowerCase() === String(nombre).toLowerCase());
@@ -66,14 +61,17 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
                 });
                 
                 if (isDuplicate) {
-                    warnings.push({ index: idx, message: `Fila ${idx}: Se omitirá "${nombre}" (Ya existe en la base de datos).` });
+                    warnings.push({ index: idx, message: `Fila ${idx}: Omitida "${nombre}" (Ya existe).` });
                 } else {
                     validCount++;
+                    validData.push(item); // Guardamos la limpia
                 }
             });
 
+            // Guardamos solo los datos purificados para inyectar
+            setJsonContent({ data: validData });
             setValidationResult({ count: validCount, errors, warnings });
-            setPreview(json.data.slice(0, 5));
+            setPreview(validData.slice(0, 5));
         } catch (err) {
             toast({ title: "Error de Lectura", description: err.message, variant: "destructive" });
             setValidationResult({ count: 0, errors: [{ message: err.message }], warnings: [] });
@@ -85,7 +83,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
   };
 
   const handleConfirm = async () => {
-      if (!jsonContent || !jsonContent.data || !validationResult) return;
+      if (!jsonContent || !jsonContent.data) return;
       
       setLoading(true);
 
@@ -96,27 +94,10 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
           return;
       }
 
-      const existingData = getIglesiasList(contextId) || [];
-      const originalCount = jsonContent.data.length;
-      
-      // 🚀 FILTRO SEGURO ANTES DE INYECTAR
-      const filteredData = jsonContent.data.filter(item => {
-          const nombre = (item.Nombre || item.nombre || '').trim().toLowerCase();
-          const codigo = (item.Codigo || item.codigo || '').toString().trim();
-          
-          return !existingData.some(ex => {
-              const matchCod = (codigo && ex.codigo && String(ex.codigo) === String(codigo));
-              const matchNom = (ex.nombre && String(ex.nombre).toLowerCase() === nombre);
-              return matchCod || matchNom;
-          });
-      });
-
-      const duplicatesCount = originalCount - filteredData.length;
-      
       let result;
-      if (filteredData.length > 0) {
-          // Limpiamos los "nulls" para evitar errores en Supabase
-          const cleanData = filteredData.map(item => ({
+      if (jsonContent.data.length > 0) {
+          // Limpiamos los "nulls"
+          const cleanData = jsonContent.data.map(item => ({
               codigo: item.codigo || item.Codigo || null,
               nombre: item.nombre || item.Nombre || null,
               nit: item.nronit || item.nit || null,
@@ -131,20 +112,15 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
 
           result = await importIglesias({ data: cleanData }, contextId, false);
       } else {
-          result = { success: true, count: 0, message: "No hay registros nuevos. Todos son duplicados." };
+          result = { success: true, count: 0, message: "No hay registros nuevos para inyectar." };
       }
 
       setLoading(false);
 
       if (result.success) {
-           let msg = `${result.count} iglesias inyectadas a la Nube.`;
-           if (duplicatesCount > 0) {
-               msg = `${result.count} iglesias inyectadas, ${duplicatesCount} omitidas por ser duplicadas.`;
-           }
-           
            toast({
                title: "Base de Datos Actualizada",
-               description: msg,
+               description: `${result.count} iglesias inyectadas a la Nube.`,
                className: "bg-green-50 border-green-200 text-green-900"
            });
            handleClose();
@@ -168,6 +144,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
       { header: 'Diócesis', render: r => <span className="text-[10px] bg-blue-50 px-2 py-1 rounded text-blue-700 font-bold">{r.diocesis || '-'}</span> },
   ];
 
+  // 🚀 Ahora el botón Confirmar se habilitará porque los nombres vacíos son solo advertencias, no errores.
   const hasErrors = validationResult?.errors?.length > 0;
   const canConfirm = validationResult && !hasErrors && !loading;
 
@@ -179,7 +156,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
                 <Database className="w-5 h-5 text-blue-600 shrink-0" />
                 <div>
                     <h4 className="text-xs font-black text-blue-900 uppercase tracking-widest">Motor de Inyección</h4>
-                    <p className="text-[11px] text-blue-700 leading-tight mt-1">El sistema omitirá registros con el mismo código o nombre. Asegúrese de que el archivo JSON tenga la llave "data".</p>
+                    <p className="text-[11px] text-blue-700 leading-tight mt-1">El sistema omitirá registros duplicados o sin nombre. Asegúrese de que el archivo JSON tenga la llave "data".</p>
                 </div>
             </div>
 
@@ -216,44 +193,47 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
                         </div>
                     </div>
 
-                    {preview && preview.length > 0 && (
-                        <div className="border border-gray-100 rounded-3xl overflow-hidden shadow-sm bg-white">
-                            <div className="bg-gray-50 px-6 py-3 border-b border-gray-100">
-                                <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Vista Previa de Limpieza</span>
+                    {/* Modificación para hacer que la caja principal ocupe todo el espacio */}
+                    <div className="w-full">
+                         {preview && preview.length > 0 && (
+                            <div className="border border-gray-100 rounded-3xl overflow-hidden shadow-sm bg-white mb-4">
+                                <div className="bg-gray-50 px-6 py-3 border-b border-gray-100">
+                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Vista Previa de Limpieza</span>
+                                </div>
+                                <Table columns={columns} data={preview} />
                             </div>
-                            <Table columns={columns} data={preview} />
-                        </div>
-                    )}
+                        )}
 
-                    {hasErrors && (
-                        <div className="bg-red-50 rounded-2xl p-4 border border-red-100 max-h-40 overflow-y-auto custom-scrollbar">
-                            <h4 className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-red-800 mb-2">
-                                <XCircle className="w-4 h-4" /> Errores Críticos (Detienen inyección)
-                            </h4>
-                            <ul className="list-none space-y-1">
-                                {validationResult.errors.map((err, idx) => (
-                                    <li key={idx} className="text-xs text-red-600 font-medium border-b border-red-100/50 pb-1">{err.message}</li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
+                        {hasErrors && (
+                            <div className="bg-red-50 rounded-2xl p-4 border border-red-100 max-h-40 overflow-y-auto custom-scrollbar mb-4">
+                                <h4 className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-red-800 mb-2">
+                                    <XCircle className="w-4 h-4" /> Errores Críticos (Detienen inyección)
+                                </h4>
+                                <ul className="list-none space-y-1">
+                                    {validationResult.errors.map((err, idx) => (
+                                        <li key={idx} className="text-xs text-red-600 font-medium border-b border-red-100/50 pb-1">{err.message}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
 
-                    {validationResult.warnings?.length > 0 && (
-                         <div className="bg-amber-50 rounded-2xl p-4 border border-amber-100 max-h-40 overflow-y-auto custom-scrollbar">
-                            <h4 className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-amber-800 mb-2">
-                                <AlertTriangle className="w-4 h-4" /> Advertencias (Duplicados a Omitir)
-                            </h4>
-                            <ul className="list-none space-y-1">
-                                {validationResult.warnings.map((warn, idx) => (
-                                    <li key={idx} className="text-xs text-amber-600 font-medium border-b border-amber-100/50 pb-1">{warn.message}</li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
+                        {validationResult.warnings?.length > 0 && (
+                             <div className="bg-amber-50 rounded-2xl p-4 border border-amber-100 max-h-40 overflow-y-auto custom-scrollbar w-full">
+                                <h4 className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-amber-800 mb-2">
+                                    <AlertTriangle className="w-4 h-4" /> Advertencias (Duplicados o vacíos a omitir)
+                                </h4>
+                                <ul className="list-none space-y-1">
+                                    {validationResult.warnings.map((warn, idx) => (
+                                        <li key={idx} className="text-xs text-amber-600 font-medium border-b border-amber-100/50 pb-1">{warn.message}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
 
-            <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
+            <div className="flex justify-end gap-3 pt-6 border-t border-gray-100 mt-4">
                 <Button variant="ghost" onClick={handleClose} className="px-8 text-gray-400 font-black uppercase tracking-widest text-[10px]">
                     Cancelar
                 </Button>
