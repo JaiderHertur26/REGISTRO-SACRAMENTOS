@@ -8,9 +8,10 @@ import { useToast } from '@/components/ui/use-toast';
 import { 
     Pencil, Trash2, Plus, Search, MapPin, 
     Globe, Database, ShieldCheck, Clock, User as UserIcon,
-    AlertCircle, Loader2
+    AlertCircle, Loader2, Upload
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import ImportCiudadesForm from '@/components/modals/ImportCiudadesForm';
 
 const CiudadesList = () => {
     const { user } = useAuth();
@@ -20,6 +21,7 @@ const CiudadesList = () => {
     const [items, setItems] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isImportOpen, setIsImportOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [currentItem, setCurrentItem] = useState(null);
     
@@ -31,17 +33,11 @@ const CiudadesList = () => {
         usuario: ''
     });
 
-    // --- 1. CARGA DE DATOS (SSOT DIOCESANO) ---
     const loadData = () => {
         if (!user?.dioceseId) return;
         setIsLoading(true);
-        
-        // El cerebro AppData ya maneja los fallbacks internamente
         const data = getCiudadesList(user.dioceseId);
-        
-        // Ordenar alfabéticamente para mejor UX
         const sortedData = [...data].sort((a, b) => a.nombre.localeCompare(b.nombre));
-        
         setItems(sortedData);
         setIsLoading(false);
     };
@@ -50,7 +46,6 @@ const CiudadesList = () => {
         loadData();
     }, [user?.dioceseId]);
 
-    // --- 2. GESTIÓN DE FORMULARIO ---
     const handleOpenModal = (item = null) => {
         if (item) {
             setCurrentItem(item);
@@ -78,9 +73,9 @@ const CiudadesList = () => {
         let result;
 
         if (currentItem) {
-            result = updateCiudad(currentItem.id, { ...formData, nombre: formData.nombre.toUpperCase() }, contextId);
+            result = await updateCiudad(currentItem.id, { ...formData, nombre: formData.nombre.toUpperCase() }, contextId);
         } else {
-            result = addCiudad({ ...formData, nombre: formData.nombre.toUpperCase() }, contextId);
+            result = await addCiudad({ ...formData, nombre: formData.nombre.toUpperCase() }, contextId);
         }
 
         if (result.success) {
@@ -92,9 +87,9 @@ const CiudadesList = () => {
         }
     };
 
-    const handleDelete = (item) => {
+    const handleDelete = async (item) => {
         if (window.confirm(`¿Realmente desea eliminar "${item.nombre}"? Esta acción puede afectar registros históricos.`)) {
-            deleteCiudad(item.id, user.dioceseId);
+            await deleteCiudad(item.id, user.dioceseId);
             toast({ title: 'Registro eliminado', description: 'La ciudad ha sido removida del catálogo.' });
             loadData();
         }
@@ -106,8 +101,6 @@ const CiudadesList = () => {
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500 pb-10">
-            
-            {/* BARRA DE ACCIONES SUPERIOR */}
             <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
                 <div className="relative w-full max-w-md group">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300 group-focus-within:text-[#4B7BA7] transition-colors" />
@@ -119,21 +112,29 @@ const CiudadesList = () => {
                     />
                 </div>
                 
-                <div className="flex items-center gap-6">
-                    <div className="hidden lg:flex flex-col items-end">
+                <div className="flex items-center gap-3 w-full lg:w-auto">
+                    <div className="hidden lg:flex flex-col items-end mr-4">
                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Capacidad de Catálogo</span>
                         <span className="text-xl font-black text-gray-800 leading-none">{items.length} <span className="text-[10px] text-[#4B7BA7]">CIUDADES</span></span>
                     </div>
+
+                    <Button 
+                        onClick={() => setIsImportOpen(true)} 
+                        variant="outline"
+                        className="flex-1 lg:flex-none py-7 rounded-2xl border-gray-200 text-gray-500 font-black uppercase tracking-widest text-[10px] hover:bg-gray-50 transition-all"
+                    >
+                        <Upload className="w-4 h-4 mr-2" /> Importar JSON
+                    </Button>
+
                     <Button 
                         onClick={() => handleOpenModal()} 
-                        className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-8 py-7 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-blue-900/20 transition-all transform active:scale-95 flex items-center gap-2"
+                        className="flex-1 lg:flex-none bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-8 py-7 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-blue-900/20 transition-all transform active:scale-95 flex items-center gap-2"
                     >
                         <Plus className="w-4 h-4" /> Agregar Ciudad
                     </Button>
                 </div>
             </div>
 
-            {/* TABLA DE CONTENIDO */}
             <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto custom-scrollbar">
                     <table className="w-full text-left">
@@ -185,7 +186,7 @@ const CiudadesList = () => {
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="flex flex-col">
-                                                <span className="text-xs font-bold text-gray-600">{item.fechaCreacion ? new Date(item.fechaCreacion).toLocaleDateString() : '-'}</span>
+                                                <span className="text-xs font-bold text-gray-600">{item.fechaCreacion || item.created_at ? new Date(item.fechaCreacion || item.created_at).toLocaleDateString() : '-'}</span>
                                                 <span className="text-[9px] text-gray-400 font-medium">F. CREACIÓN</span>
                                             </div>
                                         </td>
@@ -203,14 +204,8 @@ const CiudadesList = () => {
                 </div>
             </div>
 
-            {/* MODAL DE EDICIÓN / CREACIÓN */}
-            <Modal 
-                isOpen={isModalOpen} 
-                onClose={() => setIsModalOpen(false)} 
-                title={currentItem ? 'Editar Ciudad' : 'Nueva Localidad'}
-            >
+            <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={currentItem ? 'Editar Ciudad' : 'Nueva Localidad'}>
                 <div className="p-4 space-y-8">
-                    {/* Header Informativo */}
                     <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3">
                         <ShieldCheck className="w-5 h-5 text-blue-500 mt-0.5" />
                         <p className="text-[10px] text-blue-700 font-bold uppercase leading-relaxed tracking-tight">
@@ -245,15 +240,22 @@ const CiudadesList = () => {
                         <Button variant="ghost" onClick={() => setIsModalOpen(false)} className="text-gray-400 font-bold uppercase tracking-widest text-[10px] px-8 py-6 rounded-2xl transition-all">
                             Descartar
                         </Button>
-                        <Button 
-                            onClick={handleSave} 
-                            className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-10 py-6 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-blue-900/20 transition-all transform active:scale-95"
-                        >
+                        <Button onClick={handleSave} className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-10 py-6 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-blue-900/20 transition-all transform active:scale-95">
                             {currentItem ? 'Actualizar Registro' : 'Guardar Ciudad'}
                         </Button>
                     </div>
                 </div>
             </Modal>
+
+            {isImportOpen && (
+                <ImportCiudadesForm 
+                    isOpen={isImportOpen} 
+                    onClose={() => {
+                        setIsImportOpen(false);
+                        loadData();
+                    }} 
+                />
+            )}
         </div>
     );
 };

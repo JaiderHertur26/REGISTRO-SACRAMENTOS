@@ -4,12 +4,12 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
-import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Upload } from 'lucide-react';
 
-// Modals
 import CreateIglesiaModal from '@/components/modals/CreateIglesiaModal';
 import EditIglesiaModal from '@/components/modals/EditIglesiaModal';
 import DeleteIglesiaModal from '@/components/modals/DeleteIglesiaModal';
+import ImportIglesiasForm from '@/components/modals/ImportIglesiasForm';
 
 const IglesiasList = () => {
     const { user } = useAuth();
@@ -19,15 +19,14 @@ const IglesiasList = () => {
     const [items, setItems] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     
-    // Modal state management
     const [modals, setModals] = useState({
         create: false,
         edit: false,
-        delete: false
+        delete: false,
+        import: false
     });
     const [selectedItem, setSelectedItem] = useState(null);
     
-    // Get parishId from User context or fallback to localStorage 'currentParish'
     const getParishId = () => {
         if (user?.parishId) return user.parishId;
         try {
@@ -55,21 +54,15 @@ const IglesiasList = () => {
         setItems(data);
     };
 
-    // --- Modal Handlers ---
-
-    const handleCreate = (data) => {
+    const handleCreate = async (data) => {
         if (!parishId) {
              toast({ title: 'Error', description: 'No se ha identificado la parroquia actual.', variant: 'destructive' });
              return;
         }
 
-        const result = addIglesia(data, parishId);
+        const result = await addIglesia(data, parishId);
         if (result.success) {
-            toast({ 
-                title: 'Éxito', 
-                description: result.message, 
-                className: "bg-green-50 border-green-200 text-green-900" 
-            });
+            toast({ title: 'Éxito', description: result.message, className: "bg-green-50 border-green-200 text-green-900" });
             setModals(prev => ({ ...prev, create: false }));
             loadData();
         } else {
@@ -77,14 +70,10 @@ const IglesiasList = () => {
         }
     };
 
-    const handleUpdate = (id, data) => {
-        const result = updateIglesia(id, data, parishId);
+    const handleUpdate = async (id, data) => {
+        const result = await updateIglesia(id, data, parishId);
         if (result.success) {
-            toast({ 
-                title: 'Éxito', 
-                description: result.message, 
-                className: "bg-green-50 border-green-200 text-green-900" 
-            });
+            toast({ title: 'Éxito', description: result.message, className: "bg-green-50 border-green-200 text-green-900" });
             setModals(prev => ({ ...prev, edit: false }));
             loadData();
         } else {
@@ -92,22 +81,16 @@ const IglesiasList = () => {
         }
     };
 
-    const handleDelete = (id) => {
-        const result = deleteIglesia(id, parishId);
+    const handleDelete = async (id) => {
+        const result = await deleteIglesia(id, parishId);
         if (result.success) {
-            toast({ 
-                title: 'Eliminado', 
-                description: result.message, 
-                className: "bg-green-50 border-green-200 text-green-900" 
-            });
+            toast({ title: 'Eliminado', description: result.message, className: "bg-green-50 border-green-200 text-green-900" });
             setModals(prev => ({ ...prev, delete: false }));
             loadData();
         } else {
             toast({ title: 'Error', description: result.message, variant: 'destructive' });
         }
     };
-
-    // --- UI Actions ---
 
     const openEditModal = (item) => {
         setSelectedItem(item);
@@ -124,29 +107,37 @@ const IglesiasList = () => {
         (i.codigo || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    const headers = [
-        "Código", "Nombre", "NIT", "Dirección", "Ciudad", "Teléfono", "Fax", "Email", "Párroco", "Diócesis"
-    ];
+    const headers = ["Código", "Nombre", "NIT", "Dirección", "Ciudad", "Teléfono", "Fax", "Email", "Párroco", "Diócesis"];
 
     return (
         <div className="space-y-4">
-            <div className="flex justify-between items-center mb-4">
-                <div className="relative w-full max-w-sm">
+            <div className="flex flex-col lg:flex-row justify-between items-center mb-4 gap-4">
+                <div className="relative w-full lg:w-1/3">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                     <Input 
                         placeholder="Buscar por nombre o código..." 
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-9"
+                        className="pl-9 w-full"
                     />
                 </div>
-                <div className="flex items-center gap-4">
-                    <div className="text-sm text-gray-500 font-medium hidden sm:block">
+
+                <div className="flex items-center gap-3 w-full lg:w-auto">
+                    <div className="text-sm text-gray-500 font-medium hidden sm:block mr-2">
                         Total: <span className="text-[#111111] font-bold">{filteredItems.length}</span> registros
                     </div>
+
+                    <Button 
+                        onClick={() => setModals(prev => ({ ...prev, import: true }))} 
+                        variant="outline"
+                        className="flex-1 lg:flex-none border-gray-200 text-gray-600 hover:bg-gray-50 font-medium text-sm flex items-center gap-2"
+                    >
+                        <Upload className="w-4 h-4" /> Importar JSON
+                    </Button>
+
                     <Button 
                         onClick={() => setModals(prev => ({ ...prev, create: true }))} 
-                        className="bg-[#4B7BA7] text-white gap-2 hover:bg-[#3A6286]"
+                        className="flex-1 lg:flex-none bg-[#4B7BA7] hover:bg-[#3A6286] text-white flex items-center gap-2"
                     >
                         <Plus className="w-4 h-4" /> Agregar Iglesia
                     </Button>
@@ -216,19 +207,32 @@ const IglesiasList = () => {
                 onCreate={handleCreate} 
             />
 
-            <EditIglesiaModal 
-                isOpen={modals.edit} 
-                onClose={() => setModals(prev => ({ ...prev, edit: false }))} 
-                onUpdate={handleUpdate}
-                item={selectedItem}
-            />
+            {selectedItem && (
+                <>
+                    <EditIglesiaModal 
+                        isOpen={modals.edit} 
+                        onClose={() => { setModals(prev => ({ ...prev, edit: false })); setSelectedItem(null); }} 
+                        onUpdate={handleUpdate}
+                        item={selectedItem}
+                    />
+                    <DeleteIglesiaModal 
+                        isOpen={modals.delete} 
+                        onClose={() => { setModals(prev => ({ ...prev, delete: false })); setSelectedItem(null); }} 
+                        onDelete={handleDelete}
+                        item={selectedItem}
+                    />
+                </>
+            )}
 
-            <DeleteIglesiaModal 
-                isOpen={modals.delete} 
-                onClose={() => setModals(prev => ({ ...prev, delete: false }))} 
-                onDelete={handleDelete}
-                item={selectedItem}
-            />
+            {modals.import && (
+                <ImportIglesiasForm 
+                    isOpen={modals.import}
+                    onClose={() => {
+                        setModals(prev => ({ ...prev, import: false }));
+                        loadData();
+                    }}
+                />
+            )}
         </div>
     );
 };

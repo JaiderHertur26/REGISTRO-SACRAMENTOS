@@ -7,7 +7,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { 
     Pencil, Trash2, Search, Plus, Eye, 
     Eraser, Building2, ShieldCheck, Database, 
-    Loader2, Globe, LayoutGrid 
+    Loader2, Globe, LayoutGrid, Upload 
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -15,6 +15,7 @@ import EditMisDatosFormModal from '@/components/modals/EditMisDatosFormModal';
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import ManualMisDatosModal from '@/components/modals/ManualMisDatosModal';
 import ViewMisDatosModal from '@/components/modals/ViewMisDatosModal';
+import ImportMisDatosForm from '@/components/modals/ImportMisDatosForm';
 
 import { 
     getMisDatosFromLocalStorage, 
@@ -36,7 +37,8 @@ const MisDatosList = () => {
         manual: false,
         view: false,
         edit: false,
-        delete: false
+        delete: false,
+        import: false // Agregado el estado para el modal de importación
     });
     const [selectedRecord, setSelectedRecord] = useState(null);
 
@@ -163,6 +165,15 @@ const MisDatosList = () => {
                         <Eraser className="w-4 h-4 mr-2" /> Limpiar Todo
                     </Button>
 
+                    {/* BOTÓN DE IMPORTACIÓN AÑADIDO */}
+                    <Button 
+                        onClick={() => setModals(m => ({ ...m, import: true }))} 
+                        variant="outline"
+                        className="flex-1 lg:flex-none border-gray-200 text-gray-600 hover:bg-gray-50 font-medium text-sm flex items-center gap-2"
+                    >
+                        <Upload className="w-4 h-4" /> Importar JSON
+                    </Button>
+
                     <Button 
                         onClick={() => setModals(m => ({ ...m, manual: true }))} 
                         className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-8 py-7 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-blue-900/20 transition-all transform active:scale-95 flex items-center gap-2"
@@ -275,6 +286,17 @@ const MisDatosList = () => {
                 confirmText={isDeleting ? "Borrando..." : "Eliminar de la Nube"}
                 variant="destructive"
             />
+
+            {/* MODAL DE IMPORTACIÓN AÑADIDO */}
+            {modals.import && (
+                <ImportMisDatosForm 
+                    isOpen={modals.import}
+                    onClose={() => {
+                        setModals(m => ({ ...m, import: false }));
+                        loadData(); 
+                    }}
+                />
+            )}
         </div>
     );
 };

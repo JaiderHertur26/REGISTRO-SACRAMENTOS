@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/use-toast';
-import { Pencil, Trash2, Plus, Search } from 'lucide-react';
+import { Pencil, Trash2, Plus, Search, Upload } from 'lucide-react';
+import ImportObisposForm from '@/components/modals/ImportObisposForm';
 
 const ObisposList = () => {
     const { user } = useAuth();
@@ -17,6 +18,7 @@ const ObisposList = () => {
     const [diocesisList, setDiocesisList] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isImportOpen, setIsImportOpen] = useState(false);
     const [currentItem, setCurrentItem] = useState(null);
     const [formData, setFormData] = useState({ nombre: '', apellido: '', diocesis: '', fechaNombramiento: '', email: '' });
 
@@ -40,26 +42,26 @@ const ObisposList = () => {
         setIsModalOpen(true);
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
         if (!formData.nombre || !formData.apellido) {
             toast({ title: 'Error', description: 'Nombre y apellido son requeridos.', variant: 'destructive' });
             return;
         }
 
         if (currentItem) {
-            updateObispo(currentItem.id, formData, user?.parishId);
+            await updateObispo(currentItem.id, formData, user?.parishId);
             toast({ title: 'Éxito', description: 'Obispo actualizado exitosamente.', className: "bg-green-50 border-green-200 text-green-900" });
         } else {
-            addObispo(formData, user?.parishId);
+            await addObispo(formData, user?.parishId);
             toast({ title: 'Éxito', description: 'Obispo agregado exitosamente.', className: "bg-green-50 border-green-200 text-green-900" });
         }
         setIsModalOpen(false);
         loadData();
     };
 
-    const handleDelete = (item) => {
+    const handleDelete = async (item) => {
         if (window.confirm('¿Está seguro de eliminar este obispo?')) {
-            deleteObispo(item.id, user?.parishId);
+            await deleteObispo(item.id, user?.parishId);
             toast({ title: 'Eliminado', description: 'Registro eliminado exitosamente.', className: "bg-green-50 border-green-200 text-green-900" });
             loadData();
         }
@@ -75,21 +77,34 @@ const ObisposList = () => {
 
     return (
         <div className="space-y-4">
-            <div className="flex justify-between items-center mb-4">
-                <div className="relative w-full max-w-sm">
+            <div className="flex flex-col lg:flex-row justify-between items-center mb-4 gap-4">
+                <div className="relative w-full lg:w-1/3">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                     <Input 
                         placeholder="Buscar obispo..." 
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-9"
+                        className="pl-9 w-full"
                     />
                 </div>
-                <div className="flex items-center gap-4">
-                    <div className="text-sm text-gray-500 font-medium hidden sm:block">
+
+                <div className="flex items-center gap-3 w-full lg:w-auto">
+                    <div className="text-sm text-gray-500 font-medium hidden sm:block mr-2">
                         Total: <span className="text-[#111111] font-bold">{filteredItems.length}</span> registros
                     </div>
-                    <Button onClick={() => handleOpenModal()} className="bg-[#4B7BA7] text-white gap-2">
+
+                    <Button 
+                        onClick={() => setIsImportOpen(true)} 
+                        variant="outline"
+                        className="flex-1 lg:flex-none border-gray-200 text-gray-600 hover:bg-gray-50 font-medium text-sm flex items-center gap-2"
+                    >
+                        <Upload className="w-4 h-4" /> Importar JSON
+                    </Button>
+
+                    <Button 
+                        onClick={() => handleOpenModal()} 
+                        className="flex-1 lg:flex-none bg-[#4B7BA7] hover:bg-[#3A6286] text-white flex items-center gap-2"
+                    >
                         <Plus className="w-4 h-4" /> Agregar Obispo
                     </Button>
                 </div>
@@ -184,6 +199,16 @@ const ObisposList = () => {
                     </div>
                 </div>
             </Modal>
+
+            {isImportOpen && (
+                <ImportObisposForm 
+                    isOpen={isImportOpen} 
+                    onClose={() => {
+                        setIsImportOpen(false);
+                        loadData();
+                    }} 
+                />
+            )}
         </div>
     );
 };
