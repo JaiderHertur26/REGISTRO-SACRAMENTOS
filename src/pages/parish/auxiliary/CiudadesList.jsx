@@ -34,9 +34,12 @@ const CiudadesList = () => {
     });
 
     const loadData = () => {
-        if (!user?.dioceseId) return;
+        // 🚀 SOLUCIÓN: Usar parishId si no hay dioceseId
+        const contextId = user?.parishId || user?.dioceseId;
+        if (!contextId) return;
+
         setIsLoading(true);
-        const data = getCiudadesList(user.dioceseId);
+        const data = getCiudadesList(contextId);
         const sortedData = [...data].sort((a, b) => a.nombre.localeCompare(b.nombre));
         setItems(sortedData);
         setIsLoading(false);
@@ -44,7 +47,8 @@ const CiudadesList = () => {
 
     useEffect(() => {
         loadData();
-    }, [user?.dioceseId]);
+    // 🚀 SOLUCIÓN: Agregar parishId a las dependencias
+    }, [user?.dioceseId, user?.parishId]);
 
     const handleOpenModal = (item = null) => {
         if (item) {
@@ -69,7 +73,8 @@ const CiudadesList = () => {
             return;
         }
 
-        const contextId = user.dioceseId; 
+        // 🚀 SOLUCIÓN: Usar el contexto correcto al guardar
+        const contextId = user?.parishId || user?.dioceseId; 
         let result;
 
         if (currentItem) {
@@ -89,7 +94,9 @@ const CiudadesList = () => {
 
     const handleDelete = async (item) => {
         if (window.confirm(`¿Realmente desea eliminar "${item.nombre}"? Esta acción puede afectar registros históricos.`)) {
-            await deleteCiudad(item.id, user.dioceseId);
+            // 🚀 SOLUCIÓN: Usar el contexto correcto al eliminar
+            const contextId = user?.parishId || user?.dioceseId;
+            await deleteCiudad(item.id, contextId);
             toast({ title: 'Registro eliminado', description: 'La ciudad ha sido removida del catálogo.' });
             loadData();
         }
