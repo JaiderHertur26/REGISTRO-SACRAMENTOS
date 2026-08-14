@@ -45,8 +45,8 @@ const SearchBaptismPartidaModal = ({ isOpen, onClose, onSelectPartida }) => {
                                 apellidos.includes(searchName) || 
                                 `${apellidos} ${nombres}`.includes(searchName);
                 
-                // Coincidencia parcial o exacta en números de archivo
-                const matchLibro = !criteria.libro || String(record.book_number || record.libro || '').includes(criteria.libro);
+                // 🚀 CORRECCIÓN: Agregado record.Libro con mayúscula
+                const matchLibro = !criteria.libro || String(record.book_number || record.Libro || record.libro || '').includes(criteria.libro);
                 const matchFolio = !criteria.folio || String(record.page_number || record.folio || '').includes(criteria.folio);
                 const matchNumero = !criteria.numero || String(record.entry_number || record.numero || record.numeroActa || '').includes(criteria.numero);
 
@@ -115,7 +115,8 @@ const SearchBaptismPartidaModal = ({ isOpen, onClose, onSelectPartida }) => {
                         {(row.apellidos || row.lastName || '').trim()} {(row.nombres || row.firstName || '').trim()}
                     </span>
                     <div className="flex items-center gap-3 text-[10px] font-mono text-gray-500 mt-0.5">
-                        <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">LIBRO: {row.book_number || row.libro || '---'}</span>
+                        {/* 🚀 CORRECCIÓN: Agregado row.Libro con mayúscula */}
+                        <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">LIBRO: {row.book_number || row.Libro || row.libro || '---'}</span>
                         <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">FOLIO: {row.page_number || row.folio || '---'}</span>
                         <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">ACTA: {row.entry_number || row.numero || '---'}</span>
                     </div>

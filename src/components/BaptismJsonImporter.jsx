@@ -56,23 +56,25 @@ const BaptismJsonImporter = () => {
                 // Obtener registros existentes en la Nube para evitar duplicados
                 const { data: existingData } = await supabase
                     .from('baptisms')
-                    .select('book_number, page_number, entry_number')
+                    .select('book_number, folio, number') // 🚀 CORRECCIÓN: Nombres de columnas actualizados
                     .eq('parish_id', user.parishId);
 
                 const existingKeys = new Set((existingData || []).map(b => 
-                    `${String(b.book_number).padStart(4, '0')}-${String(b.page_number).padStart(4, '0')}-${String(b.entry_number).padStart(4, '0')}`
+                    `${String(b.book_number).padStart(4, '0')}-${String(b.folio).padStart(4, '0')}-${String(b.number).padStart(4, '0')}` // 🚀 CORRECCIÓN
                 ));
 
                 const processed = [];
                 let duplicates = 0;
 
                 json.data.forEach(item => {
-                    // Mapeo a los campos únicos en español (Ahora con los 3 campos de Registro Civil)
+                    // Mapeo a los campos únicos en español
                     const recordMap = {
                         Libro: String(item.libro || item.Libro || '').padStart(4, '0'),
                         folio: String(item.folio || '').padStart(4, '0'),
                         numero: String(item.numero || '').padStart(4, '0'),
+                        numeroRegistro: item.numeroRegistro || '',
                         fechaSacramento: item.fechaSacramento || '',
+                        horaSacramento: item.horaSacramento || '10:00',
                         lugarBautismo: (item.lugarBautismo || '').toUpperCase(),
                         apellidos: (item.apellidos || '').toUpperCase(),
                         nombres: (item.nombres || '').toUpperCase(),
@@ -86,10 +88,11 @@ const BaptismJsonImporter = () => {
                         cedulaMadre: item.cedulaMadre || '',
                         abuelosPaternos: (item.abuelosPaternos || '').toUpperCase(),
                         abuelosMaternos: (item.abuelosMaternos || '').toUpperCase(),
+                        direccion: (item.direccion || '').toUpperCase(),
                         padrinos: (item.padrinos || '').toUpperCase(),
                         ministro: (item.ministro || '').toUpperCase(),
                         daFe: parrocoActual,
-                        // 🚀 NUEVOS CAMPOS AGREGADOS
+                        notaMarginal: item.notaMarginal || '',
                         serialRegistro: item.serialRegistro || '',
                         nuip: item.nuip || '',
                         oficinaRegistro: item.oficinaRegistro || '',
@@ -130,26 +133,42 @@ const BaptismJsonImporter = () => {
             for (let i = 0; i < recordsToImport.length; i += batchSize) {
                 const batch = recordsToImport.slice(i, i + batchSize);
                 
+                // 🚀 CORRECCIÓN: Inserción 1 a 1 con la nueva estructura de Supabase
                 const dbRecords = batch.map(item => ({
                     id: generateUUID(),
                     parish_id: user.parishId,
+                    book_id: null, // Asumimos null por simplicidad en importación masiva, o puedes resolverlo si tienes la lógica a mano
                     book_number: item.Libro,
-                    page_number: item.folio,
-                    entry_number: item.numero,
-                    first_name: item.nombres,
-                    last_name: item.apellidos,
-                    gender: item.sexo,
-                    birth_date: item.fechaNacimiento || null,
-                    sacrament_date: item.fechaSacramento || null,
-                    father_name: item.nombrePadre,
-                    mother_name: item.nombreMadre,
-                    // Sincronizamos también los campos individuales en la BD si existen las columnas
-                    serial_registro: item.serialRegistro,
-                    nuip: item.nuip,
-                    oficina_registro: item.oficinaRegistro,
-                    fecha_expedicion_registro: item.fechaExpedicionRegistro,
+                    folio: item.folio,
+                    number: item.numero,
+                    numero_registro: item.numeroRegistro || null,
+                    celebration_date: item.fechaSacramento || null,
+                    hora_sacramento: item.horaSacramento || null,
+                    lugar_bautismo: item.lugarBautismo || null,
+                    apellidos: item.apellidos || null,
+                    nombres: item.nombres || null,
+                    sexo: item.sexo || null,
+                    fecha_nacimiento: item.fechaNacimiento || null,
+                    lugar_nacimiento: item.lugarNacimiento || null,
+                    nuip: item.nuip || null,
+                    serial_registro: item.serialRegistro || null,
+                    oficina_registro: item.oficinaRegistro || null,
+                    fecha_expedicion_registro: item.fechaExpedicionRegistro || null,
+                    tipo_union_padres: item.tipoUnionPadres || null,
+                    nombre_padre: item.nombrePadre || null,
+                    cedula_padre: item.cedulaPadre || null,
+                    nombre_madre: item.nombreMadre || null,
+                    cedula_madre: item.cedulaMadre || null,
+                    abuelos_paternos: item.abuelosPaternos || null,
+                    abuelos_maternos: item.abuelosMaternos || null,
+                    direccion: item.direccion || null,
+                    padrinos: item.padrinos || null,
+                    ministro: item.ministro || null,
+                    da_fe: item.daFe || null,
+                    nota_marginal: item.notaMarginal || null,
                     status: 'seated',
-                    raw_data: item // Aquí viaja la cápsula completa de 23 campos
+                    raw_data: item, 
+                    created_at: new Date().toISOString()
                 }));
 
                 const { error } = await supabase.from('baptisms').insert(dbRecords);

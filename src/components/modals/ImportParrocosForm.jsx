@@ -10,12 +10,10 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/components/ui/use-toast';
 import Table from '@/components/ui/Table';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/lib/supabaseClient';
-import { generateUUID } from '@/utils/supabaseHelpers';
 
 const ImportParrocosForm = ({ isOpen, onClose }) => {
   const { user } = useAuth();
-  const { validateJSONStructure, getParrocos } = useAppData();
+  const { validateJSONStructure, getParrocos, importParrocos } = useAppData(); // 🚀 Importamos la función del servicio
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   
@@ -133,7 +131,7 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
     reader.readAsText(selectedFile);
   };
 
-  // --- 2. IMPORTACIÓN FINAL DIRECTA A SUPABASE ---
+  // --- 2. IMPORTACIÓN DELEGADA AL SERVICIO ---
   const handleConfirm = async () => {
       if (!normalizedContent?.length) return;
       
@@ -142,63 +140,16 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
           const parishId = user?.parishId;
           if (!parishId) throw new Error("No se pudo identificar la parroquia actual.");
 
-          // 1. Preparar los registros con IDs únicos
-          const newItems = normalizedContent.map(item => ({
-              ...item,
-              id: generateUUID(),
-              createdAt: new Date().toISOString()
-          }));
+          // 🚀 DELEGAMOS LA INSERCIÓN A SUPABASE AL SERVICIO CENTRAL
+          const result = await importParrocos({ data: normalizedContent }, parishId, false);
 
-          // 2. Empaquetar para Supabase
-          const dbRecords = newItems.map(item => ({
-              id: item.id,
-              parish_id: parishId,
-              payload: item
-          }));
+          if (!result.success) throw new Error(result.message || "Fallo en la importación central.");
 
-          // 3. Insertar masivamente en la Nube
-          const { error: insertError } = await supabase
-              .from('parrocos')
-              .insert(dbRecords);
-
-          if (insertError) throw new Error(insertError.message || "Error al insertar en la base de datos.");
-
-          // 4. Actualizar Memoria Local
-          const key = `parrocos_${parishId}`;
-          const currentData = JSON.parse(localStorage.getItem(key) || '[]');
-          const updatedData = [...currentData, ...newItems];
-          
-          // 5. Reorganizar para definir el estado (Activo/Inactivo) cronológicamente de forma automática
-          const sorted = [...updatedData].sort((a, b) => {
-              const dateA = new Date(a.fechaIngreso || '1900-01-01');
-              const dateB = new Date(b.fechaIngreso || '1900-01-01');
-              return dateB - dateA;
-          });
-
-          const today = new Date().toISOString().split('T')[0];
-          const finalUpdatedList = sorted.map((p, index) => {
-              if (index === 0) return { ...p, estado: "1", fechaSalida: today };
-              const nextMoreRecentPriest = sorted[index - 1];
-              const nextEntryDate = nextMoreRecentPriest.fechaIngreso;
-              return { ...p, estado: "2", fechaSalida: nextEntryDate || p.fechaSalida };
-          });
-
-          localStorage.setItem(key, JSON.stringify(finalUpdatedList));
-
-          // 6. Reflejar cambios de estado "Activo/Inactivo" de vuelta en la Nube
-          const upsertPayload = finalUpdatedList.map(p => ({
-              id: p.id,
-              parish_id: parishId,
-              payload: p
-          }));
-          await supabase.from('parrocos').upsert(upsertPayload, { onConflict: 'id' });
-
-          // 7. Notificar a toda la App (esto actualiza las tablas visualmente al instante)
           window.dispatchEvent(new Event('storage'));
 
           toast({
               title: "¡Historial Actualizado!",
-              description: `${newItems.length} párrocos inyectados correctamente en la Nube.`,
+              description: `${result.count} párrocos inyectados correctamente en la Nube.`,
               className: "bg-green-50 border-green-200 text-green-900"
           });
           handleClose();
