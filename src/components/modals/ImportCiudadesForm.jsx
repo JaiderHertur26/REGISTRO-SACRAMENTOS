@@ -40,8 +40,8 @@ const ImportCiudadesForm = ({ isOpen, onClose }) => {
 
             setJsonContent(json);
             
-            // Contexto Diocesano (SSOT)
-            const targetContextId = user?.dioceseId;
+            // 🚀 SOLUCIÓN: Usar parishId si no hay dioceseId
+            const targetContextId = user?.parishId || user?.dioceseId;
             const existingData = getCiudadesList(targetContextId);
             
             const errors = [];
@@ -89,10 +89,12 @@ const ImportCiudadesForm = ({ isOpen, onClose }) => {
       if (!jsonContent?.data) return;
       
       setLoading(true);
-      const targetContextId = user?.dioceseId;
+      
+      // 🚀 SOLUCIÓN: Usar parishId si no hay dioceseId
+      const targetContextId = user?.parishId || user?.dioceseId;
       
       if (!targetContextId) {
-          toast({ title: "Error de Contexto", description: "No se encontró ID de Diócesis.", variant: "destructive" });
+          toast({ title: "Error de Contexto", description: "No se encontró el ID de su Parroquia o Diócesis.", variant: "destructive" });
           setLoading(false);
           return;
       }
@@ -149,7 +151,7 @@ const ImportCiudadesForm = ({ isOpen, onClose }) => {
                     <MapPin className="w-5 h-5" />
                 </div>
                 <div>
-                    <p className="text-xs font-black text-blue-900 uppercase tracking-widest mb-1">Nivel: Diócesis</p>
+                    <p className="text-xs font-black text-blue-900 uppercase tracking-widest mb-1">Nivel: General</p>
                     <p className="text-[11px] text-blue-700 leading-relaxed font-medium uppercase tracking-tight">
                         Actualice el catálogo maestro de ubicaciones. El sistema normalizará los nombres y evitará registros duplicados automáticamente.
                     </p>
