@@ -38,8 +38,10 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
 
             setJsonContent(json);
 
-            // Manual Validation
-            const existingData = getIglesiasList(user?.parishId);
+            // 🚀 SOLUCIÓN: Usar parishId si no hay dioceseId
+            const contextId = user?.parishId || user?.dioceseId;
+            const existingData = getIglesiasList(contextId);
+            
             const errors = [];
             const warnings = [];
             let validCount = 0;
@@ -48,9 +50,6 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
                 const idx = index + 1;
                 const nombre = (item.Nombre || item.nombre || '').trim();
                 const codigo = (item.Codigo || item.codigo || '').toString().trim();
-
-                // Removed blocking validation for required fields as requested
-                // We now allow incomplete records, only checking for duplicates
 
                 const isDuplicate = existingData.some(ex => 
                     (codigo && ex.codigo === codigo) || 
@@ -81,10 +80,17 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
       
       setLoading(true);
 
-      const existingData = getIglesiasList(user?.parishId);
+      // 🚀 SOLUCIÓN: Usar parishId si no hay dioceseId
+      const contextId = user?.parishId || user?.dioceseId;
+      if (!contextId) {
+          toast({ title: "Error de Contexto", description: "No se encontró el ID de su Parroquia o Diócesis.", variant: "destructive" });
+          setLoading(false);
+          return;
+      }
+
+      const existingData = getIglesiasList(contextId);
       const originalCount = jsonContent.data.length;
       
-      // Filter out duplicates (based on codigo or nombre)
       const filteredData = jsonContent.data.filter(item => {
           const nombre = (item.Nombre || item.nombre || '').trim().toLowerCase();
           const codigo = (item.Codigo || item.codigo || '').toString().trim();
@@ -100,8 +106,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
       
       let result;
       if (filteredData.length > 0) {
-          // Pass only filtered (new) records
-          result = importIglesias({ data: filteredData }, user?.parishId, false);
+          result = importIglesias({ data: filteredData }, contextId, false);
       } else {
           result = { success: true, count: 0, message: "No hay registros nuevos para importar." };
       }

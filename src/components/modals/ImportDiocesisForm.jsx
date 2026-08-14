@@ -38,8 +38,10 @@ const ImportDiocesisForm = ({ isOpen, onClose }) => {
 
             setJsonContent(json);
 
-            // Manual Validation
-            const existingData = getDiocesis(user?.parishId);
+            // 🚀 SOLUCIÓN: Usar parishId si no hay dioceseId
+            const contextId = user?.parishId || user?.dioceseId;
+            const existingData = getDiocesis(contextId);
+            
             const errors = [];
             const warnings = [];
             let validCount = 0;
@@ -80,7 +82,15 @@ const ImportDiocesisForm = ({ isOpen, onClose }) => {
       
       setLoading(true);
 
-      const existingData = getDiocesis(user?.parishId);
+      // 🚀 SOLUCIÓN: Usar parishId si no hay dioceseId
+      const contextId = user?.parishId || user?.dioceseId;
+      if (!contextId) {
+          toast({ title: "Error de Contexto", description: "No se encontró el ID de su Parroquia o Diócesis.", variant: "destructive" });
+          setLoading(false);
+          return;
+      }
+
+      const existingData = getDiocesis(contextId);
       const originalCount = jsonContent.data.length;
       
       const filteredData = jsonContent.data.filter(item => {
@@ -93,7 +103,7 @@ const ImportDiocesisForm = ({ isOpen, onClose }) => {
       let result;
       if (filteredData.length > 0) {
           const filteredJson = { ...jsonContent, data: filteredData };
-          result = importDiocesis(filteredJson, user?.parishId, false);
+          result = importDiocesis(filteredJson, contextId, false);
       } else {
           result = { success: true, count: 0 };
       }
