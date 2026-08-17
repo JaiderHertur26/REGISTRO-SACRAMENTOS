@@ -285,16 +285,21 @@ export const addIglesia = async (item, parishId) => {
         
         const dbRecord = {
             id: newItem.id,
-            name: newItem.nombre || null,
+            parish_id: parishId,
+            codigo: newItem.codigo || null,
+            nombre: newItem.nombre || null,
             nit: newItem.nronit || newItem.nit || null,
-            address: newItem.direccion || null,
-            city: newItem.ciudad || null,
-            phone: newItem.telefono || null,
+            direccion: newItem.direccion || null,
+            ciudad: newItem.ciudad || null,
+            telefono: newItem.telefono || null,
+            fax: newItem.nrofax || newItem.fax || null,
+            email: newItem.email || null,
             parroco: newItem.parroco || null,
+            diocesis: newItem.diocesis || null,
             created_at: newItem.createdAt
         };
 
-        const { error } = await supabase.from('parishes').insert([dbRecord]);
+        const { error } = await supabase.from('iglesias').insert([dbRecord]);
         if (error) throw error;
 
         localStorage.setItem(`iglesias_${parishId}`, JSON.stringify([...list, newItem]));
@@ -345,7 +350,6 @@ export const deleteIglesia = async (id, parishId) => {
         return { success: false, message: "Error al eliminar en BD: " + e.message };
     }
 };
-
 
 // ============================================================================
 // ⛪ OBISPOS (ESPEJO 1 A 1 CON SUPABASE)
@@ -588,6 +592,203 @@ export const deleteDiocesis = async (id, parishId) => {
     }
 };
 
+
+// ============================================================================
+// 📄 MEMBRETES / MIS DATOS (ESPEJO 1 A 1 CON SUPABASE)
+// ============================================================================
+export const getMisDatosList = (contextId) => {
+    if (!contextId) return [];
+    const local = safeJsonParse(localStorage.getItem('mis_datos'), []);
+    const match = local.find(md => String(md.entity_id) === String(contextId));
+    if (!match) return [];
+    let rawPayload = match.payload;
+    if (typeof rawPayload === 'string') rawPayload = safeJsonParse(rawPayload, {});
+    if (Array.isArray(rawPayload)) rawPayload = rawPayload[0] || {};
+    return [{ ...rawPayload, id: match.id }];
+};
+
+export const addMisDatosRecord = async (item, contextId) => {
+    try {
+        if (!contextId) throw new Error("Falta ID de entidad.");
+        const cleanPayload = Array.isArray(item) ? item[0] : item;
+        
+        const dbRecord = {
+            entity_id: contextId,
+            nombre: cleanPayload.nombre || null,
+            idcod: cleanPayload.idcod || null,
+            nronit: cleanPayload.nronit || cleanPayload.nit || null,
+            ciudad: cleanPayload.ciudad || null,
+            direccion: cleanPayload.direccion || null,
+            email: cleanPayload.email || null,
+            telefono: cleanPayload.telefono || null,
+            diocesis: cleanPayload.diocesis || null,
+            vicaria: cleanPayload.vicaria || null,
+            payload: cleanPayload
+        };
+
+        const { data: saved, error } = await supabase.from('mis_datos').insert([dbRecord]).select().single();
+        if (error) throw error;
+        
+        const local = safeJsonParse(localStorage.getItem('mis_datos'), []);
+        localStorage.setItem('mis_datos', JSON.stringify([...local, saved]));
+        return { success: true, message: "Guardado exitosamente" };
+    } catch (error) { 
+        return { success: false, message: error.message }; 
+    }
+};
+
+export const updateMisDatosRecord = async (id, updates, contextId) => {
+    try {
+        const local = safeJsonParse(localStorage.getItem('mis_datos'), []);
+        const current = local.find(md => md.id === id);
+        let oldPayload = current?.payload || {};
+        if (typeof oldPayload === 'string') oldPayload = safeJsonParse(oldPayload, {});
+        if (Array.isArray(oldPayload)) oldPayload = oldPayload[0] || {};
+
+        const cleanUpdates = Array.isArray(updates) ? updates[0] : updates;
+        const updatedPayload = { ...oldPayload, ...cleanUpdates };
+
+        const dbRecord = {
+            nombre: updatedPayload.nombre || null,
+            idcod: updatedPayload.idcod || null,
+            nronit: updatedPayload.nronit || updatedPayload.nit || null,
+            ciudad: updatedPayload.ciudad || null,
+            direccion: updatedPayload.direccion || null,
+            email: updatedPayload.email || null,
+            telefono: updatedPayload.telefono || null,
+            diocesis: updatedPayload.diocesis || null,
+            vicaria: updatedPayload.vicaria || null,
+            payload: updatedPayload
+        };
+
+        const { error } = await supabase.from('mis_datos').update(dbRecord).eq('id', id);
+        if (error) throw error;
+
+        localStorage.setItem('mis_datos', JSON.stringify(local.map(md => md.id === id ? { ...md, payload: updatedPayload } : md)));
+        return { success: true, message: "Actualizado exitosamente" };
+    } catch (error) { 
+        return { success: false, message: error.message }; 
+    }
+};
+
+export const deleteMisDatosRecord = async (id) => {
+    try {
+        const { error } = await supabase.from('mis_datos').delete().eq('id', id);
+        if (error) throw error;
+        const local = safeJsonParse(localStorage.getItem('mis_datos'), []);
+        localStorage.setItem('mis_datos', JSON.stringify(local.filter(md => md.id !== id)));
+        return { success: true, message: "Eliminado exitosamente" };
+    } catch (error) { return { success: false, message: error.message }; }
+};
+
+
+// ============================================================================
+// OTRAS SECCIONES E IMPORTACIONES MASIVAS
+// ============================================================================
+export const getPaises = (parishId) => getAuxData('paises', parishId);
+export const getParroquiasExternas = (parishId) => getAuxData('parroquias_externas', parishId);
+
+export const importDiocesis = () => ({ success: true });
+
+// 🚀 FUNCIÓN REAL PARA IMPORTAR IGLESIAS
+export const importIglesias = async (payload, contextId, append = false) => {
+    if (!contextId) return { success: false, message: "Falta ID de contexto." };
+    try {
+        const key = `iglesias_${contextId}`;
+        const currentData = append ? safeJsonParse(localStorage.getItem(key), []) : [];
+        
+        const newItems = (payload.data || []).map(item => ({
+            ...item,
+            id: generateUUID(),
+            createdAt: new Date().toISOString()
+        }));
+
+        const dbRecords = newItems.map(item => ({
+            id: item.id,
+            parish_id: contextId,
+            codigo: item.codigo || item.Codigo || null,
+            nombre: item.nombre || item.Nombre || null,
+            nit: item.nit || item.nronit || item.Nronit || null,
+            direccion: item.direccion || item.Direccion || null,
+            ciudad: item.ciudad || item.Ciudad || null,
+            telefono: item.telefono || item.Telefono || null,
+            fax: item.nrofax || item.fax || item.Nrofax || null,
+            email: item.email || item.Email || null,
+            parroco: item.parroco || item.Parroco || null,
+            diocesis: item.diocesis || item.Diocesis || null,
+            created_at: item.createdAt
+        }));
+
+        if (dbRecords.length > 0) {
+            const chunkSize = 200;
+            for (let i = 0; i < dbRecords.length; i += chunkSize) {
+                const chunk = dbRecords.slice(i, i + chunkSize);
+                const { error } = await supabase.from('iglesias').insert(chunk);
+                if (error) throw error;
+            }
+        }
+
+        localStorage.setItem(key, JSON.stringify([...currentData, ...newItems]));
+        return { success: true, count: newItems.length };
+    } catch (e) {
+        return { success: false, message: e.message };
+    }
+};
+
+export const importObispos = () => ({ success: true });
+
+// 🚀 FUNCIÓN REAL PARA IMPORTAR MIS DATOS
+export const importMisDatos = async (recordsArray, contextId) => {
+    if (!contextId) return { success: false, message: "Falta ID de entidad." };
+    try {
+        const local = safeJsonParse(localStorage.getItem('mis_datos'), []);
+        
+        const newItemsWithIds = recordsArray.map(item => {
+            const cleanPayload = Array.isArray(item) ? item[0] : item;
+            return {
+                ...cleanPayload,
+                id: generateUUID(),
+                entity_id: contextId
+            };
+        });
+
+        const dbRecords = newItemsWithIds.map(cleanPayload => ({
+            id: cleanPayload.id,
+            entity_id: contextId,
+            nombre: cleanPayload.nombre || null,
+            idcod: cleanPayload.idcod || null,
+            nronit: cleanPayload.nronit || cleanPayload.nit || null,
+            ciudad: cleanPayload.ciudad || null,
+            direccion: cleanPayload.direccion || null,
+            email: cleanPayload.email || null,
+            telefono: cleanPayload.telefono || null,
+            diocesis: cleanPayload.diocesis || null,
+            vicaria: cleanPayload.vicaria || null,
+            payload: cleanPayload
+        }));
+
+        if (dbRecords.length > 0) {
+            const chunkSize = 200;
+            for (let i = 0; i < dbRecords.length; i += chunkSize) {
+                const chunk = dbRecords.slice(i, i + chunkSize);
+                const { error } = await supabase.from('mis_datos').insert(chunk);
+                if (error) throw error;
+            }
+        }
+
+        localStorage.setItem('mis_datos', JSON.stringify([...local, ...newItemsWithIds]));
+        window.dispatchEvent(new Event('storage'));
+        
+        return { success: true, count: newItemsWithIds.length, message: `${newItemsWithIds.length} registros inyectados a la Nube.` };
+    } catch (e) {
+        return { success: false, message: e.message };
+    }
+};
+
+export const importMisDatosLegacy = () => ({ success: true });
+export const importPaises = () => ({ success: true });
+export const importParroquiasExternas = () => ({ success: true });
+export const fetchCatalogsFromSource = async () => [];
 
 export const AppDataProvider = ({ children }) => {
   const [data, setData] = useState({
@@ -976,20 +1177,18 @@ export const AppDataProvider = ({ children }) => {
         addDiocesis: CatalogsService.addDiocesis,
         updateDiocesis: CatalogsService.updateDiocesis,
         deleteDiocesis: CatalogsService.deleteDiocesis,
-        importDiocesis: CatalogsService.importDiocesis,
         
         getIglesias: CatalogsService.getIglesias,
         getIglesiasList: CatalogsService.getIglesiasList,
         addIglesia: CatalogsService.addIglesia,
         updateIglesia: CatalogsService.updateIglesia,
         deleteIglesia: CatalogsService.deleteIglesia,
-        importIglesias: CatalogsService.importIglesias,
+        importIglesias,
 
         getObispos: CatalogsService.getObispos,
         addObispo: CatalogsService.addObispo,
         updateObispo: CatalogsService.updateObispo,
         deleteObispo: CatalogsService.deleteObispo,
-        importObispos: CatalogsService.importObispos,
         getCiudadesList: CatalogsService.getCiudadesList,
         addCiudad: CatalogsService.addCiudad,
         updateCiudad: CatalogsService.updateCiudad,
@@ -1005,7 +1204,7 @@ export const AppDataProvider = ({ children }) => {
         addMisDatos: CatalogsService.addMisDatosRecord,
         updateMisDatos: CatalogsService.updateMisDatosRecord,
         deleteMisDatos: CatalogsService.deleteMisDatosRecord,
-        importMisDatos: CatalogsService.importMisDatos,
+        importMisDatos,
 
         getConceptosAnulacion: DecreesService.getConceptosAnulacion,
         getConceptoAnulacion: DecreesService.getConceptoAnulacion,
@@ -1094,4 +1293,4 @@ export const useAppData = () => {
   const context = useContext(AppDataContext);
   if (!context) throw new Error('useAppData must be used within AppDataProvider');
   return context;
-};
+};"
