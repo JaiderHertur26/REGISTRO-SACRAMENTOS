@@ -28,7 +28,6 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
     setValidationResult(null);
 
     try {
-        // Leemos el archivo de forma asíncrona usando una Promesa para evitar congelamientos
         const textData = await new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (event) => resolve(event.target.result);
@@ -103,44 +102,50 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
       
       setLoading(true);
 
-      const contextId = user?.parishId || user?.dioceseId;
-      if (!contextId) {
-          toast({ title: "Error", description: "Falta el ID de contexto.", variant: "destructive" });
-          setLoading(false);
-          return;
-      }
+      // 🚀 SALVAVIDAS: El bloque try/finally garantiza apagar el loader
+      try {
+          const contextId = user?.parishId || user?.dioceseId;
+          if (!contextId) {
+              throw new Error("Falta el ID de contexto para realizar la importación.");
+          }
 
-      let result;
-      if (jsonContent.data.length > 0) {
-          const cleanData = jsonContent.data.map(item => ({
-              codigo: item.codigo || item.Codigo || null,
-              nombre: item.nombre || item.Nombre || null,
-              nit: item.nronit || item.nit || null,
-              direccion: item.direccion || null,
-              ciudad: item.ciudad || null,
-              telefono: item.telefono || null,
-              fax: item.nrofax || item.fax || null,
-              email: item.email || null,
-              parroco: item.parroco || null,
-              diocesis: item.diocesis || null
-          }));
+          let result;
+          if (jsonContent.data.length > 0) {
+              const cleanData = jsonContent.data.map(item => ({
+                  codigo: item.codigo || item.Codigo || null,
+                  nombre: item.nombre || item.Nombre || null,
+                  nit: item.nronit || item.nit || null,
+                  direccion: item.direccion || null,
+                  ciudad: item.ciudad || null,
+                  telefono: item.telefono || null,
+                  fax: item.nrofax || item.fax || null,
+                  email: item.email || null,
+                  parroco: item.parroco || null,
+                  diocesis: item.diocesis || null
+              }));
 
-          result = await importIglesias({ data: cleanData }, contextId, false);
-      } else {
-          result = { success: true, count: 0, message: "No hay registros nuevos para inyectar." };
-      }
+              result = await importIglesias({ data: cleanData }, contextId, false);
+          } else {
+              result = { success: true, count: 0, message: "No hay registros nuevos para inyectar." };
+          }
 
-      setLoading(false);
+          if (result.success) {
+               toast({
+                   title: "Base de Datos Actualizada",
+                   description: `${result.count} iglesias inyectadas a la Nube.`,
+                   className: "bg-green-50 border-green-200 text-green-900"
+               });
+               handleClose();
+          } else {
+               throw new Error(result.message);
+          }
 
-      if (result.success) {
-           toast({
-               title: "Base de Datos Actualizada",
-               description: `${result.count} iglesias inyectadas a la Nube.`,
-               className: "bg-green-50 border-green-200 text-green-900"
-           });
-           handleClose();
-      } else {
-           toast({ title: "Fallo en Guardado", description: result.message, variant: "destructive" });
+      } catch (err) {
+          console.error("Fallo de inyección:", err);
+          toast({ title: "Fallo en Guardado", description: err.message, variant: "destructive" });
+      } finally {
+          // 🚀 SE APAGA EL LOADER PASE LO QUE PASE
+          setLoading(false); 
       }
   };
 
@@ -186,7 +191,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
             {loading && (
                 <div className="py-16 text-center">
                     <Loader2 className="w-12 h-12 animate-spin text-[#4B7BA7] mx-auto mb-4" />
-                    <p className="font-black text-sm text-gray-500 uppercase tracking-widest">Procesando registros...</p>
+                    <p className="font-black text-sm text-gray-500 uppercase tracking-widest">Analizando e inyectando datos...</p>
                 </div>
             )}
 
@@ -263,7 +268,6 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
   );
 };
 
-// --- COMPONENTES AUXILIARES PARA ESTÉTICA ---
 const StatCard = ({ label, val, color }) => {
     const colors = {
         green: "bg-green-50 border-green-100 text-green-700",
