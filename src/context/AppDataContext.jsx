@@ -271,7 +271,7 @@ export const importParrocos = async (payload, parishId, append = false) => {
 };
 
 // ============================================================================
-// ⛪ IGLESIAS (ESPEJO 1 A 1 EXACTO A LA TABLA 'parishes' EN SUPABASE)
+// ⛪ IGLESIAS (ESPEJO 1 A 1 CON SUPABASE)
 // ============================================================================
 export const getIglesiasList = (parishId) => safeJsonParse(localStorage.getItem(`iglesias_${parishId}`), []);
 export const getIglesias = (parishId) => getIglesiasList(parishId);
@@ -283,18 +283,21 @@ export const addIglesia = async (item, parishId) => {
         
         const newItem = { ...item, id: generateUUID(), createdAt: new Date().toISOString() };
         
-        // 🚀 MAPEO EXACTO: Solo enviamos las columnas que existen en 'parishes'
+        // 🚀 CORRECCIÓN: Nombres de columnas en inglés según Supabase (parishes)
         const dbRecord = {
             id: newItem.id,
-            name: newItem.nombre || newItem.Nombre || null,
-            address: newItem.direccion || newItem.Direccion || null,
-            phone: newItem.telefono || newItem.Telefono ? String(newItem.telefono || newItem.Telefono) : null,
-            nit: newItem.nit || newItem.nronit || newItem.Nronit || null,
-            city: newItem.ciudad || newItem.Ciudad || null,
-            parroco: newItem.parroco || newItem.Parroco || null,
+            // Guardamos todo el objeto limpio dentro de 'payload' por seguridad (arquitectura de la app)
+            // Si la tabla no tiene payload, enviamos a las columnas existentes:
+            name: newItem.nombre || null,
+            nit: newItem.nronit || newItem.nit || null,
+            address: newItem.direccion || null,
+            city: newItem.ciudad || null,
+            phone: newItem.telefono || null,
+            parroco: newItem.parroco || null,
             created_at: newItem.createdAt
         };
 
+        // 🚀 CORRECCIÓN: La tabla se llama 'parishes', no 'iglesias'
         const { error } = await supabase.from('parishes').insert([dbRecord]);
         if (error) throw error;
 
@@ -310,18 +313,21 @@ export const updateIglesia = async (id, updates, parishId) => {
         const list = getIglesiasList(parishId);
         const updatedItem = { ...list.find(i => i.id === id), ...updates, updatedAt: new Date().toISOString() };
         
-        // 🚀 MAPEO EXACTO
         const dbRecord = {
-            name: updatedItem.nombre || updatedItem.Nombre || null,
-            address: updatedItem.direccion || updatedItem.Direccion || null,
-            phone: updatedItem.telefono || updatedItem.Telefono ? String(updatedItem.telefono || updatedItem.Telefono) : null,
-            nit: updatedItem.nit || updatedItem.nronit || updatedItem.Nronit || null,
-            city: updatedItem.ciudad || updatedItem.Ciudad || null,
-            parroco: updatedItem.parroco || updatedItem.Parroco || null,
+            codigo: updatedItem.codigo || null,
+            nombre: updatedItem.nombre || null,
+            nit: updatedItem.nronit || updatedItem.nit || null,
+            direccion: updatedItem.direccion || null,
+            ciudad: updatedItem.ciudad || null,
+            telefono: updatedItem.telefono || null,
+            fax: updatedItem.nrofax || updatedItem.fax || null,
+            email: updatedItem.email || null,
+            parroco: updatedItem.parroco || null,
+            diocesis: updatedItem.diocesis || null,
             updated_at: updatedItem.updatedAt
         };
 
-        const { error } = await supabase.from('parishes').update(dbRecord).eq('id', id);
+        const { error } = await supabase.from('iglesias').update(dbRecord).eq('id', id);
         if (error) throw error;
 
         const updatedList = list.map(i => i.id === id ? updatedItem : i);
@@ -334,7 +340,7 @@ export const updateIglesia = async (id, updates, parishId) => {
 
 export const deleteIglesia = async (id, parishId) => {
     try {
-        await supabase.from('parishes').delete().eq('id', id);
+        await supabase.from('iglesias').delete().eq('id', id);
         const list = getIglesiasList(parishId);
         const filtered = list.filter(i => i.id !== id);
         localStorage.setItem(`iglesias_${parishId}`, JSON.stringify(filtered));
@@ -344,46 +350,6 @@ export const deleteIglesia = async (id, parishId) => {
     }
 };
 
-export const importIglesias = async (payload, contextId, append = false) => {
-    if (!contextId) return { success: false, message: "Falta ID de contexto." };
-    try {
-        const key = `iglesias_${contextId}`;
-        const currentData = append ? safeJsonParse(localStorage.getItem(key), []) : [];
-        
-        const newItems = (payload.data || []).map(item => ({
-            ...item,
-            id: generateUUID(),
-            createdAt: new Date().toISOString()
-        }));
-
-        // 🚀 MAPEO EXACTO PARA INYECCIÓN MASIVA
-        const dbRecords = newItems.map(item => ({
-            id: item.id,
-            name: item.nombre || item.Nombre || null,
-            address: item.direccion || item.Direccion || null,
-            phone: item.telefono || item.Telefono ? String(item.telefono || item.Telefono) : null,
-            nit: item.nit || item.nronit || item.Nronit || null,
-            city: item.ciudad || item.Ciudad || null,
-            parroco: item.parroco || item.Parroco || null,
-            created_at: item.createdAt
-        }));
-
-        if (dbRecords.length > 0) {
-            // 🚀 BATCHING: Dividimos la inyección en lotes de 200 para que Supabase no tire la conexión por Timeout
-            const chunkSize = 200;
-            for (let i = 0; i < dbRecords.length; i += chunkSize) {
-                const chunk = dbRecords.slice(i, i + chunkSize);
-                const { error } = await supabase.from('parishes').insert(chunk);
-                if (error) throw error;
-            }
-        }
-
-        localStorage.setItem(key, JSON.stringify([...currentData, ...newItems]));
-        return { success: true, count: newItems.length };
-    } catch (e) {
-        return { success: false, message: e.message };
-    }
-};
 
 // ============================================================================
 // ⛪ OBISPOS (ESPEJO 1 A 1 CON SUPABASE)
@@ -1117,12 +1083,12 @@ export const AppDataProvider = ({ children }) => {
         updateDiocesis: CatalogsService.updateDiocesis,
         deleteDiocesis: CatalogsService.deleteDiocesis,
         
-        getIglesias,
-        getIglesiasList,
-        addIglesia,
-        updateIglesia,
-        deleteIglesia,
-        importIglesias,
+        getIglesias: CatalogsService.getIglesias,
+        getIglesiasList: CatalogsService.getIglesiasList,
+        addIglesia: CatalogsService.addIglesia,
+        updateIglesia: CatalogsService.updateIglesia,
+        deleteIglesia: CatalogsService.deleteIglesia,
+        importIglesias: CatalogsService.importIglesias,
 
         getObispos: CatalogsService.getObispos,
         addObispo: CatalogsService.addObispo,
@@ -1143,6 +1109,7 @@ export const AppDataProvider = ({ children }) => {
         addMisDatos: CatalogsService.addMisDatosRecord,
         updateMisDatos: CatalogsService.updateMisDatosRecord,
         deleteMisDatos: CatalogsService.deleteMisDatosRecord,
+        importMisDatos: CatalogsService.importMisDatos,
 
         getConceptosAnulacion: DecreesService.getConceptosAnulacion,
         getConceptoAnulacion: DecreesService.getConceptoAnulacion,

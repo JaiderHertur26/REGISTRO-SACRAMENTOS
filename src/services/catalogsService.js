@@ -623,7 +623,63 @@ export const getParroquiasExternas = (parishId) => getAuxData('parroquias_extern
 export const importDiocesis = () => ({ success: true });
 export const importIglesias = () => ({ success: true });
 export const importObispos = () => ({ success: true });
-export const importMisDatos = () => ({ success: true });
+
+// 🚀 IMPORTACIÓN DE MIS DATOS
+export const importMisDatos = async (recordsArray, contextId) => {
+    if (!contextId) return { success: false, message: "Falta ID de entidad." };
+    try {
+        const local = safeJsonParse(localStorage.getItem('mis_datos'), []);
+        
+        // Asignamos IDs y armamos el payload limpio
+        const newItemsWithIds = recordsArray.map(item => {
+            const cleanPayload = Array.isArray(item) ? item[0] : item;
+            return {
+                ...cleanPayload,
+                id: generateUUID(),
+                entity_id: contextId
+            };
+        });
+
+        // Mapeo exacto a las columnas de la tabla 'mis_datos'
+        const dbRecords = newItemsWithIds.map(cleanPayload => ({
+            id: cleanPayload.id,
+            entity_id: contextId,
+            nombre: cleanPayload.nombre || null,
+            idcod: cleanPayload.idcod || null,
+            nronit: cleanPayload.nronit || cleanPayload.nit || null,
+            ciudad: cleanPayload.ciudad || null,
+            direccion: cleanPayload.direccion || null,
+            email: cleanPayload.email || null,
+            telefono: cleanPayload.telefono || null,
+            diocesis: cleanPayload.diocesis || null,
+            vicaria: cleanPayload.vicaria || null,
+            payload: cleanPayload
+        }));
+
+        // Inserción masiva en Supabase (Lotes de 200)
+        if (dbRecords.length > 0) {
+            const chunkSize = 200;
+            for (let i = 0; i < dbRecords.length; i += chunkSize) {
+                const chunk = dbRecords.slice(i, i + chunkSize);
+                const { error } = await supabase.from('mis_datos').insert(chunk);
+                if (error) throw error;
+            }
+        }
+
+        // Actualizamos memoria local
+        localStorage.setItem('mis_datos', JSON.stringify([...local, ...newItemsWithIds]));
+        window.dispatchEvent(new Event('storage'));
+        
+        return { 
+            success: true, 
+            count: newItemsWithIds.length, 
+            message: `${newItemsWithIds.length} registros inyectados a la Nube.` 
+        };
+    } catch (e) {
+        return { success: false, message: e.message };
+    }
+};
+
 export const importMisDatosLegacy = () => ({ success: true });
 export const importPaises = () => ({ success: true });
 export const importParroquiasExternas = () => ({ success: true });
