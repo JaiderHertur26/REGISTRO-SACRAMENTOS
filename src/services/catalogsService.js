@@ -215,23 +215,22 @@ export const addIglesia = async (item, parishId) => {
         
         const newItem = { ...item, id: generateUUID(), createdAt: new Date().toISOString() };
         
+        // 🚀 CORRECCIÓN: Nombres de columnas en inglés según Supabase (parishes)
         const dbRecord = {
             id: newItem.id,
-            parish_id: parishId,
-            codigo: newItem.codigo || null,
-            nombre: newItem.nombre || null,
+            // Guardamos todo el objeto limpio dentro de 'payload' por seguridad (arquitectura de la app)
+            // Si la tabla no tiene payload, enviamos a las columnas existentes:
+            name: newItem.nombre || null,
             nit: newItem.nronit || newItem.nit || null,
-            direccion: newItem.direccion || null,
-            ciudad: newItem.ciudad || null,
-            telefono: newItem.telefono || null,
-            fax: newItem.nrofax || newItem.fax || null,
-            email: newItem.email || null,
+            address: newItem.direccion || null,
+            city: newItem.ciudad || null,
+            phone: newItem.telefono || null,
             parroco: newItem.parroco || null,
-            diocesis: newItem.diocesis || null,
             created_at: newItem.createdAt
         };
 
-        const { error } = await supabase.from('iglesias').insert([dbRecord]);
+        // 🚀 CORRECCIÓN: La tabla se llama 'parishes', no 'iglesias'
+        const { error } = await supabase.from('parishes').insert([dbRecord]);
         if (error) throw error;
 
         localStorage.setItem(`iglesias_${parishId}`, JSON.stringify([...list, newItem]));

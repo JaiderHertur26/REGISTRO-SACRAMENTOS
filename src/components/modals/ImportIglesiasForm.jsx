@@ -19,7 +19,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
   const [validationResult, setValidationResult] = useState(null);
   const [jsonContent, setJsonContent] = useState(null);
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
 
@@ -27,71 +27,75 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
     setPreview(null);
     setValidationResult(null);
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-        try {
-            const json = JSON.parse(event.target.result);
+    try {
+        // Leemos el archivo de forma asíncrona usando una Promesa para evitar congelamientos
+        const textData = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => resolve(event.target.result);
+            reader.onerror = () => reject(new Error("Error físico al leer el archivo."));
+            reader.readAsText(selectedFile);
+        });
+
+        const json = JSON.parse(textData);
+        
+        if (!json || !json.data || !Array.isArray(json.data)) {
+            throw new Error("El archivo no tiene la estructura requerida: { \"data\": [...] }");
+        }
+
+        const contextId = user?.parishId || user?.dioceseId;
+        const existingData = getIglesiasList(contextId) || [];
+        
+        const errors = [];
+        const warnings = [];
+        let validCount = 0;
+        const validData = [];
+
+        json.data.forEach((item, index) => {
+            const idx = index + 1;
             
-            if (!json || !json.data || !Array.isArray(json.data)) {
-                throw new Error("El archivo no tiene la estructura requerida: { \"data\": [...] }");
+            if (!item || typeof item !== 'object') {
+                warnings.push(`Fila ${idx}: Omitida (Fila completamente vacía o corrupta).`);
+                return; 
             }
 
-            const contextId = user?.parishId || user?.dioceseId;
-            const existingData = getIglesiasList(contextId) || [];
+            const nombreRaw = item.Nombre || item.nombre || '';
+            const codigoRaw = item.Codigo || item.codigo || '';
             
-            const errors = [];
-            const warnings = [];
-            let validCount = 0;
-            const validData = [];
+            const nombre = String(nombreRaw).trim();
+            const codigo = String(codigoRaw).trim();
 
-            json.data.forEach((item, index) => {
-                const idx = index + 1;
-                
-                if (!item || typeof item !== 'object') {
-                    // 🚀 STRING, NO OBJETO
-                    warnings.push(`Fila ${idx}: Omitida (Fila completamente vacía o corrupta).`);
-                    return; 
-                }
+            if (!nombre) {
+                warnings.push(`Fila ${idx}: Omitida (La iglesia no tiene nombre asignado).`);
+                return; 
+            }
 
-                const nombreRaw = item.Nombre || item.nombre || '';
-                const codigoRaw = item.Codigo || item.codigo || '';
-                
-                const nombre = String(nombreRaw).trim();
-                const codigo = String(codigoRaw).trim();
-
-                if (!nombre) {
-                    warnings.push(`Fila ${idx}: Omitida (La iglesia no tiene nombre asignado).`);
-                    return; 
-                }
-
-                const isDuplicate = existingData.some(ex => {
-                    if (!ex) return false;
-                    const matchCodigo = (codigo && ex.codigo && String(ex.codigo) === codigo);
-                    const matchNombre = (ex.nombre && String(ex.nombre).toLowerCase() === nombre.toLowerCase());
-                    return matchCodigo || matchNombre;
-                });
-                
-                if (isDuplicate) {
-                    warnings.push(`Fila ${idx}: Omitida "${nombre}" (Ya existe en sistema).`);
-                } else {
-                    validCount++;
-                    validData.push(item);
-                }
+            const isDuplicate = existingData.some(ex => {
+                if (!ex) return false;
+                const matchCodigo = (codigo && ex.codigo && String(ex.codigo) === codigo);
+                const matchNombre = (ex.nombre && String(ex.nombre).toLowerCase() === nombre.toLowerCase());
+                return matchCodigo || matchNombre;
             });
+            
+            if (isDuplicate) {
+                warnings.push(`Fila ${idx}: Omitida "${nombre}" (Ya existe en sistema).`);
+            } else {
+                validCount++;
+                validData.push(item);
+            }
+        });
 
-            setJsonContent({ data: validData });
-            setValidationResult({ count: validCount, errors, warnings });
-            setPreview(validData.slice(0, 5));
+        setJsonContent({ data: validData });
+        setValidationResult({ count: validCount, errors, warnings });
+        setPreview(validData.slice(0, 5));
 
-        } catch (err) {
-            console.error(err);
-            toast({ title: "Error de Lectura", description: err.message, variant: "destructive" });
-            setValidationResult({ count: 0, errors: [err.message], warnings: [] });
-        } finally {
-            setLoading(false);
-        }
-    };
-    reader.readAsText(selectedFile);
+    } catch (err) {
+        console.error(err);
+        toast({ title: "Error de Lectura", description: err.message, variant: "destructive" });
+        setValidationResult({ count: 0, errors: [err.message], warnings: [] });
+    } finally {
+        setLoading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handleConfirm = async () => {
@@ -182,7 +186,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
             {loading && (
                 <div className="py-16 text-center">
                     <Loader2 className="w-12 h-12 animate-spin text-[#4B7BA7] mx-auto mb-4" />
-                    <p className="font-black text-sm text-gray-500 uppercase tracking-widest">Analizando y purificando datos...</p>
+                    <p className="font-black text-sm text-gray-500 uppercase tracking-widest">Procesando registros...</p>
                 </div>
             )}
 
