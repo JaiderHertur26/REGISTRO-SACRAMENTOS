@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
 import { 
     Pencil, Trash2, Search, Plus, Eye, 
-    Eraser, Building2, ShieldCheck, Database, 
-    Loader2, Globe, LayoutGrid, Upload 
+    Eraser, Building2, ShieldCheck, 
+    Loader2, Globe, Upload 
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -17,14 +17,15 @@ import ManualMisDatosModal from '@/components/modals/ManualMisDatosModal';
 import ViewMisDatosModal from '@/components/modals/ViewMisDatosModal';
 import ImportMisDatosForm from '@/components/modals/ImportMisDatosForm';
 
-import { 
-    getMisDatosFromLocalStorage, 
-    saveMisDatosToLocalStorage, 
-    clearMisDatosFromLocalStorage 
-} from '@/utils/misDatosStorageHelper';
-
 const MisDatosList = () => {
     const { user } = useAuth();
+    const { 
+        getMisDatosList, 
+        addMisDatosRecord, 
+        updateMisDatosRecord, 
+        deleteMisDatosRecord 
+    } = useAppData();
+    
     const { toast } = useToast();
 
     const [items, setItems] = useState([]);
@@ -38,61 +39,47 @@ const MisDatosList = () => {
         view: false,
         edit: false,
         delete: false,
-        import: false // Agregado el estado para el modal de importación
+        import: false 
     });
     const [selectedRecord, setSelectedRecord] = useState(null);
 
     const entityId = user?.parishId || user?.dioceseId || 'default';
 
-    // --- 1. CARGA Y SINCRONIZACIÓN CON LA NUBE ---
+    // --- 1. CARGA DE DATOS CENTRALIZADA ---
     const loadData = async () => {
         setIsLoading(true);
         try {
-            // Traemos los datos que ya están en Supabase (vía el helper)
-            let cloudData = await getMisDatosFromLocalStorage(entityId) || [];
-            
-            // --- RESCATE DE DATOS LOCALES (MIGRACIÓN) ---
-            const savedManualData = localStorage.getItem('misDatos_manual_records');
-            if (savedManualData) {
-                const manualData = JSON.parse(savedManualData);
-                let needsSync = false;
-                
-                manualData.forEach(manualItem => {
-                    if (!cloudData.some(item => item.id === manualItem.id)) {
-                        cloudData.push(manualItem);
-                        needsSync = true;
-                    }
-                });
-                
-                if (needsSync) {
-                    await saveMisDatosToLocalStorage(cloudData, entityId);
-                }
-                localStorage.removeItem('misDatos_manual_records'); // Limpiar rastro local
-            }
-            
-            setItems(cloudData);
+            // Obtenemos los datos directamente de la función provista por el Contexto
+            const data = await getMisDatosList(entityId);
+            setItems(data || []);
         } catch (error) {
-            toast({ title: 'Error de Red', description: 'No se pudo conectar con la base de datos.', variant: 'destructive' });
+            console.error("Error cargando Mis Datos:", error);
+            toast({ title: 'Error de Red', description: 'No se pudo cargar la información.', variant: 'destructive' });
         } finally {
             setIsLoading(false);
         }
     };
 
     useEffect(() => {
-        if (entityId) loadData();
+        if (entityId) {
+            loadData();
+        }
     }, [entityId]);
 
     // --- 2. ACCIONES DE GESTIÓN ---
     const handleSaveManual = async (newData) => {
         setIsLoading(true);
         try {
-            const updatedItems = [...items, newData];
-            await saveMisDatosToLocalStorage(updatedItems, entityId);
-            setItems(updatedItems);
-            setModals(m => ({ ...m, manual: false }));
-            toast({ title: 'Guardado', description: 'Registro inyectado en la Nube.', className: "bg-green-50 text-green-900 border-green-200" });
+            const result = await addMisDatosRecord(newData, entityId);
+            if (result.success) {
+                toast({ title: 'Guardado', description: 'Registro creado exitosamente.', className: "bg-green-50 text-green-900 border-green-200" });
+                setModals(m => ({ ...m, manual: false }));
+                await loadData();
+            } else {
+                throw new Error(result.message);
+            }
         } catch (e) {
-            toast({ title: 'Fallo al Guardar', variant: 'destructive' });
+            toast({ title: 'Fallo al Guardar', description: e.message, variant: 'destructive' });
         } finally {
             setIsLoading(false);
         }
@@ -101,11 +88,16 @@ const MisDatosList = () => {
     const handleEditSave = async (updatedData) => {
         setIsLoading(true);
         try {
-            const newItems = items.map(item => item.id === updatedData.id ? { ...updatedData } : item);
-            await saveMisDatosToLocalStorage(newItems, entityId);
-            setItems(newItems);
-            setModals(m => ({ ...m, edit: false }));
-            toast({ title: 'Actualizado', description: 'Cambios sincronizados exitosamente.' });
+            const result = await updateMisDatosRecord(updatedData.id, updatedData, entityId);
+            if (result.success) {
+                toast({ title: 'Actualizado', description: 'Cambios sincronizados exitosamente.' });
+                setModals(m => ({ ...m, edit: false }));
+                await loadData();
+            } else {
+                 throw new Error(result.message);
+            }
+        } catch (e) {
+            toast({ title: 'Fallo al Actualizar', description: e.message, variant: 'destructive' });
         } finally {
             setIsLoading(false);
         }
@@ -115,10 +107,15 @@ const MisDatosList = () => {
         if (!selectedRecord) return;
         setIsDeleting(true);
         try {
-            const newItems = items.filter(item => item.id !== selectedRecord.id);
-            await saveMisDatosToLocalStorage(newItems, entityId);
-            setItems(newItems);
-            toast({ title: 'Eliminado', description: 'El registro fue borrado de la Nube.' });
+            const result = await deleteMisDatosRecord(selectedRecord.id);
+            if (result.success) {
+                 toast({ title: 'Eliminado', description: 'El registro fue borrado exitosamente.' });
+                 await loadData();
+            } else {
+                 throw new Error(result.message);
+            }
+        } catch (e) {
+            toast({ title: 'Error al Eliminar', description: e.message, variant: 'destructive' });
         } finally {
             setIsDeleting(false);
             setSelectedRecord(null);
@@ -155,17 +152,15 @@ const MisDatosList = () => {
                     <Button 
                         variant="ghost"
                         onClick={() => {
-                            if(window.confirm("¿Vaciar toda la base de datos de membretes?")) {
-                                clearMisDatosFromLocalStorage(entityId);
-                                setItems([]);
+                            if(window.confirm("Esta acción ha sido deshabilitada temporalmente por seguridad.")) {
+                               // Funcionalidad de borrado masivo desactivada para evitar desastres en Supabase
                             }
                         }}
-                        className="text-red-400 hover:text-red-600 font-black uppercase tracking-widest text-[10px]"
+                        className="text-red-400 hover:text-red-600 font-black uppercase tracking-widest text-[10px] hidden"
                     >
                         <Eraser className="w-4 h-4 mr-2" /> Limpiar Todo
                     </Button>
 
-                    {/* BOTÓN DE IMPORTACIÓN AÑADIDO */}
                     <Button 
                         onClick={() => setModals(m => ({ ...m, import: true }))} 
                         variant="outline"
@@ -188,7 +183,7 @@ const MisDatosList = () => {
                 {isLoading && (
                     <div className="absolute inset-0 bg-white/80 z-20 flex flex-col items-center justify-center">
                         <Loader2 className="w-10 h-10 animate-spin text-[#4B7BA7] mb-4" />
-                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Sincronizando con Supabase...</p>
+                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Cargando...</p>
                     </div>
                 )}
 
@@ -256,7 +251,6 @@ const MisDatosList = () => {
                 </div>
             </div>
 
-            {/* MODALES PURIFICADOS */}
             <ManualMisDatosModal 
                 isOpen={modals.manual} 
                 onClose={() => setModals(m => ({ ...m, manual: false }))} 
@@ -283,11 +277,10 @@ const MisDatosList = () => {
                 message={`Estás a punto de borrar "${selectedRecord?.nombre}". Esto afectará a los documentos generados con este perfil.`}
                 onConfirm={handleDeleteConfirm}
                 onClose={() => setModals(m => ({ ...m, delete: false }))}
-                confirmText={isDeleting ? "Borrando..." : "Eliminar de la Nube"}
+                confirmText={isDeleting ? "Borrando..." : "Eliminar Definitivamente"}
                 variant="destructive"
             />
 
-            {/* MODAL DE IMPORTACIÓN AÑADIDO */}
             {modals.import && (
                 <ImportMisDatosForm 
                     isOpen={modals.import}
