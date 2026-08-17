@@ -18,7 +18,8 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
   const [validationResult, setValidationResult] = useState(null);
   const [jsonContent, setJsonContent] = useState(null);
 
-  const handleFileChange = (e) => {
+  // 🚀 MOTOR MODERNO BASADO EN PROMESAS (A PRUEBA DE BLOQUEOS)
+  const handleFileChange = async (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
 
@@ -26,76 +27,83 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
     setPreview(null);
     setValidationResult(null);
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-        // Le damos un respiro a la interfaz para que muestre el "Cargando..." antes de procesar
-        setTimeout(() => {
-            try {
-                const json = JSON.parse(event.target.result);
-                
-                if (!json || !json.data || !Array.isArray(json.data)) {
-                    throw new Error("El archivo no tiene la estructura requerida: { \"data\": [...] }");
-                }
+    try {
+        // 1. Damos tiempo a la UI para que pinte la pantalla de carga
+        await new Promise(resolve => setTimeout(resolve, 50));
 
-                const contextId = user?.parishId || user?.dioceseId;
-                const existingData = getIglesiasList(contextId) || [];
-                
-                const errors = [];
-                const warnings = [];
-                let validCount = 0;
-                const validData = [];
+        // 2. Leemos el archivo encapsulado en una Promesa para atrapar CUALQUIER error
+        const textData = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => resolve(event.target.result);
+            reader.onerror = () => reject(new Error("Fallo físico al leer el archivo desde su computadora."));
+            reader.readAsText(selectedFile);
+        });
 
-                json.data.forEach((item, index) => {
-                    const idx = index + 1;
-                    
-                    // 🛡️ PROTECCIÓN ANTI-CONGELAMIENTO: Si la fila es nula o vacía, la omitimos.
-                    if (!item || typeof item !== 'object') {
-                        warnings.push({ index: idx, message: `Fila ${idx}: Omitida (Fila completamente vacía o corrupta).` });
-                        return; 
-                    }
+        // 3. Parseamos y Validamos
+        const json = JSON.parse(textData);
+        if (!json || !json.data || !Array.isArray(json.data)) {
+            throw new Error("El archivo no tiene la estructura requerida: { \"data\": [...] }");
+        }
 
-                    // Extraemos tolerando nulos
-                    const nombreRaw = item.Nombre || item.nombre || '';
-                    const codigoRaw = item.Codigo || item.codigo || '';
-                    
-                    const nombre = String(nombreRaw).trim();
-                    const codigo = String(codigoRaw).trim();
+        const contextId = user?.parishId || user?.dioceseId;
+        const existingData = getIglesiasList(contextId) || [];
+        
+        const errors = [];
+        const warnings = [];
+        let validCount = 0;
+        const validData = [];
 
-                    if (!nombre) {
-                        warnings.push({ index: idx, message: `Fila ${idx}: Omitida (No tiene nombre asignado).` });
-                        return; // Pasa silenciosamente a los "Omitidos" y no bloquea
-                    }
-
-                    // Verificación de duplicados a prueba de fallos
-                    const isDuplicate = existingData.some(ex => {
-                        if (!ex) return false;
-                        const matchCodigo = (codigo && ex.codigo && String(ex.codigo) === codigo);
-                        const matchNombre = (ex.nombre && String(ex.nombre).toLowerCase() === nombre.toLowerCase());
-                        return matchCodigo || matchNombre;
-                    });
-                    
-                    if (isDuplicate) {
-                        warnings.push({ index: idx, message: `Fila ${idx}: Omitida "${nombre}" (Ya existe en sistema).` });
-                    } else {
-                        validCount++;
-                        validData.push(item);
-                    }
-                });
-
-                setJsonContent({ data: validData });
-                setValidationResult({ count: validCount, errors, warnings });
-                setPreview(validData.slice(0, 5));
-
-            } catch (err) {
-                console.error(err);
-                toast({ title: "Error de Lectura", description: err.message, variant: "destructive" });
-                setValidationResult({ count: 0, errors: [{ message: err.message }], warnings: [] });
-            } finally {
-                setLoading(false);
+        // 4. Analizamos fila por fila tolerando errores y nulos
+        json.data.forEach((item, index) => {
+            const idx = index + 1;
+            
+            // Protección contra filas completamente en blanco
+            if (!item || typeof item !== 'object') {
+                warnings.push({ index: idx, message: `Fila ${idx}: Omitida (Registro corrupto o completamente vacío).` });
+                return; 
             }
-        }, 100);
-    };
-    reader.readAsText(selectedFile);
+
+            const nombreRaw = item.Nombre || item.nombre || '';
+            const codigoRaw = item.Codigo || item.codigo || '';
+            
+            const nombre = String(nombreRaw).trim();
+            const codigo = String(codigoRaw).trim();
+
+            if (!nombre) {
+                warnings.push({ index: idx, message: `Fila ${idx}: Omitida (La iglesia no tiene nombre asignado).` });
+                return; 
+            }
+
+            const isDuplicate = existingData.some(ex => {
+                if (!ex) return false;
+                const matchCodigo = (codigo && ex.codigo && String(ex.codigo) === codigo);
+                const matchNombre = (ex.nombre && String(ex.nombre).toLowerCase() === nombre.toLowerCase());
+                return matchCodigo || matchNombre;
+            });
+            
+            if (isDuplicate) {
+                warnings.push({ index: idx, message: `Fila ${idx}: Omitida "${nombre}" (Ya existe en su base de datos).` });
+            } else {
+                validCount++;
+                validData.push(item);
+            }
+        });
+
+        // 5. Presentamos Resultados
+        setJsonContent({ data: validData });
+        setValidationResult({ count: validCount, errors, warnings });
+        setPreview(validData.slice(0, 5));
+
+    } catch (err) {
+        console.error("Error en motor de carga:", err);
+        toast({ title: "Error de Procesamiento", description: err.message, variant: "destructive" });
+        setValidationResult({ count: 0, errors: [{ message: err.message }], warnings: [] });
+    } finally {
+        // ¡GARANTIZADO! PASE LO QUE PASE, EL ESTADO DE CARGA SE APAGA.
+        setLoading(false);
+        // Limpiamos el input file para permitir subir el mismo archivo otra vez si hubo error
+        if (fileInputRef.current) fileInputRef.current.value = ''; 
+    }
   };
 
   const handleConfirm = async () => {
@@ -105,14 +113,14 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
 
       const contextId = user?.parishId || user?.dioceseId;
       if (!contextId) {
-          toast({ title: "Error", description: "Falta el ID de contexto de la parroquia.", variant: "destructive" });
+          toast({ title: "Error de Permisos", description: "No se encontró el ID de su Parroquia.", variant: "destructive" });
           setLoading(false);
           return;
       }
 
       let result;
       if (jsonContent.data.length > 0) {
-          // Limpiamos los nulos para Supabase
+          // Limpiamos nulos para la inyección SQL a Supabase
           const cleanData = jsonContent.data.map(item => ({
               codigo: item.codigo || item.Codigo || null,
               nombre: item.nombre || item.Nombre || null,
@@ -128,7 +136,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
 
           result = await importIglesias({ data: cleanData }, contextId, false);
       } else {
-          result = { success: true, count: 0, message: "No hay registros nuevos para inyectar." };
+          result = { success: true, count: 0, message: "No hay registros nuevos para inyectar. Todos fueron omitidos." };
       }
 
       setLoading(false);
@@ -136,7 +144,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
       if (result.success) {
            toast({
                title: "Base de Datos Actualizada",
-               description: `${result.count} iglesias inyectadas a la Nube.`,
+               description: result.message || `${result.count} iglesias inyectadas a la Nube.`,
                className: "bg-green-50 border-green-200 text-green-900"
            });
            handleClose();
@@ -171,7 +179,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
                 <Database className="w-5 h-5 text-blue-600 shrink-0" />
                 <div>
                     <h4 className="text-xs font-black text-blue-900 uppercase tracking-widest">Motor de Inyección</h4>
-                    <p className="text-[11px] text-blue-700 leading-tight mt-1">El sistema omitirá registros duplicados o sin nombre. Asegúrese de que el archivo JSON tenga la llave "data".</p>
+                    <p className="text-[11px] text-blue-700 leading-tight mt-1">El sistema omitirá registros duplicados o corruptos. Asegúrese de que el archivo JSON tenga la llave "data".</p>
                 </div>
             </div>
 
@@ -187,7 +195,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
             {loading && (
                 <div className="py-16 text-center">
                     <Loader2 className="w-12 h-12 animate-spin text-[#4B7BA7] mx-auto mb-4" />
-                    <p className="font-black text-sm text-gray-500 uppercase tracking-widest">Procesando registros...</p>
+                    <p className="font-black text-sm text-gray-500 uppercase tracking-widest">Analizando y purificando datos...</p>
                 </div>
             )}
 
@@ -212,7 +220,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
                          {preview && preview.length > 0 && (
                             <div className="border border-gray-100 rounded-3xl overflow-hidden shadow-sm bg-white mb-4 w-full">
                                 <div className="bg-gray-50 px-6 py-3 border-b border-gray-100">
-                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Vista Previa de Limpieza</span>
+                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Vista Previa de Limpieza (5 primeros)</span>
                                 </div>
                                 <Table columns={columns} data={preview} />
                             </div>
