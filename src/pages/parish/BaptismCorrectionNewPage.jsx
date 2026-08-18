@@ -8,26 +8,37 @@ import { useToast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { Save, ArrowLeft, FileText, UserPlus, AlertCircle, CheckCircle2, Search, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 import { supabase } from '@/lib/supabaseClient';
-import { marginalNotesEngine } from '@/utils/marginalNotesEngine';
+import { marginalNotesEngine } from '@/utils/marginalNotesEngine'; 
 
 const BaptismCorrectionNewPage = () => {
   const { user } = useAuth();
-  const { createBaptismCorrection, getParrocoActual, getMisDatosList } = useAppData();
+  const {
+    getConfirmations,
+    getMatrimonios,
+    createBaptismCorrection,
+    getParrocoActual,
+    getMisDatosList,
+    getConceptosAnulacion
+  } = useAppData();
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  // --- STATE MANAGEMENT ---
   const [isLoading, setIsLoading] = useState(false);
   const [cloudParams, setCloudParams] = useState({});
-  const [conceptos, setConceptos] = useState([]);
 
+  // --- BAPTISM STATE ---
   const [decreeData, setDecreeData] = useState({
     parroquia: '',
     numeroDeDecreto: '',
     fechaEmision: new Date().toISOString().split('T')[0],
     conceptoAnulacion: '',
     nombreBautizado: '',
-    Libro: '', folio: '', numero: ''
+    Libro: '',
+    folio: '',
+    numero: ''
   });
 
   const [foundRecord, setFoundRecord] = useState(null);
@@ -37,50 +48,140 @@ const BaptismCorrectionNewPage = () => {
   const wrapperRef = useRef(null);
 
   const [newPartida, setNewPartida] = useState({
-    lugarBautismo: '', fechaSacramento: '', apellidos: '', nombres: '',
-    fechaNacimiento: '', lugarNacimiento: '', sexo: '', nombrePadre: '',
-    nombreMadre: '', tipoUnionPadres: '', abuelosPaternos: '', abuelosMaternos: '',
-    padrinos: '', ministro: '', daFe: '', observaciones: ''
+    lugarBautismo: '',
+    fechaSacramento: '',
+    apellidos: '',
+    nombres: '',
+    fechaNacimiento: '',
+    lugarNacimiento: '',
+    sexo: '', 
+    nombrePadre: '',
+    nombreMadre: '',
+    tipoUnionPadres: '', 
+    abuelosPaternos: '',
+    abuelosMaternos: '',
+    padrinos: '',
+    ministro: '',
+    daFe: '',
+    observaciones: ''
   });
 
+  // --- CONFIRMATION STATE ---
+  const [confDecreeData, setConfDecreeData] = useState({
+    parroquia: '', decreeNumber: '', decreeDate: new Date().toISOString().split('T')[0],
+    conceptoAnulacionId: '', targetName: '', book: '', page: '', entry: ''
+  });
+
+  const [confFoundRecord, setConfFoundRecord] = useState(null);
+  const [confSearchMessage, setConfSearchMessage] = useState(null);
+  const [confSuggestions, setConfSuggestions] = useState([]);
+  const [showConfSuggestions, setShowConfSuggestions] = useState(false);
+  const confWrapperRef = useRef(null);
+
+  const [newConfPartida, setNewConfPartida] = useState({
+    sacramentDate: '', firstName: '', lastName: '', birthDate: '',
+    lugarNacimientoDetalle: '', lugarConfirmacion: '', fatherName: '', motherName: '',
+    padrino: '', madrina: '', minister: '', ministerFaith: ''
+  });
+
+  // --- MARRIAGE STATE ---
+  const [marDecreeData, setMarDecreeData] = useState({
+    parroquia: '', decreeNumber: '', decreeDate: new Date().toISOString().split('T')[0],
+    conceptoAnulacionId: '', targetName: '', book: '', page: '', entry: ''
+  });
+
+  const [marFoundRecord, setMarFoundRecord] = useState(null);
+  const [marSearchMessage, setMarSearchMessage] = useState(null);
+  const [marSuggestions, setMarSuggestions] = useState([]);
+  const [showMarSuggestions, setShowMarSuggestions] = useState(false);
+  const marWrapperRef = useRef(null);
+
+  const [newMarPartida, setNewMarPartida] = useState({
+    sacramentDate: '', lugarMatrimonio: '', husbandName: '', husbandSurname: '',
+    husbandBirthDate: '', husbandPlaceOfBirth: '', husbandFather: '', husbandMother: '',
+    wifeName: '', wifeSurname: '', wifeBirthDate: '', wifePlaceOfBirth: '',
+    wifeFather: '', wifeMother: '', witnesses: '', minister: '', ministerFaith: ''
+  });
+
+  const [conceptos, setConceptos] = useState([]);
+
+  // --- INITIALIZATION ---
   useEffect(() => {
     const initializeData = async () => {
       if (!user) return;
+
       try {
         if (user.parishId) {
           const misDatos = getMisDatosList(user.parishId);
-          let parishLabel = misDatos?.length > 0 ? `${misDatos[0].nombre} - ${misDatos[0].ciudad}` : `${user.parishName} - ${user.city}`;
+          let parishLabel = '';
+
+          if (misDatos && misDatos.length > 0) {
+            const dato = misDatos[0];
+            const nombre = dato.nombre || user.parishName || 'Parroquia';
+            const ciudad = dato.ciudad || user.city || 'Ciudad';
+            parishLabel = `${nombre} - ${ciudad}`;
+          } else {
+            parishLabel = `${user.parishName || 'Parroquia'} - ${user.city || 'Ciudad'}`;
+          }
+
           setDecreeData(prev => ({ ...prev, parroquia: parishLabel }));
+          setConfDecreeData(prev => ({ ...prev, parroquia: parishLabel }));
+          setMarDecreeData(prev => ({ ...prev, parroquia: parishLabel }));
 
           const priest = getParrocoActual(user.parishId);
-          if (priest) setNewPartida(prev => ({ ...prev, daFe: `${priest.nombre} ${priest.apellido || ''}`.trim() }));
+          if (priest) {
+            const priestName = `${priest.nombre} ${priest.apellido || ''}`.trim();
+            setNewPartida(prev => ({ ...prev, daFe: priestName }));
+            setNewConfPartida(prev => ({ ...prev, ministerFaith: priestName }));
+            setNewMarPartida(prev => ({ ...prev, ministerFaith: priestName }));
+          }
 
-          const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
-          if (paramsData?.bautizos_params) setCloudParams(paramsData.bautizos_params);
+          const { data: paramsData } = await supabase
+            .from('parish_parameters')
+            .select('bautizos_params')
+            .eq('parish_id', user.parishId)
+            .maybeSingle();
+
+          if (paramsData && paramsData.bautizos_params) {
+            setCloudParams(paramsData.bautizos_params);
+          }
+
+          const allConcepts = getConceptosAnulacion(user.parishId) || [];
+          setConceptos(allConcepts.filter(c => 
+              c.tipo === 'porCorreccion' || 
+              (c.concepto && c.concepto.toLowerCase().includes('correcc'))
+          ));
         }
 
-        // 🚀 CONSULTA A LA NUBE PARA CONCEPTOS DE CORRECCIÓN
-        const { data: conceptosData, error: conceptosError } = await supabase
-            .from('conceptos_anulacion')
-            .select('id, codigo, concepto')
-            .ilike('tipo', '%Correccion%');
-
-        if (!conceptosError && conceptosData) setConceptos(conceptosData);
-
       } catch (error) {
-        console.error("Error inicializando:", error);
+        console.error("❌ Error general al inicializar:", error);
+        toast({
+          title: "Error",
+          description: "No se pudieron cargar los conceptos de corrección.",
+          variant: "destructive"
+        });
       }
     };
+
     initializeData();
-  }, [user, getParrocoActual, getMisDatosList]);
+  }, [user, getParrocoActual, getMisDatosList, getConceptosAnulacion, toast]);
 
   useEffect(() => {
     function handleClickOutside(event) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setShowSuggestions(false);
+      if (confWrapperRef.current && !confWrapperRef.current.contains(event.target)) setShowConfSuggestions(false);
+      if (marWrapperRef.current && !marWrapperRef.current.contains(event.target)) setShowMarSuggestions(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [wrapperRef]);
+  }, [wrapperRef, confWrapperRef, marWrapperRef]);
+
+  const getSafeValue = (obj, ...keys) => {
+    for (const key of keys) {
+      if (obj[key] !== undefined && obj[key] !== null) return obj[key];
+    }
+    return '';
+  };
 
   const handleDecreeChange = async (e) => {
     const { name, value } = e.target;
@@ -91,7 +192,8 @@ const BaptismCorrectionNewPage = () => {
       setSearchMessage(null);
     }
 
-    if (name === 'nombreBautizado' && value.length > 2) {
+    if (name === 'nombreBautizado') {
+      if (value.length > 2) {
         try {
           const { data, error } = await supabase
             .from('baptisms')
@@ -100,133 +202,429 @@ const BaptismCorrectionNewPage = () => {
             .ilike('nombres', `%${value}%`)
             .limit(5);
 
-          if (!error && data) {
-            setSuggestions(data.map(d => ({ ...d.raw_data, id: d.id, firstName: d.nombres, lastName: d.apellidos })));
-            setShowSuggestions(true);
-          }
-        } catch (error) { setSuggestions([]); setShowSuggestions(false); }
-    } else if (name === 'nombreBautizado') {
-        setSuggestions([]); setShowSuggestions(false);
+          if (error) throw error;
+
+          const mappedSuggestions = data.map(dbRecord => ({
+            ...dbRecord.raw_data,
+            id: dbRecord.id,
+            firstName: dbRecord.nombres,
+            lastName: dbRecord.apellidos
+          }));
+
+          setSuggestions(mappedSuggestions);
+          setShowSuggestions(true);
+        } catch (error) {
+          console.error("Error buscando sugerencias:", error);
+          setSuggestions([]);
+          setShowSuggestions(false);
+        }
+      } else {
+        setSuggestions([]);
+        setShowSuggestions(false);
+      }
     }
+  };
+
+  const handleSuggestionClick = (record) => {
+    const fullName = `${record.firstName || record.nombres} ${record.lastName || record.apellidos}`;
+    setDecreeData(prev => ({ ...prev, nombreBautizado: fullName }));
+    setShowSuggestions(false);
+  };
+
+  const handleNewPartidaChange = (e) => {
+    const { name, value } = e.target;
+    setNewPartida(prev => ({ ...prev, [name]: value }));
   };
 
   const handleSearch = async () => {
     const { Libro, folio, numero } = decreeData;
     if (!Libro || !folio || !numero) {
-      setSearchMessage({ type: 'error', text: "Ingrese Libro, Folio y Número." });
+      setSearchMessage({ type: 'error', text: "Debe ingresar Libro, Folio y Número para buscar." });
       return;
     }
+
     setIsLoading(true);
     setSearchMessage(null);
     setFoundRecord(null);
 
     try {
+      const formattedBook = String(Libro).padStart(4, '0');
+      const formattedPage = String(folio).padStart(4, '0');
+      const formattedEntry = String(numero).padStart(4, '0');
+
       const { data: dbRecord, error } = await supabase
         .from('baptisms')
         .select('*')
         .eq('parish_id', user?.parishId)
-        .eq('book_number', String(Libro).padStart(4, '0'))
-        .eq('folio', String(folio).padStart(4, '0'))
-        .eq('number', String(numero).padStart(4, '0'))
+        .eq('book_number', formattedBook)
+        .eq('folio', formattedPage)
+        .eq('number', formattedEntry)
         .maybeSingle();
 
       if (error) throw error;
 
       if (dbRecord) {
         if (dbRecord.status === 'anulada') {
-          setSearchMessage({ type: 'error', text: "Esta partida ya está ANULADA." });
+          setSearchMessage({ type: 'error', text: "Esta partida ya se encuentra ANULADA." });
         } else {
-          setFoundRecord({ ...dbRecord.raw_data, id: dbRecord.id, status: dbRecord.status });
-          setSearchMessage({ type: 'success', text: "Partida localizada en la Nube." });
-          if (!decreeData.nombreBautizado) setDecreeData(prev => ({ ...prev, nombreBautizado: `${dbRecord.nombres} ${dbRecord.apellidos}` }));
-          
+          const found = { ...dbRecord.raw_data, id: dbRecord.id, status: dbRecord.status };
+
+          setFoundRecord(found);
+          setSearchMessage({ type: 'success', text: "Partida encontrada exitosamente." });
+
+          const foundName = `${dbRecord.nombres || found.nombres || ''} ${dbRecord.apellidos || found.apellidos || ''}`.trim();
+          if (!decreeData.nombreBautizado) setDecreeData(prev => ({ ...prev, nombreBautizado: foundName }));
+
+          const rawSex = String(dbRecord.sexo || getSafeValue(found, 'sex', 'sexo', 'genero')).toUpperCase();
+          let mappedSex = '';
+          if (rawSex === '2' || rawSex === 'FEMENINO' || rawSex === 'F') mappedSex = 'FEMENINO';
+          else if (rawSex === '1' || rawSex === 'MASCULINO' || rawSex === 'M') mappedSex = 'MASCULINO';
+
+          const rawUnion = String(dbRecord.tipo_union_padres || getSafeValue(found, 'tipoUnionPadres', 'tipohijo') || '').toUpperCase();
+          let mappedUnion = '';
+          if (rawUnion === '1' || rawUnion.includes('CATÓLICO') || rawUnion.includes('CATOLICO')) mappedUnion = 'MATRIMONIO CATÓLICO';
+          else if (rawUnion === '2' || rawUnion.includes('CIVIL')) mappedUnion = 'MATRIMONIO CIVIL';
+          else if (rawUnion === '3' || rawUnion.includes('LIBRE')) mappedUnion = 'UNIÓN LIBRE';
+          else if (rawUnion === '4' || rawUnion.includes('SOLTERA')) mappedUnion = 'MADRE SOLTERA';
+          else if (rawUnion === '5' || rawUnion.includes('OTRO')) mappedUnion = 'OTRO CASO';
+          else mappedUnion = rawUnion;
+
           setNewPartida(prev => ({
             ...prev,
-            nombres: dbRecord.nombres || '', apellidos: dbRecord.apellidos || '',
-            fechaSacramento: dbRecord.celebration_date || '', fechaNacimiento: dbRecord.fecha_nacimiento || '',
-            lugarNacimiento: dbRecord.lugar_nacimiento || '', lugarBautismo: dbRecord.lugar_bautismo || '',
-            sexo: dbRecord.sexo || '', nombrePadre: dbRecord.nombre_padre || '',
-            nombreMadre: dbRecord.nombre_madre || '', tipoUnionPadres: dbRecord.tipo_union_padres || '',
-            abuelosPaternos: dbRecord.abuelos_paternos || '', abuelosMaternos: dbRecord.abuelos_maternos || '',
-            padrinos: dbRecord.padrinos || '', ministro: dbRecord.ministro || '', daFe: prev.daFe || dbRecord.da_fe || ''
+            nombres: dbRecord.nombres || getSafeValue(found, 'firstName', 'nombres'),
+            apellidos: dbRecord.apellidos || getSafeValue(found, 'lastName', 'apellidos'),
+            fechaSacramento: dbRecord.celebration_date || getSafeValue(found, 'sacramentDate', 'fechaSacramento', 'fecbau'),
+            fechaNacimiento: dbRecord.fecha_nacimiento || getSafeValue(found, 'birthDate', 'fechaNacimiento', 'fecnac'),
+            lugarNacimiento: dbRecord.lugar_nacimiento || getSafeValue(found, 'lugarNacimientoDetalle', 'lugarNacimiento', 'lugarn', 'lugnac'),
+            lugarBautismo: dbRecord.lugar_bautismo || getSafeValue(found, 'lugarBautismo', 'lugbau', 'lugarBautismoDetalle'),
+            sexo: mappedSex,
+            nombrePadre: dbRecord.nombre_padre || getSafeValue(found, 'fatherName', 'nombrePadre', 'padre'),
+            nombreMadre: dbRecord.nombre_madre || getSafeValue(found, 'motherName', 'nombreMadre', 'madre'),
+            tipoUnionPadres: mappedUnion,
+            abuelosPaternos: dbRecord.abuelos_paternos || getSafeValue(found, 'paternalGrandparents', 'abuelosPaternos', 'abuepat'),
+            abuelosMaternos: dbRecord.abuelos_maternos || getSafeValue(found, 'maternalGrandparents', 'abuelosMaternos', 'abuemat'),
+            padrinos: dbRecord.padrinos || (Array.isArray(found.godparents) ? found.godparents.map(g => g.name).join(', ') : getSafeValue(found, 'godparents', 'padrinos')),
+            ministro: dbRecord.ministro || getSafeValue(found, 'minister', 'ministro'),
+            daFe: prev.daFe || dbRecord.da_fe || getSafeValue(found, 'ministerFaith', 'daFe', 'dafe'),
+            observaciones: ''
           }));
         }
       } else {
-        setSearchMessage({ type: 'error', text: "No se encontró partida en la Nube." });
+        setSearchMessage({ type: 'error', text: "No se encontró ninguna partida con esos datos en la nube." });
       }
     } catch (error) {
-      setSearchMessage({ type: 'error', text: "Error de conexión." });
-    } finally { setIsLoading(false); }
+      console.error("Error en búsqueda:", error);
+      setSearchMessage({ type: 'error', text: "Ocurrió un error conectando con la base de datos." });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const validateForm = () => {
+    if (!decreeData.numeroDeDecreto || !decreeData.fechaEmision || !decreeData.conceptoAnulacion || !decreeData.nombreBautizado || !foundRecord) return false;
+    const required = ['fechaSacramento', 'nombres', 'apellidos', 'fechaNacimiento', 'lugarNacimiento', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe'];
+    return required.every(field => newPartida[field]);
   };
 
   const handleSave = async () => {
-    if (!decreeData.numeroDeDecreto || !foundRecord) {
-      toast({ title: "Validación", description: "Complete los datos del decreto y localice la partida.", variant: "destructive" });
+    if (!validateForm()) {
+      toast({ title: "Error de Validación", description: "Complete todos los campos requeridos.", variant: "destructive" });
       return;
     }
+
     setIsLoading(true);
 
     try {
-        // 🚀 VALIDACIÓN DE DUPLICADOS DIRECTO EN LA NUBE
-        const { data: existingDecree, error: checkError } = await supabase
-            .from('decretos')
-            .select('id')
-            .eq('tipo', 'correccion')
-            .eq('parish_id', user.parishId)
-            .contains('payload', { decreeNumber: decreeData.numeroDeDecreto })
-            .maybeSingle();
+        const decreeKey = `decreeCorrectionBaptism_${user?.parishId}`;
+        const currentDecrees = JSON.parse(localStorage.getItem(decreeKey) || '[]');
+        const existingDecree = currentDecrees.find(d => String(d.decreeNumber) === String(decreeData.numeroDeDecreto));
 
         if (existingDecree) {
-            toast({ title: "Decreto Duplicado", description: `El decreto ${decreeData.numeroDeDecreto} ya existe en la Nube.`, variant: "destructive" });
-            setIsLoading(false); return;
+            setIsLoading(false);
+            toast({ 
+                title: "Número de Decreto Duplicado", 
+                description: `El decreto número ${decreeData.numeroDeDecreto} ya se encuentra registrado.`, 
+                variant: "destructive" 
+            });
+            return;
         }
 
         const supletorioLibro = cloudParams.suplementarioLibro || 1;
         const supletorioFolio = cloudParams.suplementarioFolio || 1;
         const supletorioNumero = cloudParams.suplementarioNumero || 1;
 
-        // 🧠 MOTOR INTELIGENTE DE NOTAS
         const noteAnulada = marginalNotesEngine.forAnnulledCorrection(user?.parishId, {
-            numeroDecreto: decreeData.numeroDecreto, fechaDecreto: decreeData.fechaEmision,
-            libroNuevo: supletorioLibro, folioNuevo: supletorioFolio, numeroNuevo: supletorioNumero
+            numeroDecreto: decreeData.numeroDecreto,
+            fechaDecreto: decreeData.fechaEmision,
+            libroNuevo: supletorioLibro,
+            folioNuevo: supletorioFolio,
+            numeroNuevo: supletorioNumero
         });
 
         const notaSupletoriaFinal = marginalNotesEngine.forNewCorrection(user?.parishId, {
-            numeroDecreto: decreeData.numeroDecreto, fechaDecreto: decreeData.fechaEmision,
-            libroAnulada: decreeData.Libro, folioAnulada: decreeData.folio, numeroAnulada: decreeData.numero,
+            numeroDecreto: decreeData.numeroDecreto,
+            fechaDecreto: decreeData.fechaEmision,
+            libroAnulada: decreeData.Libro,
+            folioAnulada: decreeData.folio,
+            numeroAnulada: decreeData.numero,
             ministro: newPartida.daFe
         });
 
         const partidaToSave = {
           ...newPartida,
-          Libro: String(supletorioLibro).padStart(4, '0'), folio: String(supletorioFolio).padStart(4, '0'), numero: String(supletorioNumero).padStart(4, '0'),
-          book_number: String(supletorioLibro).padStart(4, '0'), page_number: String(supletorioFolio).padStart(4, '0'), entry_number: String(supletorioNumero).padStart(4, '0'),
-          anulado: false, status: 'seated', notaMarginal: notaSupletoriaFinal
+          Libro: String(supletorioLibro).padStart(4, '0'),
+          folio: String(supletorioFolio).padStart(4, '0'),
+          numero: String(supletorioNumero).padStart(4, '0'),
+          book_number: String(supletorioLibro).padStart(4, '0'),
+          page_number: String(supletorioFolio).padStart(4, '0'),
+          entry_number: String(supletorioNumero).padStart(4, '0'),
+
+          firstName: newPartida.nombres, lastName: newPartida.apellidos,
+          fecbau: newPartida.fechaSacramento,
+          fecnac: newPartida.fechaNacimiento,
+          lugarn: newPartida.lugarNacimiento, lugarNacimientoDetalle: newPartida.lugarNacimiento,
+          lugarBautismoDetalle: newPartida.lugarBautismo,
+          sex: newPartida.sexo,
+          padre: newPartida.nombrePadre, fatherName: newPartida.nombrePadre,
+          madre: newPartida.nombreMadre, motherName: newPartida.nombreMadre,
+          abuepat: newPartida.abuelosPaternos, paternalGrandparents: newPartida.abuelosPaternos,
+          abuemat: newPartida.abuelosMaternos, maternalGrandparents: newPartida.abuelosMaternos,
+          godparents: newPartida.padrinos, tipohijo: newPartida.tipoUnionPadres,
+          minister: newPartida.ministro, dafe: newPartida.daFe, ministerFaith: newPartida.daFe,
+          anulado: false, estado: 'permanente', status: 'seated',
+          notaMarginal: notaSupletoriaFinal
         };
 
         const payloadDecree = {
-          decreeNumber: decreeData.numeroDeDecreto, decreeDate: decreeData.fechaEmision,
-          conceptoAnulacionId: decreeData.conceptoAnulacion, targetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(),
-          observaciones: newPartida.observaciones, newPartidaSummary: { book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero },
-          originalPartidaSummary: { book: decreeData.Libro, page: decreeData.folio, entry: decreeData.numero }
+          decreeNumber: decreeData.numeroDeDecreto,
+          decreeDate: decreeData.fechaEmision,
+          conceptoAnulacionId: decreeData.conceptoAnulacion,
+          targetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(),
+          observaciones: newPartida.observaciones,
+          
+          fechaSacramento: newPartida.fechaSacramento,
+          sexo: newPartida.sexo,
+          fechaNacimiento: newPartida.fechaNacimiento,
+          lugarNacimiento: newPartida.lugarNacimiento,
+          nombrePadre: newPartida.nombrePadre,
+          nombreMadre: newPartida.nombreMadre,
+          tipoUnionPadres: newPartida.tipoUnionPadres,
+          abuelosPaternos: newPartida.abuelosPaternos,
+          abuelosMaternos: newPartida.abuelosMaternos,
+          padrinos: newPartida.padrinos
         };
 
-        // 🚀 APLICAR ANULACIÓN EN LA NUBE
-        await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada }).eq('id', foundRecord.id);
+        const result = await createBaptismCorrection(
+          payloadDecree,
+          foundRecord.id,
+          partidaToSave,
+          user?.parishId
+        );
 
-        // 🚀 CREAR DECRETO EN LA NUBE
-        await supabase.from('decretos').insert([{ parish_id: user.parishId, tipo: 'correccion', payload: payloadDecree }]);
-
-        // 🚀 GUARDAR PARTIDA NUEVA
-        await createBaptismCorrection(payloadDecree, foundRecord.id, partidaToSave, user.parishId);
+        const baptismsKey = `baptisms_${user?.parishId}`;
+        let allBaptisms = JSON.parse(localStorage.getItem(baptismsKey) || '[]');
+        const originalIndex = allBaptisms.findIndex(b => b.id === foundRecord.id);
+        if (originalIndex !== -1) {
+          allBaptisms[originalIndex].notaMarginal = noteAnulada;
+          localStorage.setItem(baptismsKey, JSON.stringify(allBaptisms));
+        }
 
         setIsLoading(false);
-        toast({ title: "Éxito", description: "Decreto y partida sincronizados en la Nube.", className: "bg-green-50 text-green-900 border-green-200" });
-        navigate('/parroquia/decretos/ver-correcciones');
+
+        if (result.success) {
+          toast({ title: "Éxito", description: "Decreto guardado correctamente.", className: "bg-green-50 border-green-200 text-green-900" });
+          navigate('/parroquia/decretos/ver-correcciones');
+        } else {
+          throw new Error(result.message || "Error al guardar el decreto.");
+        }
     } catch (error) {
         setIsLoading(false);
-        toast({ title: "Error en la Nube", description: error.message, variant: "destructive" });
+        console.error("Error al guardar:", error);
+        toast({ title: "Error", description: error.message, variant: "destructive" });
     }
+  };
+
+  const handleConfDecreeChange = (e) => {
+    const { name, value } = e.target;
+    setConfDecreeData(prev => ({ ...prev, [name]: value }));
+
+    if (['book', 'page', 'entry'].includes(name)) {
+      setConfFoundRecord(null);
+      setConfSearchMessage(null);
+    }
+
+    if (name === 'targetName') {
+      if (value.length > 2) {
+        const allConfirmations = getConfirmations(user?.parishId);
+        const filtered = allConfirmations.filter(c => {
+          const fullName = `${c.firstName || ''} ${c.lastName || ''} ${c.nombres || ''} ${c.apellidos || ''}`.toLowerCase();
+          return fullName.includes(value.toLowerCase());
+        }).slice(0, 5);
+        setConfSuggestions(filtered);
+        setShowConfSuggestions(true);
+      } else {
+        setConfSuggestions([]);
+        setShowConfSuggestions(false);
+      }
+    }
+  };
+
+  const handleConfSuggestionClick = (record) => {
+    const fullName = `${record.firstName || record.nombres} ${record.lastName || record.apellidos}`;
+    setConfDecreeData(prev => ({ ...prev, targetName: fullName }));
+    setShowConfSuggestions(false);
+  };
+
+  const handleNewConfPartidaChange = (e) => {
+    const { name, value } = e.target;
+    setNewConfPartida(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleConfSearch = () => {
+    const { book, page, entry } = confDecreeData;
+    if (!book || !page || !entry) {
+      setConfSearchMessage({ type: 'error', text: "Debe ingresar Libro, Folio y Número para buscar." });
+      return;
+    }
+
+    setIsLoading(true);
+    setConfSearchMessage(null);
+    setConfFoundRecord(null);
+
+    setTimeout(() => {
+      const allConfirmations = getConfirmations(user?.parishId);
+      const found = allConfirmations.find(c =>
+        String(c.book_number || c.libro) === String(book) &&
+        String(c.page_number || c.folio) === String(page) &&
+        String(c.entry_number || c.numeroActa || c.numero) === String(entry)
+      );
+
+      if (found) {
+        if (found.status === 'anulada' || found.estado === 'anulada') {
+          setConfSearchMessage({ type: 'error', text: "Esta partida ya se encuentra ANULADA." });
+        } else {
+          setConfFoundRecord(found);
+          setConfSearchMessage({ type: 'success', text: "Partida encontrada exitosamente." });
+
+          const foundName = `${found.firstName || found.nombres || ''} ${found.lastName || found.apellidos || ''}`.trim();
+          if (!confDecreeData.targetName) setConfDecreeData(prev => ({ ...prev, targetName: foundName }));
+
+          setNewConfPartida(prev => ({
+            ...prev,
+            firstName: getSafeValue(found, 'firstName', 'nombres'),
+            lastName: getSafeValue(found, 'lastName', 'apellidos'),
+            sacramentDate: getSafeValue(found, 'sacramentDate', 'feccof', 'fechaConfirmacion'),
+            birthDate: getSafeValue(found, 'birthDate', 'fecnac', 'fechaNacimiento'),
+            lugarNacimientoDetalle: getSafeValue(found, 'placeOfBirth', 'lugarNacimiento', 'lugarn'),
+            lugarConfirmacion: getSafeValue(found, 'lugarConfirmacion', 'parroquia', 'parishName'),
+            fatherName: getSafeValue(found, 'fatherName', 'padre'),
+            motherName: getSafeValue(found, 'motherName', 'madre'),
+            padrino: getSafeValue(found, 'padrino', 'godfather'),
+            madrina: getSafeValue(found, 'madrina', 'godmother'),
+            minister: getSafeValue(found, 'minister', 'ministro'),
+            ministerFaith: prev.ministerFaith || getSafeValue(found, 'ministerFaith', 'dafe', 'daFe'),
+          }));
+        }
+      } else {
+        setConfSearchMessage({ type: 'error', text: "No se encontró ninguna partida con esos datos." });
+      }
+      setIsLoading(false);
+    }, 300);
+  };
+
+  const handleMarDecreeChange = (e) => {
+    const { name, value } = e.target;
+    setMarDecreeData(prev => ({ ...prev, [name]: value }));
+
+    if (['book', 'page', 'entry'].includes(name)) {
+      setMarFoundRecord(null);
+      setMarSearchMessage(null);
+    }
+
+    if (name === 'targetName') {
+      if (value.length > 2) {
+        const allMatrimonios = getMatrimonios(user?.parishId);
+        const filtered = allMatrimonios.filter(m => {
+          const husbandFull = `${m.husbandName || ''} ${m.husbandSurname || ''}`.toLowerCase();
+          const wifeFull = `${m.wifeName || ''} ${m.wifeSurname || ''}`.toLowerCase();
+          const query = value.toLowerCase();
+          return husbandFull.includes(query) || wifeFull.includes(query);
+        }).slice(0, 5);
+        setMarSuggestions(filtered);
+        setShowMarSuggestions(true);
+      } else {
+        setMarSuggestions([]);
+        setShowMarSuggestions(false);
+      }
+    }
+  };
+
+  const handleMarSuggestionClick = (record) => {
+    const label = `${record.husbandName} ${record.husbandSurname} & ${record.wifeName} ${record.wifeSurname}`;
+    setMarDecreeData(prev => ({ ...prev, targetName: label }));
+    setShowMarSuggestions(false);
+  };
+
+  const handleNewMarPartidaChange = (e) => {
+    const { name, value } = e.target;
+    setNewMarPartida(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleMarSearch = () => {
+    const { book, page, entry } = marDecreeData;
+    if (!book || !page || !entry) {
+      setMarSearchMessage({ type: 'error', text: "Debe ingresar Libro, Folio y Número para buscar." });
+      return;
+    }
+
+    setIsLoading(true);
+    setMarSearchMessage(null);
+    setMarFoundRecord(null);
+
+    setTimeout(() => {
+      const allMatrimonios = getMatrimonios(user?.parishId);
+      const found = allMatrimonios.find(m =>
+        String(m.book_number || m.libro) === String(book) &&
+        String(m.page_number || m.folio) === String(page) &&
+        String(m.entry_number || m.numeroActa || m.numero) === String(entry)
+      );
+
+      if (found) {
+        if (found.status === 'anulada' || found.estado === 'anulada') {
+          setMarSearchMessage({ type: 'error', text: "Esta partida ya se encuentra ANULADA." });
+        } else {
+          setMarFoundRecord(found);
+          setMarSearchMessage({ type: 'success', text: "Partida encontrada exitosamente." });
+
+          const foundName = `${found.husbandName} ${found.husbandSurname} & ${found.wifeName} ${found.wifeSurname}`;
+          if (!marDecreeData.targetName) setMarDecreeData(prev => ({ ...prev, targetName: foundName }));
+
+          setNewMarPartida(prev => ({
+            ...prev,
+            sacramentDate: getSafeValue(found, 'sacramentDate', 'fechaCelebracion', 'fecha'),
+            lugarMatrimonio: getSafeValue(found, 'lugarMatrimonio', 'parroquia', 'parishName'),
+            husbandName: getSafeValue(found, 'husbandName', 'esposoNombres'),
+            husbandSurname: getSafeValue(found, 'husbandSurname', 'esposoApellidos'),
+            husbandBirthDate: getSafeValue(found, 'husbandBirthDate', 'esposoFechaNacimiento'),
+            husbandPlaceOfBirth: getSafeValue(found, 'husbandPlaceOfBirth', 'esposoLugarNacimiento'),
+            husbandFather: getSafeValue(found, 'husbandFather', 'esposoPadre'),
+            husbandMother: getSafeValue(found, 'husbandMother', 'esposoMadre'),
+            wifeName: getSafeValue(found, 'wifeName', 'esposaNombres'),
+            wifeSurname: getSafeValue(found, 'wifeSurname', 'esposaApellidos'),
+            wifeBirthDate: getSafeValue(found, 'wifeBirthDate', 'esposaFechaNacimiento'),
+            wifePlaceOfBirth: getSafeValue(found, 'wifePlaceOfBirth', 'esposaLugarNacimiento'),
+            wifeFather: getSafeValue(found, 'wifeFather', 'esposaPadre'),
+            wifeMother: getSafeValue(found, 'wifeMother', 'esposaMadre'),
+            witnesses: getSafeValue(found, 'witnesses', 'testigos'),
+            minister: getSafeValue(found, 'minister', 'ministro'),
+            ministerFaith: prev.ministerFaith || getSafeValue(found, 'ministerFaith', 'dafe', 'daFe'),
+          }));
+        }
+      } else {
+        setMarSearchMessage({ type: 'error', text: "No se encontró ninguna partida con esos datos." });
+      }
+      setIsLoading(false);
+    }, 300);
   };
 
   const handleNewPartidaChangeEvent = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
@@ -252,14 +650,19 @@ const BaptismCorrectionNewPage = () => {
           </TabsList>
 
           <TabsContent value="bautizos" className="space-y-8 animate-in fade-in duration-500">
-            {/* SECCIÓN 1: DECRETO */}
             <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="bg-gray-50 px-8 py-4 border-b border-gray-200 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-gray-400" /><h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">01. Información del Decreto</h3>
               </div>
               <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Número de Decreto</label><Input name="numeroDeDecreto" value={decreeData.numeroDeDecreto} onChange={handleDecreeChange} className="py-6 font-bold" /></div>
-                <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Fecha de Emisión</label><Input type="date" name="fechaEmision" value={decreeData.fechaEmision} onChange={handleDecreeChange} className="py-6" /></div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Número de Decreto</label>
+                  <Input name="numeroDeDecreto" value={decreeData.numeroDeDecreto} onChange={handleDecreeChange} placeholder="Ej: 024-2025" className="py-6 font-bold" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Fecha de Emisión</label>
+                  <Input type="date" name="fechaEmision" value={decreeData.fechaEmision} onChange={handleDecreeChange} className="py-6" />
+                </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-gray-400 uppercase">Concepto</label>
                   <select name="conceptoAnulacion" value={decreeData.conceptoAnulacion} onChange={handleDecreeChange} className="w-full h-[50px] px-4 border border-gray-200 rounded-xl text-sm font-bold uppercase outline-none focus:ring-2 focus:ring-blue-500/20 bg-white text-gray-700">
@@ -298,7 +701,6 @@ const BaptismCorrectionNewPage = () => {
               </div>
             </div>
 
-            {/* SECCIÓN 2: FORMULARIO */}
             <div className={`bg-white rounded-3xl border border-gray-200 shadow-sm transition-all duration-500 ${!foundRecord ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
               <div className="bg-gray-50 px-8 py-4 border-b border-gray-200 flex items-center gap-2">
                 <UserPlus className="w-4 h-4 text-green-600" /><h3 className="text-xs font-black text-green-600 uppercase tracking-widest">02. Datos Corregidos</h3>
@@ -359,6 +761,14 @@ const BaptismCorrectionNewPage = () => {
                 {isLoading ? <Loader2 className="animate-spin w-5 h-5 mr-3" /> : <Save className="w-6 h-6 mr-3" />} Ejecutar Decreto en la Nube
               </Button>
             </div>
+          </TabsContent>
+
+          <TabsContent value="confirmaciones">
+            <div className="p-20 text-center text-gray-400 italic">Módulo de Corrección de Confirmaciones bajo construcción con el Cerebro Global...</div>
+          </TabsContent>
+
+          <TabsContent value="matrimonios">
+            <div className="p-20 text-center text-gray-400 italic">Módulo de Corrección de Matrimonios bajo construcción con el Cerebro Global...</div>
           </TabsContent>
         </Tabs>
       </div>
