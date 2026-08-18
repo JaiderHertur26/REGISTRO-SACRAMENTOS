@@ -11,9 +11,10 @@ import { useToast } from '@/components/ui/use-toast';
 import Table from '@/components/ui/Table';
 import { cn } from '@/lib/utils';
 
-const ImportParrocosForm = ({ isOpen, onClose }) => {
+// 🚀 RECIBIMOS LA LISTA REAL (existingItems)
+const ImportParrocosForm = ({ isOpen, onClose, existingItems = [] }) => {
   const { user } = useAuth();
-  const { validateJSONStructure, getParrocos, importParrocos } = useAppData(); // 🚀 Importamos la función del servicio
+  const { validateJSONStructure, importParrocos } = useAppData(); 
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   
@@ -22,10 +23,6 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
   const [validationResult, setValidationResult] = useState(null);
   const [normalizedContent, setNormalizedContent] = useState(null);
 
-  // =========================================================================
-  // 🧠 LÓGICA DE PROCESAMIENTO (INTELIGENCIA ARTIFICIAL DE NOMBRES)
-  // =========================================================================
-  
   const splitFullName = (fullName) => {
       if (!fullName) return { nombre: '', apellido: '' };
       const parts = fullName.trim().split(' ').filter(p => p);
@@ -73,7 +70,6 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
       };
   };
 
-  // --- 1. VALIDACIÓN Y ANÁLISIS ---
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
@@ -88,11 +84,13 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
             const structureCheck = validateJSONStructure(json);
             if (!structureCheck.isValid) throw new Error(structureCheck.message);
 
-            const existingData = getParrocos(user?.parishId) || [];
             const errors = [];
             const warnings = [];
             let validCount = 0;
             const normalizedData = [];
+
+            // 🚀 DOBLE FILTRO: Memoria para no duplicar en el mismo archivo JSON
+            const nombresCompletosEnArchivo = new Set();
 
             json.data.forEach((item, index) => {
                 const rowNum = index + 1;
@@ -103,16 +101,24 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
                     return;
                 }
 
-                const isDuplicate = existingData.some(ex => {
-                    const codeMatch = ex.codigo && normItem.codigo && String(ex.codigo) === String(normItem.codigo);
-                    const nameMatch = (ex.nombre || '').toLowerCase() === normItem.nombre.toLowerCase() && 
-                                     (ex.apellido || '').toLowerCase() === normItem.apellido.toLowerCase();
-                    return codeMatch || nameMatch;
+                // Generamos una "llave única" uniendo nombre y apellido para comparar
+                const fullNameStr = `${normItem.nombre} ${normItem.apellido}`.trim().toLowerCase();
+
+                // 1. Verificar contra Base de Datos Real
+                const isDuplicateDB = existingItems.some(ex => {
+                    const exFullName = `${ex.nombre || ''} ${ex.apellido || ''}`.trim().toLowerCase();
+                    return exFullName === fullNameStr || (ex.codigo && normItem.codigo && String(ex.codigo) === String(normItem.codigo));
                 });
+
+                // 2. Verificar en el archivo actual
+                const isDuplicateFile = nombresCompletosEnArchivo.has(fullNameStr);
                 
-                if (isDuplicate) {
-                    warnings.push(`Fila ${rowNum}: Registro duplicado detectado (${normItem.nombre}).`);
+                if (isDuplicateDB) {
+                    warnings.push(`Fila ${rowNum}: Omitido "${normItem.nombre}" (Ya existe en el sistema).`);
+                } else if (isDuplicateFile) {
+                    warnings.push(`Fila ${rowNum}: Omitido "${normItem.nombre}" (Repetido en este archivo).`);
                 } else {
+                    nombresCompletosEnArchivo.add(fullNameStr);
                     validCount++;
                     normalizedData.push(normItem);
                 }
@@ -126,26 +132,23 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
             toast({ title: "Error en Estructura", description: err.message, variant: "destructive" });
         } finally {
             setLoading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
     reader.readAsText(selectedFile);
   };
 
-  // --- 2. IMPORTACIÓN DELEGADA AL SERVICIO ---
   const handleConfirm = async () => {
       if (!normalizedContent?.length) return;
       
       setLoading(true);
       try {
-          const parishId = user?.parishId;
+          const parishId = user?.parishId || user?.parish_id;
           if (!parishId) throw new Error("No se pudo identificar la parroquia actual.");
 
-          // 🚀 DELEGAMOS LA INSERCIÓN A SUPABASE AL SERVICIO CENTRAL
           const result = await importParrocos({ data: normalizedContent }, parishId, false);
 
           if (!result.success) throw new Error(result.message || "Fallo en la importación central.");
-
-          window.dispatchEvent(new Event('storage'));
 
           toast({
               title: "¡Historial Actualizado!",
@@ -165,7 +168,6 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
       setPreview(null);
       setValidationResult(null);
       setNormalizedContent(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
       onClose();
   };
 
@@ -184,7 +186,6 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
     <Modal isOpen={isOpen} onClose={handleClose} title="Importar Historial de Párrocos">
         <div className="space-y-8 min-w-[750px] max-w-2xl">
             
-            {/* Header Informativo */}
             <div className="flex items-start gap-4 bg-blue-50/50 p-5 rounded-[1.5rem] border border-blue-100/50">
                 <div className="bg-[#4B7BA7] p-2 rounded-xl text-white shadow-lg shadow-blue-900/20">
                     <UserCheck className="w-5 h-5" />
@@ -192,12 +193,11 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
                 <div>
                     <p className="text-xs font-black text-blue-900 uppercase tracking-widest mb-1">Carga Masiva</p>
                     <p className="text-[11px] text-blue-700 leading-relaxed font-medium uppercase tracking-tight">
-                        El sistema separará automáticamente títulos, nombres y apellidos. Se recomienda un archivo JSON limpio para evitar inconsistencias en las partidas.
+                        El sistema separará automáticamente títulos, nombres y apellidos. Omitirá los registros que ya existan en la base de datos o estén duplicados en el archivo.
                     </p>
                 </div>
             </div>
 
-            {/* Zona de Carga */}
             {!preview && !loading && (
                 <div 
                     onClick={() => fileInputRef.current?.click()}
@@ -206,12 +206,11 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
                     <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:scale-110 transition-transform"><FileJson className="w-40 h-40" /></div>
                     <Upload className="w-12 h-12 text-gray-300 mx-auto mb-4 group-hover:text-[#4B7BA7] transition-colors" />
                     <p className="text-lg font-black text-gray-700 uppercase tracking-tight">Seleccionar Lista de Párrocos</p>
-                    <p className="text-xs text-gray-400 mt-2 font-bold uppercase tracking-widest">JSON compatible con estructura SACRAMENTUM</p>
+                    <p className="text-xs text-gray-400 mt-2 font-bold uppercase tracking-widest">Formato Requerido: JSON {`{ "data": [...] }`}</p>
                     <input type="file" accept=".json" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
                 </div>
             )}
 
-            {/* Estado de Carga */}
             {loading && (
                 <div className="py-20 text-center space-y-4">
                     <Loader2 className="w-12 h-12 animate-spin text-[#4B7BA7] mx-auto" />
@@ -221,18 +220,15 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
                 </div>
             )}
 
-            {/* Resultados de Validación */}
             {validationResult && !loading && (
                 <div className="space-y-8 animate-in fade-in zoom-in-95 duration-300">
                     
-                    {/* Estadísticas */}
                     <div className="grid grid-cols-3 gap-4">
                         <StatCard label="Listos" val={validationResult.count} color="green" />
                         <StatCard label="Con Error" val={validationResult.errors.length} color="red" />
-                        <StatCard label="Duplicados" val={validationResult.warnings.length} color="amber" />
+                        <StatCard label="Omitidos" val={validationResult.warnings.length} color="amber" />
                     </div>
 
-                    {/* Tabla de Vista Previa */}
                     {preview?.length > 0 && (
                         <div className="border border-gray-100 rounded-3xl overflow-hidden shadow-sm bg-white">
                             <div className="bg-gray-50 px-6 py-3 border-b border-gray-100 flex items-center gap-2">
@@ -243,21 +239,19 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
                         </div>
                     )}
 
-                    {/* Alertas */}
                     {(validationResult.errors.length > 0 || validationResult.warnings.length > 0) && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {validationResult.errors.length > 0 && (
                                 <AlertBox title="Errores Críticos" list={validationResult.errors} type="error" />
                             )}
                             {validationResult.warnings.length > 0 && (
-                                <AlertBox title="Omitidos" list={validationResult.warnings} type="warning" />
+                                <AlertBox title="Duplicados Omitidos" list={validationResult.warnings} type="warning" />
                             )}
                         </div>
                     )}
                 </div>
             )}
 
-            {/* Acciones */}
             <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
                 <Button variant="ghost" onClick={handleClose} className="px-8 text-gray-400 font-black uppercase tracking-widest text-[10px]">
                     Cancelar
@@ -274,8 +268,6 @@ const ImportParrocosForm = ({ isOpen, onClose }) => {
     </Modal>
   );
 };
-
-// --- COMPONENTES AUXILIARES ---
 
 const StatCard = ({ label, val, color }) => {
     const colors = {

@@ -3,7 +3,7 @@ import { useAppData } from '@/context/AppDataContext';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación necesaria
+import { supabase } from '@/lib/supabaseClient'; 
 import { 
     Plus, Search, Pencil, Trash2, Upload, 
     UserCheck, ShieldCheck, Mail, Phone, 
@@ -23,7 +23,7 @@ const ParrocosList = () => {
         addParroco, 
         updateParroco, 
         deleteParroco,
-        getParrocos // Mantenemos para fallback
+        getParrocos // Mantenemos para fallback offline
     } = useAppData();
     const { toast } = useToast();
 
@@ -46,7 +46,6 @@ const ParrocosList = () => {
         
         setLoading(true);
         try {
-            // 🚀 Consulta directa a la tabla parrocos
             const { data, error } = await supabase
                 .from('parrocos')
                 .select('*')
@@ -54,28 +53,28 @@ const ParrocosList = () => {
 
             if (error) throw error;
 
-            // Mapeamos el payload que contiene la info real del sacerdote
             let parrocos = data.map(dbItem => ({
                 ...dbItem.payload,
-                id: dbItem.id // Aseguramos que el ID sea el de la fila de la tabla
+                id: dbItem.id
             }));
 
-            // Ordenamos cronológicamente por fecha de ingreso
             parrocos.sort((a, b) => 
                 new Date(a.fechaIngreso || '1900-01-01') - 
                 new Date(b.fechaIngreso || '1900-01-01')
             );
 
-            // Procesamos códigos calculados y revertimos para ver el más reciente arriba
             const processed = parrocos.map((p, index) => ({
                 ...p,
                 calculatedCode: String(index + 1).padStart(4, '0')
             })).reverse();
 
             setItems(processed);
+            localStorage.setItem(`parrocos_${parishId}`, JSON.stringify(processed));
         } catch (err) {
             console.error("Error cargando párrocos:", err);
-            toast({ title: "Error", description: "No se pudieron cargar los datos de la nube.", variant: "destructive" });
+            // Fallback
+            const fallback = getParrocos(parishId);
+            setItems(fallback || []);
         } finally {
             setLoading(false);
         }
@@ -83,33 +82,63 @@ const ParrocosList = () => {
 
     useEffect(() => {
         loadData();
-        // Escuchar cambios globales (por ejemplo, después de una importación)
-        window.addEventListener('storage', loadData);
-        return () => window.removeEventListener('storage', loadData);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.parishId]);
 
     // --- 2. OPERACIONES CRUD ---
     const handleCreate = async (data) => {
-        const result = await addParroco(data, user?.parishId);
+        const parishId = user?.parishId || user?.parish_id;
+        
+        // 🚀 BLOQUEO DE DUPLICADOS MANUALES
+        const isDuplicate = items.some(i => 
+            (i.nombre || '').toLowerCase() === (data.nombre || '').toLowerCase() &&
+            (i.apellido || '').toLowerCase() === (data.apellido || '').toLowerCase()
+        );
+
+        if (isDuplicate) {
+            toast({ title: 'Duplicado', description: 'Este Párroco ya se encuentra registrado.', variant: 'destructive' });
+            return;
+        }
+
+        setLoading(true);
+        const result = await addParroco(data, parishId);
         if (result.success) {
             toast({ title: 'Éxito', description: 'Párroco registrado en la nube.', className: "bg-green-50 text-green-900 border-green-200" });
-            loadData();
+            setModals(m => ({ ...m, create: false }));
+            await loadData();
+        } else {
+            toast({ title: 'Error', description: result.message, variant: 'destructive' });
+            setLoading(false);
         }
     };
 
     const handleUpdate = async (id, data) => {
-        const result = await updateParroco(id, data, user?.parishId);
+        const parishId = user?.parishId || user?.parish_id;
+        setLoading(true);
+        const result = await updateParroco(id, data, parishId);
         if (result.success) {
             toast({ title: 'Actualizado', description: 'Información sincronizada.', className: "bg-green-50 text-green-900 border-green-200" });
-            loadData();
+            setModals(m => ({ ...m, edit: false }));
+            setSelectedParroco(null);
+            await loadData();
+        } else {
+            toast({ title: 'Error', description: result.message, variant: 'destructive' });
+            setLoading(false);
         }
     };
 
     const handleDelete = async (id) => {
-        const result = await deleteParroco(id, user?.parishId);
+        const parishId = user?.parishId || user?.parish_id;
+        setLoading(true);
+        const result = await deleteParroco(id, parishId);
         if (result.success) {
             toast({ title: 'Eliminado', description: 'Registro removido.', className: "bg-green-50 text-green-900 border-green-200" });
-            loadData();
+            setModals(m => ({ ...m, delete: false }));
+            setSelectedParroco(null);
+            await loadData();
+        } else {
+            toast({ title: 'Error', description: result.message, variant: 'destructive' });
+            setLoading(false);
         }
     };
 
@@ -127,7 +156,6 @@ const ParrocosList = () => {
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500 pb-10">
-            {/* CABECERA DE CONTROL */}
             <div className="flex flex-col lg:flex-row justify-between items-center gap-6 bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
                 <div className="relative w-full max-w-md group">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300 group-focus-within:text-[#4B7BA7] transition-colors" />
@@ -157,7 +185,6 @@ const ParrocosList = () => {
                 </div>
             </div>
 
-            {/* TABLA DE HISTORIAL */}
             <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto custom-scrollbar">
                     <table className="w-full text-left">
@@ -193,8 +220,21 @@ const ParrocosList = () => {
                                         <tr key={item.id || index} className="group hover:bg-gray-50/50 transition-all duration-300">
                                             <td className="px-8 py-4">
                                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button onClick={() => { setSelectedParroco(item); setModals(m => ({ ...m, edit: true })); }} className="p-2.5 text-[#4B7BA7] hover:bg-blue-50 rounded-xl transition-all"><Pencil className="w-4 h-4" /></button>
-                                                    <button onClick={() => { setSelectedParroco(item); setModals(m => ({ ...m, delete: true })); }} className="p-2.5 text-red-400 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button>
+                                                    {/* 🚀 BOTONES PROTEGIDOS CONTRA EVENT BUBBLING */}
+                                                    <button 
+                                                        type="button"
+                                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedParroco(item); setModals(m => ({ ...m, edit: true })); }} 
+                                                        className="p-2.5 text-[#4B7BA7] hover:bg-blue-50 rounded-xl transition-all"
+                                                    >
+                                                        <Pencil className="w-4 h-4" />
+                                                    </button>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedParroco(item); setModals(m => ({ ...m, delete: true })); }} 
+                                                        className="p-2.5 text-red-400 hover:bg-red-50 rounded-xl transition-all"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">
@@ -240,13 +280,13 @@ const ParrocosList = () => {
                 </div>
             </div>
 
-            {/* MODALS */}
             <CreateParrocoModal 
                 isOpen={modals.create} 
                 onClose={() => setModals(m => ({ ...m, create: false }))} 
                 onCreate={handleCreate} 
             />
 
+            {/* 🚀 CANDADO CONDICIONAL DE MODALES PARA EVITAR FALLO DEL LÁPIZ */}
             {selectedParroco && (
                 <>
                     <EditParrocoModal 
@@ -268,6 +308,7 @@ const ParrocosList = () => {
             {modals.import && (
                 <ImportParrocosForm 
                     isOpen={modals.import}
+                    existingItems={items} // 🚀 PASAMOS LOS DATOS REALES DE LA BD
                     onClose={() => {
                         setModals(m => ({ ...m, import: false }));
                         loadData(); 

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación de Supabase
+import { supabase } from '@/lib/supabaseClient'; 
 import { Pencil, Trash2, Plus, Search, Upload, Loader2 } from 'lucide-react';
 import ImportDiocesisForm from '@/components/modals/ImportDiocesisForm';
 
@@ -19,11 +19,10 @@ const DiocesisList = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isImportOpen, setIsImportOpen] = useState(false);
     const [currentItem, setCurrentItem] = useState(null);
-    const [isLoading, setIsLoading] = useState(true); // 🚀 Estado de carga
+    const [isLoading, setIsLoading] = useState(true); 
 
     const [formData, setFormData] = useState({ nombre: '', codigo: '', region: '', descripcion: '' });
 
-    // 🚀 Lógica de Espejo 1 a 1 con Supabase
     const loadData = async () => {
         const contextId = user?.parishId || user?.dioceseId;
         if (!contextId) return;
@@ -41,7 +40,7 @@ const DiocesisList = () => {
             localStorage.setItem(`diocesis_${contextId}`, JSON.stringify(data || []));
         } catch (error) {
             console.error("Error cargando diócesis:", error);
-            setItems(getDiocesis(contextId)); // Fallback a local
+            setItems(getDiocesis(contextId)); 
         } finally {
             setIsLoading(false);
         }
@@ -69,6 +68,20 @@ const DiocesisList = () => {
             return;
         }
 
+        // 🚀 BLOQUEO DE DUPLICADOS MANUALES
+        const isDuplicate = items.some(i => 
+            i.id !== currentItem?.id && // Si estamos editando, ignoramos el mismo registro
+            (
+                (formData.codigo && i.codigo && String(i.codigo).toLowerCase() === String(formData.codigo).toLowerCase()) ||
+                (String(i.nombre).toLowerCase() === String(formData.nombre).toLowerCase())
+            )
+        );
+
+        if (isDuplicate) {
+            toast({ title: 'Duplicado', description: 'El nombre o código de la Diócesis ya existe en el sistema.', variant: 'destructive' });
+            return;
+        }
+
         const contextId = user?.parishId || user?.dioceseId;
         setIsLoading(true);
 
@@ -81,7 +94,7 @@ const DiocesisList = () => {
         }
         
         setIsModalOpen(false);
-        await loadData(); // 🚀 Recarga desde la Nube
+        await loadData(); 
     };
 
     const handleDelete = async (item) => {
@@ -90,7 +103,7 @@ const DiocesisList = () => {
             const contextId = user?.parishId || user?.dioceseId;
             await deleteDiocesis(item.id, contextId);
             toast({ title: 'Eliminado', description: 'Registro eliminado exitosamente.', className: "bg-green-50 border-green-200 text-green-900" });
-            await loadData(); // 🚀 Recarga desde la Nube
+            await loadData(); 
         }
     };
 
@@ -166,15 +179,18 @@ const DiocesisList = () => {
                                     <tr key={item.id || index} className="hover:bg-gray-50 transition-colors">
                                         <td className="px-4 py-2 sticky left-0 bg-white border-r border-gray-100 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                                             <div className="flex items-center gap-1 justify-center">
+                                                {/* 🚀 BOTONES PROTEGIDOS CONTRA EVENT BUBBLING */}
                                                 <button 
-                                                    onClick={() => handleOpenModal(item)}
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOpenModal(item); }}
                                                     className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
                                                     title="Editar"
                                                 >
                                                     <Pencil className="w-4 h-4" />
                                                 </button>
                                                 <button 
-                                                    onClick={() => handleDelete(item)}
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDelete(item); }}
                                                     className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
                                                     title="Eliminar"
                                                 >
@@ -224,6 +240,7 @@ const DiocesisList = () => {
             {isImportOpen && (
                 <ImportDiocesisForm 
                     isOpen={isImportOpen} 
+                    existingItems={items} // 🚀 Pasamos los datos reales
                     onClose={() => {
                         setIsImportOpen(false);
                         loadData();
