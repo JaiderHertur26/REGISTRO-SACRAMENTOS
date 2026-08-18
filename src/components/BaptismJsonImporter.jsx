@@ -12,6 +12,12 @@ import { generateUUID } from '@/utils/supabaseHelpers';
 import Table from '@/components/ui/Table';
 import { cn } from '@/lib/utils';
 
+// 🚀 FUNCIÓN LIMPIADORA DE TÍTULOS (Normaliza la Base de Datos)
+const cleanTitle = (nameStr) => {
+    if (!nameStr) return '';
+    return String(nameStr).replace(/^(PBRO\.?|PADRE|FRAY|MONS\.?)\s+/i, '').trim();
+};
+
 const BaptismJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth();
@@ -34,10 +40,10 @@ const BaptismJsonImporter = () => {
             const parrocos = getParrocos(parishId) || [];
             setListaSacerdotes(parrocos);
             
-            // A. Buscar Párroco Actual
+            // A. Buscar Párroco Actual (Limpiando el título)
             const actual = parrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
             if (actual) {
-                setParrocoActual(`PBRO. ${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase());
+                setParrocoActual(cleanTitle(`${actual.nombre} ${actual.apellido || ''}`).toUpperCase());
             } else {
                 setParrocoActual('PÁRROCO ENCARGADO');
             }
@@ -52,7 +58,8 @@ const BaptismJsonImporter = () => {
             const map = {};
             sortedParrocos.forEach((p, index) => {
                 const code = String(index + 1).padStart(4, '0');
-                map[code] = `PBRO. ${p.nombre} ${p.apellido || ''}`.trim().toUpperCase();
+                // Guardamos el nombre puro sin el "PBRO." quemado
+                map[code] = cleanTitle(`${p.nombre} ${p.apellido || ''}`).toUpperCase();
             });
             
             setDiccionarioDaFe(map);
@@ -122,7 +129,7 @@ const BaptismJsonImporter = () => {
                         notaMarginal: item["NOTAS MARGINALES"] || item.notaMarginal || ''
                     };
 
-                    // 🚀 INTELIGENCIA: AUTO-COMPLETAR MINISTRO (Igual que BaptismCelebratedPage)
+                    // 🚀 INTELIGENCIA: AUTO-COMPLETAR MINISTRO HISTÓRICO
                     if (!mappedItem.ministro || mappedItem.ministro === '---') {
                         if (mappedItem.fechaSacramento && listaSacerdotes.length > 0) {
                             const fechaBautismo = new Date(mappedItem.fechaSacramento);
@@ -132,22 +139,25 @@ const BaptismJsonImporter = () => {
                                 return fechaBautismo >= inicio && fechaBautismo <= fin;
                             });
                             if (ministroHistorico) {
-                                mappedItem.ministro = `PBRO. ${ministroHistorico.nombre} ${ministroHistorico.apellido || ''}`.trim().toUpperCase();
+                                mappedItem.ministro = cleanTitle(`${ministroHistorico.nombre} ${ministroHistorico.apellido || ''}`).toUpperCase();
                             }
                         }
+                    } else {
+                        // Si ya trae ministro, lo purificamos
+                        mappedItem.ministro = cleanTitle(mappedItem.ministro).toUpperCase();
                     }
 
                     // Purificación Estándar
                     const cleanItem = purificarRegistroBautismo(mappedItem);
 
-                    // 🚀 INTELIGENCIA "DA FE"
+                    // 🚀 INTELIGENCIA "DA FE" CON DICCIONARIO
                     const rawDaFe = String(mappedItem.daFe).trim();
                     let finalDaFe = parrocoActual; 
 
                     if (/^\d+$/.test(rawDaFe)) {
                         if (diccionarioDaFe[rawDaFe]) finalDaFe = diccionarioDaFe[rawDaFe];
                     } else if (rawDaFe && rawDaFe !== '---' && !rawDaFe.includes('ENCARGADO')) {
-                        finalDaFe = rawDaFe;
+                        finalDaFe = cleanTitle(rawDaFe).toUpperCase();
                     }
                     cleanItem.daFe = finalDaFe;
 
