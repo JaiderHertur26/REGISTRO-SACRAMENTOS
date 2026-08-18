@@ -115,7 +115,7 @@ const InfoBox = ({ data, parishId, getParrocos }) => {
                 </div>
 
                 <div className="pt-2">
-                   <BaptismPartidaValidator rawData={data} />[cite: 2]
+                   
                 </div>
             </div>
         </div>
