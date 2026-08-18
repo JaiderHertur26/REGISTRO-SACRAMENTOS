@@ -7,25 +7,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import Modal from '@/components/ui/Modal';
 import { 
-    ScrollText, Mail, LayoutDashboard, Database, 
-    AlertCircle, FileCheck, CheckCircle, Download, 
-    FileText, Settings, Building, MapPin, Phone, 
-    Info, Loader2, ShieldCheck,
-    Zap, FileStack, ChevronRight, AtSign
+    ScrollText, Mail, AlertCircle, FileCheck, CheckCircle, Download, 
+    FileText, Settings, Building, AtSign, Info, Loader2, ShieldCheck,
+    Zap, FileStack, ChevronRight
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { generateBackup } from '@/lib/backupHelpers';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabaseClient'; // 🚀 IMPORTACIÓN CLAVE
 
 const ChanceryDashboard = () => {
-    const { 
-        data, getMisDatosList, 
-        updateMisDatosRecord, addMisDatosRecord,
-        getBaptisms, getConfirmations, getMatrimonios
-    } = useAppData();
+    const { data, getBaptisms, getConfirmations, getMatrimonios } = useAppData();
     const { user } = useAuth();
     const { toast } = useToast();
     const navigate = useNavigate();
@@ -36,70 +30,77 @@ const ChanceryDashboard = () => {
     const [globalCorrectionsCount, setGlobalCorrectionsCount] = useState(0);
     const [globalReplacementsCount, setGlobalReplacementsCount] = useState(0);
 
+    // 🚀 ESTADO ACTUALIZADO CON VICE-CANCILLER
     const [misDatosForm, setMisDatosForm] = useState({
         id: null,
         nombreCancilleria: '',
         canciller: '',
-        cargo: 'Canciller Diocesano',
+        cargo: 'CANCILLER DIOCESANO',
+        viceCanciller: '', // Nuevo campo
         direccion: '',
         ciudad: '',
         telefono: '',
         email: ''
     });
 
+    // 🚀 CARGAR DATOS DIRECTO DE LA NUBE
     useEffect(() => {
-        if (!user?.chanceryId) return;
-        const records = getMisDatosList(user.chanceryId);
-        if (records?.length > 0) {
-            const d = records[0];
-            setMisDatosForm({
-                id: d.id,
-                nombreCancilleria: d.nombreCancilleria || d.nombre || user.chancelleryName || '',
-                canciller: d.canciller || d.parroco || '', 
-                cargo: d.cargo || 'Canciller Diocesano',
-                direccion: d.direccion || '',
-                ciudad: d.ciudad || '',
-                telefono: d.telefono || '',
-                email: d.email || ''
-            });
+        const fetchMisDatos = async () => {
+            const cId = user?.chanceryId || user?.chancery_id;
+            if (!cId) return;
+            
+            try {
+                const { data: dbData, error } = await supabase
+                    .from('mis_datos')
+                    .select('*')
+                    .eq('entity_id', cId)
+                    .maybeSingle();
+
+                if (dbData && dbData.payload) {
+                    const p = dbData.payload;
+                    setMisDatosForm({
+                        id: dbData.id,
+                        nombreCancilleria: p.nombreCancilleria || p.nombre || user?.chancelleryName || '',
+                        canciller: p.canciller || p.parroco || '', 
+                        cargo: p.cargo || 'CANCILLER DIOCESANO',
+                        viceCanciller: p.viceCanciller || '',
+                        direccion: p.direccion || '',
+                        ciudad: p.ciudad || '',
+                        telefono: p.telefono || '',
+                        email: p.email || ''
+                    });
+                }
+            } catch (err) {
+                console.error("Error al cargar datos de cancillería:", err);
+            }
+        };
+        
+        if (isSettingsOpen) {
+            fetchMisDatos();
         }
-    }, [user, isSettingsOpen, getMisDatosList]);
+    }, [user, isSettingsOpen]);
 
     useEffect(() => {
         const fetchGlobalDecreesStats = async () => {
             let targetDioceseId = user?.dioceseId || user?.diocese_id;
             
-            if (!targetDioceseId && user?.chancery_id) {
-                 const { data: chanData } = await supabase.from('chancelleries').select('diocese_id').eq('id', user.chancery_id).single();
+            if (!targetDioceseId && (user?.chancery_id || user?.chanceryId)) {
+                 const { data: chanData } = await supabase.from('chancelleries').select('diocese_id').eq('id', user?.chancery_id || user?.chanceryId).single();
                  if (chanData) targetDioceseId = chanData.diocese_id;
             }
 
             if (!targetDioceseId) return;
 
             try {
-                const { data: parishesData } = await supabase
-                    .from('parishes')
-                    .select('id')
-                    .eq('diocese_id', targetDioceseId);
-
+                const { data: parishesData } = await supabase.from('parishes').select('id').eq('diocese_id', targetDioceseId);
                 const parishIds = parishesData ? parishesData.map(p => p.id) : [];
 
                 if (parishIds.length === 0) return;
 
-                const { count: correctionsCount, error: corrError } = await supabase
-                    .from('decretos')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('tipo', 'correccion')
-                    .in('parish_id', parishIds);
-
+                const { count: correctionsCount, error: corrError } = await supabase.from('decretos').select('*', { count: 'exact', head: true }).eq('tipo', 'correccion').in('parish_id', parishIds);
                 if (!corrError) setGlobalCorrectionsCount(correctionsCount || 0);
 
-                const { count: replacementsCount, error: repError } = await supabase
-                    .from('decretos')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('tipo', 'reposicion')
-                    .in('parish_id', parishIds);
-
+                const { count: replacementsCount, error: repError } = await supabase.from('decretos').select('*', { count: 'exact', head: true }).eq('tipo', 'reposicion').in('parish_id', parishIds);
                 if (!repError) setGlobalReplacementsCount(replacementsCount || 0);
 
             } catch (error) {
@@ -112,14 +113,12 @@ const ChanceryDashboard = () => {
 
     const dioceseStats = useMemo(() => {
         const parishes = data.parishes.filter(p => p.dioceseId === user?.dioceseId);
-        
         let allSacraments = [];
 
         parishes.forEach(p => {
             const baptisms = (getBaptisms(p.id) || []).map(b => ({ ...b, type: 'Bautismo' }));
             const confirmations = (getConfirmations(p.id) || []).map(c => ({ ...c, type: 'Confirmación' }));
             const marriages = (getMatrimonios(p.id) || []).map(m => ({ ...m, type: 'Matrimonio' }));
-
             allSacraments = [...allSacraments, ...baptisms, ...confirmations, ...marriages];
         });
 
@@ -132,29 +131,41 @@ const ChanceryDashboard = () => {
         };
     }, [data.parishes, data.communications, user?.dioceseId, getBaptisms, getConfirmations, getMatrimonios]);
 
+    // 🚀 GUARDAR DATOS DIRECTO EN LA NUBE
     const handleSaveSettings = async (e) => {
         e.preventDefault();
         setIsSaving(true);
+        const cId = user?.chanceryId || user?.chancery_id;
 
         try {
             const payload = {
-                ...misDatosForm,
-                nombre: misDatosForm.nombreCancilleria.toUpperCase(),
-                parroco: misDatosForm.canciller.toUpperCase(),
+                nombreCancilleria: misDatosForm.nombreCancilleria.toUpperCase(),
+                nombre: misDatosForm.nombreCancilleria.toUpperCase(), // Retro-compatibilidad
+                canciller: misDatosForm.canciller.toUpperCase(),
                 cargo: misDatosForm.cargo.toUpperCase(),
-                ciudad: misDatosForm.ciudad.toUpperCase()
+                viceCanciller: misDatosForm.viceCanciller.toUpperCase(),
+                direccion: misDatosForm.direccion,
+                ciudad: misDatosForm.ciudad.toUpperCase(),
+                telefono: misDatosForm.telefono,
+                email: misDatosForm.email.toLowerCase()
             };
 
-            const res = misDatosForm.id 
-                ? await updateMisDatosRecord(misDatosForm.id, payload, user.chanceryId)
-                : await addMisDatosRecord(payload, user.chanceryId);
-
-            if (res.success) {
-                toast({ title: "Identidad Sincronizada", description: "Los membretes de los decretos han sido actualizados.", className: "bg-green-50 text-green-900 border-green-200" });
-                setIsSettingsOpen(false);
+            if (misDatosForm.id) {
+                // Actualizar
+                const { error } = await supabase.from('mis_datos').update({ payload }).eq('id', misDatosForm.id);
+                if (error) throw error;
+            } else {
+                // Insertar nuevo
+                const { data: newRecord, error } = await supabase.from('mis_datos').insert([{ entity_id: cId, payload }]).select('id').single();
+                if (error) throw error;
+                if (newRecord) setMisDatosForm(prev => ({ ...prev, id: newRecord.id }));
             }
+
+            toast({ title: "Identidad Sincronizada", description: "Los membretes de los decretos han sido actualizados en la Nube.", className: "bg-green-50 text-green-900 border-green-200" });
+            setIsSettingsOpen(false);
         } catch (error) {
-            toast({ title: "Error", description: error.message, variant: "destructive" });
+            console.error("Error al guardar:", error);
+            toast({ title: "Error", description: "No se pudo sincronizar con la base de datos.", variant: "destructive" });
         } finally {
             setIsSaving(false);
         }
@@ -283,6 +294,7 @@ const ChanceryDashboard = () => {
                 </div>
             </div>
 
+            {/* 🚀 MODAL DE CONFIGURACIÓN CON EL NUEVO CAMPO Y LÓGICA DE NUBE */}
             <Modal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} title="Configuración de Identidad Legal">
                 <form onSubmit={handleSaveSettings} className="p-4 space-y-8 max-w-2xl">
                     <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 flex gap-4">
@@ -297,28 +309,33 @@ const ChanceryDashboard = () => {
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nombre de la Oficina</label>
                             <div className="relative group">
                                 <Building className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300 group-focus-within:text-blue-500 transition-colors" />
-                                <Input required value={misDatosForm.nombreCancilleria} onChange={e => setMisDatosForm({...misDatosForm, nombreCancilleria: e.target.value})} className="pl-12 py-6 font-bold" />
+                                <Input required value={misDatosForm.nombreCancilleria} onChange={e => setMisDatosForm({...misDatosForm, nombreCancilleria: e.target.value})} className="pl-12 py-6 font-bold uppercase" />
                             </div>
                         </div>
 
                         <div className="space-y-1">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Canciller Responsable</label>
-                            <Input required value={misDatosForm.canciller} onChange={e => setMisDatosForm({...misDatosForm, canciller: e.target.value})} className="py-6 font-bold" />
+                            <Input required value={misDatosForm.canciller} onChange={e => setMisDatosForm({...misDatosForm, canciller: e.target.value})} className="py-6 font-bold uppercase" />
                         </div>
 
                         <div className="space-y-1">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Cargo Institucional</label>
-                            <Input required value={misDatosForm.cargo} onChange={e => setMisDatosForm({...misDatosForm, cargo: e.target.value})} className="py-6 font-bold" />
+                            <Input required value={misDatosForm.cargo} onChange={e => setMisDatosForm({...misDatosForm, cargo: e.target.value})} className="py-6 font-bold uppercase" />
                         </div>
 
                         <div className="md:col-span-2 space-y-1">
+                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 text-purple-600">Vice-Canciller (Opcional)</label>
+                            <Input value={misDatosForm.viceCanciller} onChange={e => setMisDatosForm({...misDatosForm, viceCanciller: e.target.value})} className="py-6 font-bold uppercase bg-purple-50/30 focus:ring-purple-500 border-purple-100" placeholder="EJ: PBRO. JUAN PÉREZ" />
+                        </div>
+
+                        <div className="md:col-span-2 space-y-1 border-t border-gray-100 pt-6">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Dirección de Sede</label>
                             <Input value={misDatosForm.direccion} onChange={e => setMisDatosForm({...misDatosForm, direccion: e.target.value})} className="py-6" />
                         </div>
 
                         <div className="space-y-1">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Ciudad / Sede</label>
-                            <Input value={misDatosForm.ciudad} onChange={e => setMisDatosForm({...misDatosForm, ciudad: e.target.value})} className="py-6 font-bold" />
+                            <Input value={misDatosForm.ciudad} onChange={e => setMisDatosForm({...misDatosForm, ciudad: e.target.value})} className="py-6 font-bold uppercase" />
                         </div>
 
                         <div className="space-y-1">
