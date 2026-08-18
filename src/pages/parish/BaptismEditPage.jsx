@@ -65,7 +65,7 @@ const BaptismEditPage = () => {
                     numero: dbRecord.entry_number || raw.numero || raw.number
                 });
 
-                // 🚀 CARGA ESTRICTA: Solo los 21 campos que usa el formulario Edit
+                // 🚀 CARGA ESTRICTA: Los campos que usa el formulario Edit
                 setFormData({
                     id: purificado.id,
                     status: purificado.status,
@@ -92,6 +92,7 @@ const BaptismEditPage = () => {
                     notaMarginal: purificado.notaMarginal
                 });
 
+                // 🚀 SOLUCIÓN FUNCIONAL: Carga real de ciudades y párrocos para los autocompletados
                 const listaCiudadesRaw = getCiudadesList(parishId) || [];
                 setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
                 
@@ -111,7 +112,6 @@ const BaptismEditPage = () => {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        // 🚀 LIMPIEZA: Solo los campos de texto que existen en este formulario
         const uppercaseFields = ['nombres', 'apellidos', 'lugarNacimiento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'abuelosPaternos', 'abuelosMaternos', 'ministro', 'daFe', 'notaMarginal'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
@@ -170,7 +170,7 @@ const BaptismEditPage = () => {
                     <div className="flex items-center gap-4">
                         <Button variant="ghost" onClick={() => navigate('/parroquia/bautismo/partidas')} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><ArrowLeft className="w-6 h-6 text-gray-400" /></Button>
                         <div>
-                            <h1 className="text-3xl font-black text-gray-900 tracking-tighter uppercase leading-none">Editar Partida</h1>
+                            <h1 className="text-3xl font-black text-gray-900 tracking-tighter uppercase leading-none font-serif">Editar Partida</h1>
                             <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest mt-2 flex items-center gap-2"><BookOpen className="w-3 h-3" /> Registro en Base de Datos Permanente</p>
                         </div>
                     </div>
