@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación de Supabase añadida
+import { supabase } from '@/lib/supabaseClient'; 
 import { 
     Pencil, Trash2, Plus, Search, MapPin, 
     Globe, Database, ShieldCheck, Clock, User as UserIcon,
@@ -16,7 +16,6 @@ import ImportCiudadesForm from '@/components/modals/ImportCiudadesForm';
 
 const CiudadesList = () => {
     const { user } = useAuth();
-    // getCiudadesList se mantiene solo como fallback (respaldo offline)
     const { getCiudadesList, addCiudad, updateCiudad, deleteCiudad } = useAppData();
     const { toast } = useToast();
 
@@ -35,14 +34,12 @@ const CiudadesList = () => {
         usuario: ''
     });
 
-    // 🚀 NUEVA LÓGICA: Consulta directa a Supabase (Espejo 1 a 1)
-    const loadData = async () => {
-        const contextId = user?.parishId || user?.dioceseId;
-        if (!contextId) return;
+    const contextId = user?.parishId || user?.dioceseId;
 
+    const loadData = async () => {
+        if (!contextId) return;
         setIsLoading(true);
         try {
-            // Buscamos directamente en la tabla real de la nube
             const { data, error } = await supabase
                 .from('ciudades')
                 .select('*')
@@ -50,14 +47,10 @@ const CiudadesList = () => {
                 .order('nombre', { ascending: true });
 
             if (error) throw error;
-
             setItems(data || []);
-            
-            // Actualizamos la caché local en segundo plano (para la experiencia offline-first)
             localStorage.setItem(`ciudades_${contextId}`, JSON.stringify(data || []));
         } catch (error) {
             console.error("Error cargando ciudades desde Supabase:", error);
-            // Fallback: Si no hay internet, lee de la caché local
             const fallbackData = getCiudadesList(contextId);
             const sortedData = [...fallbackData].sort((a, b) => a.nombre.localeCompare(b.nombre));
             setItems(sortedData);
@@ -69,7 +62,7 @@ const CiudadesList = () => {
     useEffect(() => {
         loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user?.dioceseId, user?.parishId]);
+    }, [contextId]);
 
     const handleOpenModal = (item = null) => {
         if (item) {
@@ -89,27 +82,32 @@ const CiudadesList = () => {
     };
 
     const handleSave = async () => {
-        if (!formData.nombre.trim()) {
+        const nombreLimpio = formData.nombre.trim().toUpperCase();
+
+        if (!nombreLimpio) {
             toast({ title: 'Campo requerido', description: 'El nombre de la ciudad es obligatorio.', variant: 'destructive' });
             return;
         }
 
-        const contextId = user?.parishId || user?.dioceseId; 
+        // 🚀 PREVENCIÓN DE DUPLICADOS MANUALES
+        if (!currentItem && items.some(i => i.nombre.toUpperCase() === nombreLimpio)) {
+            toast({ title: 'Duplicado detectado', description: 'Esta ciudad ya existe en el catálogo.', variant: 'destructive' });
+            return;
+        }
+
+        setIsLoading(true);
         let result;
 
-        // Mostrar estado de carga mientras sube a BD
-        setIsLoading(true);
-
         if (currentItem) {
-            result = await updateCiudad(currentItem.id, { ...formData, nombre: formData.nombre.toUpperCase() }, contextId);
+            result = await updateCiudad(currentItem.id, { ...formData, nombre: nombreLimpio }, contextId);
         } else {
-            result = await addCiudad({ ...formData, nombre: formData.nombre.toUpperCase() }, contextId);
+            result = await addCiudad({ ...formData, nombre: nombreLimpio }, contextId);
         }
 
         if (result.success) {
             toast({ title: '¡Éxito!', description: result.message, className: "bg-green-50 border-green-200 text-green-900" });
             setIsModalOpen(false);
-            await loadData(); // Recarga la info real de la BD
+            await loadData();
         } else {
             toast({ title: 'Error', description: result.message, variant: 'destructive' });
             setIsLoading(false);
@@ -119,12 +117,11 @@ const CiudadesList = () => {
     const handleDelete = async (item) => {
         if (window.confirm(`¿Realmente desea eliminar "${item.nombre}"? Esta acción se reflejará inmediatamente en la base de datos.`)) {
             setIsLoading(true);
-            const contextId = user?.parishId || user?.dioceseId;
             const result = await deleteCiudad(item.id, contextId);
             
             if (result.success) {
                 toast({ title: 'Registro eliminado', description: 'La ciudad ha sido removida del catálogo de Supabase.' });
-                await loadData(); // Recarga la info real de la BD
+                await loadData();
             } else {
                 toast({ title: 'Error', description: result.message, variant: 'destructive' });
                 setIsLoading(false);
@@ -287,9 +284,11 @@ const CiudadesList = () => {
             {isImportOpen && (
                 <ImportCiudadesForm 
                     isOpen={isImportOpen} 
+                    // 🚀 PASAMOS LA LISTA REAL A LA IMPORTACIÓN PARA EVITAR DUPLICADOS
+                    existingItems={items} 
                     onClose={() => {
                         setIsImportOpen(false);
-                        loadData(); // Al cerrar el modal, se recargan los datos desde Supabase
+                        loadData(); 
                     }} 
                 />
             )}

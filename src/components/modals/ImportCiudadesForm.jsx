@@ -11,9 +11,10 @@ import { useToast } from '@/components/ui/use-toast';
 import Table from '@/components/ui/Table';
 import { cn } from '@/lib/utils';
 
-const ImportCiudadesForm = ({ isOpen, onClose }) => {
+// 🚀 AHORA RECIBE LA LISTA REAL DE LA BASE DE DATOS COMO PROP (existingItems)
+const ImportCiudadesForm = ({ isOpen, onClose, existingItems = [] }) => {
   const { user } = useAuth();
-  const { importCiudades, validateJSONStructure, getCiudadesList } = useAppData();
+  const { importCiudades, validateJSONStructure } = useAppData();
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   
@@ -34,36 +35,39 @@ const ImportCiudadesForm = ({ isOpen, onClose }) => {
         try {
             const json = JSON.parse(event.target.result);
             
-            // Validar Estructura Base
             const structureCheck = validateJSONStructure(json);
             if (!structureCheck.isValid) throw new Error(structureCheck.message);
 
             setJsonContent(json);
             
-            // 🚀 SOLUCIÓN: Usar parishId si no hay dioceseId
-            const targetContextId = user?.parishId || user?.dioceseId;
-            const existingData = getCiudadesList(targetContextId);
-            
             const errors = [];
             const warnings = [];
             let validCount = 0;
+            
+            // 🚀 DOBLE FILTRO: Memoria para no duplicar los que vengan repetidos en el propio archivo
+            const nombresEnArchivo = new Set();
 
             json.data.forEach((item, index) => {
                 const rowNum = index + 1;
                 const nombre = (item.data || item.Data || item.nombre || '').trim();
+                const nombreLowerCase = nombre.toLowerCase();
                 
                 if (!nombre) {
                     errors.push(`Fila ${rowNum}: El nombre de la ciudad es obligatorio.`);
                     return;
                 }
 
-                const isDuplicate = existingData.some(ex => 
-                    String(ex.nombre).toLowerCase() === nombre.toLowerCase()
-                );
+                // 1. Validar contra la Base de Datos real
+                const isDuplicateDB = existingItems.some(ex => String(ex.nombre).toLowerCase() === nombreLowerCase);
+                // 2. Validar contra el mismo archivo
+                const isDuplicateFile = nombresEnArchivo.has(nombreLowerCase);
                 
-                if (isDuplicate) {
-                    warnings.push(`Fila ${rowNum}: "${nombre.toUpperCase()}" ya existe en el catálogo.`);
+                if (isDuplicateDB) {
+                    warnings.push(`Fila ${rowNum}: "${nombre.toUpperCase()}" ya existe en el sistema.`);
+                } else if (isDuplicateFile) {
+                    warnings.push(`Fila ${rowNum}: "${nombre.toUpperCase()}" está repetido dentro de este archivo JSON.`);
                 } else {
+                    nombresEnArchivo.add(nombreLowerCase);
                     validCount++;
                 }
             });
@@ -85,13 +89,11 @@ const ImportCiudadesForm = ({ isOpen, onClose }) => {
   };
 
   // --- 2. EJECUCIÓN DE LA IMPORTACIÓN ---
-  // 🚀 CORRECCIÓN: Agregado 'async'
   const handleConfirm = async () => {
       if (!jsonContent?.data) return;
       
       setLoading(true);
       
-      // 🚀 SOLUCIÓN: Usar parishId si no hay dioceseId
       const targetContextId = user?.parishId || user?.dioceseId;
       
       if (!targetContextId) {
@@ -100,21 +102,28 @@ const ImportCiudadesForm = ({ isOpen, onClose }) => {
           return;
       }
 
-      const existingData = getCiudadesList(targetContextId);
-      
-      // Filtrar duplicados antes de enviar al motor de importación
+      // 🚀 DOBLE FILTRO EXACTO A LA HORA DE GUARDAR
+      const nombresGuardados = new Set();
+
       const filteredData = jsonContent.data.filter(item => {
           const nombre = (item.data || item.Data || item.nombre || '').trim().toLowerCase();
-          return !existingData.some(ex => String(ex.nombre).toLowerCase() === nombre);
+          if (!nombre) return false;
+
+          const existsInDB = existingItems.some(ex => String(ex.nombre).toLowerCase() === nombre);
+          const existsInFileAlready = nombresGuardados.has(nombre);
+
+          if (existsInDB || existsInFileAlready) return false;
+
+          nombresGuardados.add(nombre);
+          return true;
       });
 
       if (filteredData.length === 0) {
-          toast({ title: "Sin novedades", description: "Todas las ciudades del archivo ya existen." });
+          toast({ title: "Sin novedades", description: "Todas las ciudades del archivo ya existen en la base de datos o están repetidas." });
           handleClose();
           return;
       }
 
-      // 🚀 CORRECCIÓN: Agregado 'await' para esperar la respuesta asíncrona de Supabase
       const result = await importCiudades({ ...jsonContent, data: filteredData }, targetContextId, false);
 
       if (result.success) {
