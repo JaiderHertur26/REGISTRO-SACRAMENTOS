@@ -468,24 +468,32 @@ export const AppDataProvider = ({ children }) => {
         deleteParroco: CatalogsService.deleteParroco,
         actualizarParrocoActual: CatalogsService.actualizarParrocoActual,
         importParrocos: CatalogsService.importParrocos,
+        
         getDiocesis: CatalogsService.getDiocesis,
         addDiocesis: CatalogsService.addDiocesis,
         updateDiocesis: CatalogsService.updateDiocesis,
         deleteDiocesis: CatalogsService.deleteDiocesis,
+        importDiocesis: CatalogsService.importDiocesis, // 🚀 AGREGADO
+
         getIglesias: CatalogsService.getIglesias,
         getIglesiasList: CatalogsService.getIglesiasList,
         addIglesia: CatalogsService.addIglesia,
         updateIglesia: CatalogsService.updateIglesia,
         deleteIglesia: CatalogsService.deleteIglesia,
+        importIglesias: CatalogsService.importIglesias, // 🚀 AGREGADO
+
         getObispos: CatalogsService.getObispos,
         addObispo: CatalogsService.addObispo,
         updateObispo: CatalogsService.updateObispo,
         deleteObispo: CatalogsService.deleteObispo,
+        importObispos: CatalogsService.importObispos, // 🚀 AGREGADO
+
         getCiudadesList: CatalogsService.getCiudadesList,
         addCiudad: CatalogsService.addCiudad,
         updateCiudad: CatalogsService.updateCiudad,
         deleteCiudad: CatalogsService.deleteCiudad,
         importCiudades: CatalogsService.importCiudades,
+        
         getPaises: CatalogsService.getPaises,
         getParroquiasExternas: CatalogsService.getParroquiasExternas,
 
@@ -497,6 +505,7 @@ export const AppDataProvider = ({ children }) => {
         addMisDatos: CatalogsService.addMisDatosRecord,
         updateMisDatos: CatalogsService.updateMisDatosRecord,
         deleteMisDatos: CatalogsService.deleteMisDatosRecord,
+        importMisDatos: CatalogsService.importMisDatos, // 🚀 AGREGADO
 
         // --- DECRETOS Y CANCILLERÍA ---
         getConceptosAnulacion: DecreesService.getConceptosAnulacion,
