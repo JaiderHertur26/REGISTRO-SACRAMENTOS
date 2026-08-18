@@ -4,7 +4,7 @@ import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación de Supabase
+import { supabase } from '@/lib/supabaseClient'; 
 import { 
     Pencil, Trash2, Search, Plus, Eye, 
     Eraser, Building2, ShieldCheck, 
@@ -43,10 +43,8 @@ const MisDatosList = () => {
     });
     const [selectedRecord, setSelectedRecord] = useState(null);
 
-    // 🚀 CORRECCIÓN CRÍTICA (Error 403): Eliminamos 'default'. Debe ser null si no existe para no romper el tipo UUID en Supabase.
     const entityId = user?.parishId || user?.dioceseId || null;
 
-    // 🚀 Lógica de Espejo 1 a 1 con Supabase
     const loadData = async () => {
         if (!entityId) return;
 
@@ -74,7 +72,7 @@ const MisDatosList = () => {
             localStorage.setItem('mis_datos', JSON.stringify(processedData || []));
         } catch (error) {
             console.error("Error cargando Mis Datos:", error);
-            setItems(getMisDatosList(entityId) || []); // Fallback offline
+            setItems(getMisDatosList(entityId) || []); 
         } finally {
             setIsLoading(false);
         }
@@ -93,7 +91,6 @@ const MisDatosList = () => {
             return;
         }
 
-        // 🚀 BLOQUEO DE DUPLICADOS MANUALES
         const isDuplicate = items.some(i => 
             (newData.idcod && String(i.idcod).toLowerCase() === String(newData.idcod).toLowerCase()) ||
             (newData.nronit && String(i.nronit).toLowerCase() === String(newData.nronit).toLowerCase()) ||
@@ -128,6 +125,7 @@ const MisDatosList = () => {
             if (result.success) {
                 toast({ title: 'Actualizado', description: 'Cambios sincronizados exitosamente.' });
                 setModals(m => ({ ...m, edit: false }));
+                setSelectedRecord(null);
                 await loadData();
             } else {
                  throw new Error(result.message);
@@ -188,7 +186,6 @@ const MisDatosList = () => {
                         variant="ghost"
                         onClick={() => {
                             if(window.confirm("Esta acción ha sido deshabilitada temporalmente por seguridad.")) {
-                               // Funcionalidad de borrado masivo desactivada para evitar desastres en Supabase
                             }
                         }}
                         className="text-red-400 hover:text-red-600 font-black uppercase tracking-widest text-[10px] hidden"
@@ -245,9 +242,28 @@ const MisDatosList = () => {
                                     <tr key={item.id} className="group hover:bg-blue-50/30 transition-all duration-300">
                                         <td className="px-8 py-4">
                                             <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button onClick={() => { setSelectedRecord(item); setModals(m => ({ ...m, view: true })); }} className="p-2.5 text-gray-400 hover:text-[#4B7BA7] hover:bg-white rounded-xl transition-all"><Eye className="w-4 h-4" /></button>
-                                                <button onClick={() => { setSelectedRecord(item); setModals(m => ({ ...m, edit: true })); }} className="p-2.5 text-[#4B7BA7] hover:bg-white rounded-xl transition-all"><Pencil className="w-4 h-4" /></button>
-                                                <button onClick={() => { setSelectedRecord(item); setModals(m => ({ ...m, delete: true })); }} className="p-2.5 text-red-400 hover:bg-white rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button>
+                                                {/* 🚀 CORRECCIÓN DE BOTONES */}
+                                                <button 
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); setSelectedRecord(item); setModals(m => ({ ...m, view: true })); }} 
+                                                    className="p-2.5 text-gray-400 hover:text-[#4B7BA7] hover:bg-white rounded-xl transition-all cursor-pointer relative z-10"
+                                                >
+                                                    <Eye className="w-4 h-4" />
+                                                </button>
+                                                <button 
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); setSelectedRecord(item); setModals(m => ({ ...m, edit: true })); }} 
+                                                    className="p-2.5 text-[#4B7BA7] hover:bg-white rounded-xl transition-all cursor-pointer relative z-10"
+                                                >
+                                                    <Pencil className="w-4 h-4" />
+                                                </button>
+                                                <button 
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); setSelectedRecord(item); setModals(m => ({ ...m, delete: true })); }} 
+                                                    className="p-2.5 text-red-400 hover:bg-white rounded-xl transition-all cursor-pointer relative z-10"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
@@ -291,34 +307,38 @@ const MisDatosList = () => {
                 onSave={handleSaveManual} 
             />
             
-            <ViewMisDatosModal 
-                isOpen={modals.view} 
-                onClose={() => setModals(m => ({ ...m, view: false }))} 
-                data={selectedRecord} 
-            />
+            {/* 🚀 EL CANDADO CONDICIONAL QUE SOLUCIONA EL FALLO */}
+            {selectedRecord && (
+                <>
+                    <ViewMisDatosModal 
+                        isOpen={modals.view} 
+                        onClose={() => { setModals(m => ({ ...m, view: false })); setSelectedRecord(null); }} 
+                        data={selectedRecord} 
+                    />
 
-            <EditMisDatosFormModal 
-                isOpen={modals.edit} 
-                onClose={() => setModals(m => ({ ...m, edit: false }))} 
-                record={selectedRecord} 
-                onSave={handleEditSave} 
-                allItems={items} 
-            />
+                    <EditMisDatosFormModal 
+                        isOpen={modals.edit} 
+                        onClose={() => { setModals(m => ({ ...m, edit: false })); setSelectedRecord(null); }} 
+                        record={selectedRecord} 
+                        onSave={handleEditSave} 
+                        allItems={items} 
+                    />
 
-            <ConfirmationDialog 
-                isOpen={modals.delete} 
-                title="¿Eliminar Membrete?"
-                message={`Estás a punto de borrar "${selectedRecord?.nombre}". Esto afectará a los documentos generados con este perfil.`}
-                onConfirm={handleDeleteConfirm}
-                onClose={() => setModals(m => ({ ...m, delete: false }))}
-                confirmText={isDeleting ? "Borrando..." : "Eliminar Definitivamente"}
-                variant="destructive"
-            />
+                    <ConfirmationDialog 
+                        isOpen={modals.delete} 
+                        title="¿Eliminar Membrete?"
+                        message={`Estás a punto de borrar "${selectedRecord?.nombre}". Esto afectará a los documentos generados con este perfil.`}
+                        onConfirm={handleDeleteConfirm}
+                        onClose={() => { setModals(m => ({ ...m, delete: false })); setSelectedRecord(null); }}
+                        confirmText={isDeleting ? "Borrando..." : "Eliminar Definitivamente"}
+                        variant="destructive"
+                    />
+                </>
+            )}
 
             {modals.import && (
                 <ImportMisDatosForm 
                     isOpen={modals.import}
-                    // 🚀 PASAMOS LA LISTA REAL A LA IMPORTACIÓN
                     existingItems={items}
                     onClose={() => {
                         setModals(m => ({ ...m, import: false }));
