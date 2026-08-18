@@ -34,7 +34,6 @@ const MisDatosList = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isDeleting, setIsDeleting] = useState(false);
     
-    // Modal Management
     const [modals, setModals] = useState({
         manual: false,
         view: false,
@@ -44,20 +43,23 @@ const MisDatosList = () => {
     });
     const [selectedRecord, setSelectedRecord] = useState(null);
 
-    const entityId = user?.parishId || user?.dioceseId || 'default';
+    // 🚀 CORRECCIÓN CRÍTICA (Error 403): Eliminamos 'default'. Debe ser null si no existe para no romper el tipo UUID en Supabase.
+    const entityId = user?.parishId || user?.dioceseId || null;
 
     // 🚀 Lógica de Espejo 1 a 1 con Supabase
     const loadData = async () => {
+        if (!entityId) return;
+
         setIsLoading(true);
         try {
             const { data, error } = await supabase
                 .from('mis_datos')
                 .select('*')
-                .eq('entity_id', entityId);
+                .eq('entity_id', entityId)
+                .order('nombre', { ascending: true });
 
             if (error) throw error;
 
-            // Procesamos el JSONB igual que en el backend
             const processedData = data.map(dbItem => {
                 let rawPayload = dbItem.payload;
                 if (typeof rawPayload === 'string') {
@@ -72,8 +74,7 @@ const MisDatosList = () => {
             localStorage.setItem('mis_datos', JSON.stringify(processedData || []));
         } catch (error) {
             console.error("Error cargando Mis Datos:", error);
-            toast({ title: 'Error de Red', description: 'Leyendo desde caché local.', variant: 'destructive' });
-            setItems(getMisDatosList(entityId) || []); // Fallback
+            setItems(getMisDatosList(entityId) || []); // Fallback offline
         } finally {
             setIsLoading(false);
         }
@@ -86,8 +87,24 @@ const MisDatosList = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [entityId]);
 
-    // --- 2. ACCIONES DE GESTIÓN ---
     const handleSaveManual = async (newData) => {
+        if (!entityId) {
+            toast({ title: 'Error de Sesión', description: 'No se identificó la entidad asociada.', variant: 'destructive' });
+            return;
+        }
+
+        // 🚀 BLOQUEO DE DUPLICADOS MANUALES
+        const isDuplicate = items.some(i => 
+            (newData.idcod && String(i.idcod).toLowerCase() === String(newData.idcod).toLowerCase()) ||
+            (newData.nronit && String(i.nronit).toLowerCase() === String(newData.nronit).toLowerCase()) ||
+            (newData.nombre && String(i.nombre).toLowerCase() === String(newData.nombre).toLowerCase())
+        );
+
+        if (isDuplicate) {
+            toast({ title: 'Duplicado', description: 'Este perfil (NIT, Código o Nombre) ya existe.', variant: 'destructive' });
+            return;
+        }
+
         setIsLoading(true);
         try {
             const result = await addMisDatosRecord(newData, entityId);
@@ -167,6 +184,18 @@ const MisDatosList = () => {
                 </div>
                 
                 <div className="flex items-center gap-3 w-full lg:w-auto">
+                    <Button 
+                        variant="ghost"
+                        onClick={() => {
+                            if(window.confirm("Esta acción ha sido deshabilitada temporalmente por seguridad.")) {
+                               // Funcionalidad de borrado masivo desactivada para evitar desastres en Supabase
+                            }
+                        }}
+                        className="text-red-400 hover:text-red-600 font-black uppercase tracking-widest text-[10px] hidden"
+                    >
+                        <Eraser className="w-4 h-4 mr-2" /> Limpiar Todo
+                    </Button>
+
                     <Button 
                         onClick={() => setModals(m => ({ ...m, import: true }))} 
                         variant="outline"
@@ -289,6 +318,8 @@ const MisDatosList = () => {
             {modals.import && (
                 <ImportMisDatosForm 
                     isOpen={modals.import}
+                    // 🚀 PASAMOS LA LISTA REAL A LA IMPORTACIÓN
+                    existingItems={items}
                     onClose={() => {
                         setModals(m => ({ ...m, import: false }));
                         loadData(); 
