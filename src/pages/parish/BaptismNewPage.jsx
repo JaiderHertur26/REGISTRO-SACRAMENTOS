@@ -27,6 +27,7 @@ const BaptismNewPage = () => {
     const [parishInfo, setParishInfo] = useState(null); 
     const [ciudades, setCiudades] = useState([]); 
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
+    const [listaSacerdotes, setListaSacerdotes] = useState([]); // 🚀 Agregado para cálculos de fechas
     const [fullParamsCache, setFullParamsCache] = useState(null); 
 
     // 📖 DICCIONARIO COMPLETO (25 CAMPOS DE LA VERSIÓN NEW)
@@ -55,7 +56,17 @@ const BaptismNewPage = () => {
             setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
             
             const listaParrocos = getParrocos(parishId) || [];
+            setListaSacerdotes(listaParrocos); // 🚀 Guardamos objetos completos
             setParrocosSugeridos(listaParrocos.map(p => `${p.nombre} ${p.apellido || ''}`.trim().toUpperCase()));
+
+            // 🚀 SOLUCIÓN: Auto-asignar el Párroco Actual (Estado 1 o ACTIVO)
+            const parrocoActual = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
+            if (parrocoActual) {
+                setFormData(prev => ({ 
+                    ...prev, 
+                    daFe: `${parrocoActual.nombre} ${parrocoActual.apellido || ''}`.trim().toUpperCase() 
+                }));
+            }
 
             const p = await getBaptismParameters(parishId);
             if (p) {
@@ -65,6 +76,25 @@ const BaptismNewPage = () => {
         };
         loadInitialData();
     }, [parishId, nombreParroquia, getMisDatosList, getCiudadesList, getParrocos, getBaptismParameters]);
+
+    // 🚀 SOLUCIÓN: Auto-completar Ministro según la Fecha del Sacramento
+    useEffect(() => {
+        if (!formData.fechaSacramento || listaSacerdotes.length === 0) return;
+
+        const fechaSeleccionada = new Date(formData.fechaSacramento);
+        const sacerdoteEncontrado = listaSacerdotes.find(s => {
+            const inicio = new Date(s.fechaIngreso || s.fechaNombramiento);
+            const fin = s.fechaSalida ? new Date(s.fechaSalida) : new Date();
+            return fechaSeleccionada >= inicio && fechaSeleccionada <= fin;
+        });
+
+        if (sacerdoteEncontrado) {
+            setFormData(prev => ({ 
+                ...prev, 
+                ministro: `${sacerdoteEncontrado.nombre} ${sacerdoteEncontrado.apellido || ''}`.trim().toUpperCase() 
+            }));
+        }
+    }, [formData.fechaSacramento, listaSacerdotes]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -203,7 +233,7 @@ const BaptismNewPage = () => {
                                     <div><label className={labelClass}><MapPin className="w-3 h-3 inline mb-0.5"/> Dirección de Residencia</label><input type="text" name="direccion" value={formData.direccion} onChange={handleChange} className={inputClass} /></div>
                                     <div>
                                         <label className={labelClass}>Estado Civil de los Padres</label>
-                                        <select name="tipoUnionPadres" value={formData.tipoUnionPadres} onChange={handleChange} className={inputClass}>
+                                        <select name="tipoUnionPadres" value={formData.tipoUnionPadres} onChange={handleChange} className="w-full md:w-1/2 px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl font-black text-gray-600 uppercase outline-none shadow-sm focus:bg-white transition-all">
                                             <option value="">SELECCIONE...</option>
                                             <option value="MATRIMONIO CATÓLICO">MATRIMONIO CATÓLICO</option>
                                             <option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option>
