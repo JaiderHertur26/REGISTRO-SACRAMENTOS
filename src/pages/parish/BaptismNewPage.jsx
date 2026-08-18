@@ -27,10 +27,9 @@ const BaptismNewPage = () => {
     const [parishInfo, setParishInfo] = useState(null); 
     const [ciudades, setCiudades] = useState([]); 
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
-    const [listaSacerdotes, setListaSacerdotes] = useState([]); // 🚀 Agregado para cálculos de fechas
+    const [listaSacerdotes, setListaSacerdotes] = useState([]); 
     const [fullParamsCache, setFullParamsCache] = useState(null); 
 
-    // 📖 DICCIONARIO COMPLETO (25 CAMPOS DE LA VERSIÓN NEW)
     const [formData, setFormData] = useState({
         numeroRegistro: '', Libro: '---', folio: '---', numero: '---',
         fechaSacramento: '', horaSacramento: '10:00', lugarBautismo: nombreParroquia,
@@ -56,15 +55,17 @@ const BaptismNewPage = () => {
             setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
             
             const listaParrocos = getParrocos(parishId) || [];
-            setListaSacerdotes(listaParrocos); // 🚀 Guardamos objetos completos
+            setListaSacerdotes(listaParrocos); 
             setParrocosSugeridos(listaParrocos.map(p => `${p.nombre} ${p.apellido || ''}`.trim().toUpperCase()));
 
-            // 🚀 SOLUCIÓN: Auto-asignar el Párroco Actual (Estado 1 o ACTIVO)
+            // 🚀 SOLUCIÓN: Auto-asignar el Párroco Actual a "Da Fe" y "Ministro" al cargar
             const parrocoActual = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
             if (parrocoActual) {
+                const nombreCompletoActual = `${parrocoActual.nombre} ${parrocoActual.apellido || ''}`.trim().toUpperCase();
                 setFormData(prev => ({ 
                     ...prev, 
-                    daFe: `${parrocoActual.nombre} ${parrocoActual.apellido || ''}`.trim().toUpperCase() 
+                    daFe: nombreCompletoActual,
+                    ministro: nombreCompletoActual // Por defecto el celebrante es el párroco actual
                 }));
             }
 
@@ -77,7 +78,7 @@ const BaptismNewPage = () => {
         loadInitialData();
     }, [parishId, nombreParroquia, getMisDatosList, getCiudadesList, getParrocos, getBaptismParameters]);
 
-    // 🚀 SOLUCIÓN: Auto-completar Ministro según la Fecha del Sacramento
+    // 🚀 INTELIGENCIA: Si cambian la fecha del sacramento, actualizar el Ministro Celebrante
     useEffect(() => {
         if (!formData.fechaSacramento || listaSacerdotes.length === 0) return;
 
@@ -270,7 +271,7 @@ const BaptismNewPage = () => {
                                 <SectionHeader number="07" title="Ministros" icon={BookOpen} />
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                     <div><label className={labelClass}>Sacerdote Celebrante</label><input type="text" name="ministro" value={formData.ministro} onChange={handleChange} className={inputClass} list="lista-parrocos" /></div>
-                                    <div><label className={labelClass}>Párroco que Da Fe</label><input type="text" name="daFe" value={formData.daFe} onChange={handleChange} className={inputClass} list="lista-parrocos" placeholder="DEJAR EN BLANCO PARA USAR PÁRROCO ACTUAL" /></div>
+                                    <div><label className={labelClass}>Párroco que Da Fe</label><input type="text" name="daFe" value={formData.daFe} onChange={handleChange} className={inputClass} list="lista-parrocos" /></div>
                                 </div>
                             </section>
 
