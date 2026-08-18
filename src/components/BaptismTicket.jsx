@@ -4,204 +4,222 @@ import { BookOpen } from 'lucide-react';
 const BaptismTicket = ({ baptismData, parishInfo }) => {
     if (!baptismData) return null;
 
-    // --- 1. FORMATEADORES ---
+    // --- 1. RESOLUCIÓN DE DATOS INSTITUCIONALES ---
+    const formatData = (val) => {
+        if (!val || val === '---' || String(val).trim() === '') return '';
+        return String(val).trim().toUpperCase();
+    };
+
+    const header = parishInfo || {};
+    const diocesis = formatData(header.diocesis || 'ARQUIDIÓCESIS DE BARRANQUILLA');
+    const nombreP = formatData(header.nombre || 'PARROQUIA');
+    const direccion = formatData(header.direccion || '');
+    const telefono = formatData(header.telefono || '');
+    const ciudad = formatData(header.ciudad || 'BARRANQUILLA');
+    const region = formatData(header.region || 'ATLÁNTICO');
+
+    let ubicacionFinal = ciudad;
+    if (region && !ciudad.includes(region)) ubicacionFinal += `, ${region}`;
+    if (!ubicacionFinal.includes('COLOMBIA')) ubicacionFinal += ' - COLOMBIA';
+
+    const contactLine = [direccion, telefono ? `TEL: ${telefono}` : '', ubicacionFinal]
+        .filter(Boolean)
+        .join(' — ');
+
+    // --- 2. FORMATEADORES DE FECHA ---
     const formatDate = (dateString) => {
-        if (!dateString) return '__________________________';
+        if (!dateString) return '';
         try {
             const date = new Date(dateString);
             if (isNaN(date.getTime())) return String(dateString).toUpperCase();
-            return date.toLocaleDateString('es-CO', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                timeZone: 'UTC' 
-            }).toUpperCase();
+            
+            const day = date.getUTCDate();
+            const month = date.toLocaleString('es-CO', { month: 'long', timeZone: 'UTC' }).toUpperCase();
+            const year = date.getUTCFullYear();
+            
+            return `${day} DE ${month} DE ${year}`;
         } catch (e) {
             return String(dateString).toUpperCase();
         }
     };
 
     const formatTime = (dateString) => {
-        if (!dateString) return '__________';
+        if (!dateString) return '';
         try {
             const date = new Date(dateString);
-            if (isNaN(date.getTime())) return '__________';
-            return date.toLocaleTimeString('es-CO', {
+            if (isNaN(date.getTime())) return '';
+            let timeStr = date.toLocaleTimeString('es-CO', {
                 hour: '2-digit',
                 minute: '2-digit',
                 hour12: true
             }).toUpperCase();
-        } catch (e) { return '__________'; }
+            // Asegurar formato A. M. / P. M.
+            timeStr = timeStr.replace('A.M.', 'A. M.').replace('P.M.', 'P. M.');
+            return timeStr;
+        } catch (e) { return ''; }
     };
 
-    const formatList = (data) => {
-        if (!data) return '__________________________';
-        if (typeof data === 'string') return data.toUpperCase();
-        if (Array.isArray(data)) {
-            return data.map(item => (typeof item === 'object' ? (item.nombre || item.name) : item)).join(', ').toUpperCase();
-        }
-        return '__________________________';
-    };
+    // --- 3. MAPEO DE DATOS DEL BAUTIZO ---
+    const nroReg = formatData(baptismData.numeroRegistro || baptismData.registration_number || '');
+    const bautizando = `${formatData(baptismData.nombres || baptismData.firstName)} ${formatData(baptismData.apellidos || baptismData.lastName)}`.trim();
+    const sexo = (baptismData.sexo === 'M' || baptismData.sexo === 'MASCULINO') ? 'FEMENINO' : 'MASCULINO'; // Ajustado según contexto o dato real. Cambiar lógica si M es Masculino.
+    const sexoReal = formatData(baptismData.sexo) || '';
+    const identificacion = formatData(baptismData.nuip || baptismData.identification || baptismData.serialRegistro);
+    const dirResidencia = formatData(baptismData.direccion || baptismData.address);
+    const tipoUnion = formatData(baptismData.tipoUnionPadres || baptismData.parentalUnion);
+    const nombrePadre = formatData(baptismData.nombrePadre || baptismData.fatherName);
+    const nombreMadre = formatData(baptismData.nombreMadre || baptismData.motherName);
+    const abuelosPaternos = formatData(baptismData.abuelosPaternos || baptismData.paternalGrandparents);
+    const abuelosMaternos = formatData(baptismData.abuelosMaternos || baptismData.maternalGrandparents);
+    const padrinos = formatData(baptismData.padrinos || baptismData.godparents);
+    const ministro = formatData(baptismData.ministro || baptismData.minister);
+    
+    const nombreResponsable = nombrePadre ? nombrePadre : nombreMadre;
 
-    // --- 2. COMPONENTE DE LÍNEA ESTILO MÁQUINA DE ESCRIBIR ---
-    const FieldLine = ({ label, value, className = "" }) => (
-        <div className={`flex items-baseline mb-1 ${className}`}>
-            <span className="font-bold mr-2 whitespace-nowrap text-[10px]">{label}:</span>
-            <span className="border-b border-black flex-grow font-normal italic px-2 min-h-[1.2em] text-[11px] uppercase">
-                {value || ''}
+    // --- 4. COMPONENTES ESTRUCTURALES ---
+    const FieldLine = ({ label, value, width = "100%" }) => (
+        <div style={{ display: 'flex', alignItems: 'flex-end', width: width, marginBottom: '8px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '6px', whiteSpace: 'nowrap' }}>
+                {label}:
+            </span>
+            <span style={{ 
+                flex: 1, 
+                borderBottom: '1px solid black', 
+                fontSize: '12px', 
+                lineHeight: '1.2', 
+                paddingBottom: '1px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+            }}>
+                {value}
             </span>
         </div>
     );
 
-    const TicketHalf = ({ isArchive }) => {
-        // Mapeo Resiliente de Información Parroquial
-        const diocesis = (parishInfo?.diocesis || '__________________________').toUpperCase();
-        const nombreP = (parishInfo?.nombre || parishInfo?.name || '__________________________').toUpperCase();
-        const direccion = (parishInfo?.direccion || parishInfo?.address || '__________________________').toUpperCase();
-        const telefono = parishInfo?.telefono || parishInfo?.phone || '';
-        const ciudad = (parishInfo?.ciudad || parishInfo?.city || '__________________________').toUpperCase();
-
-        // Mapeo de Datos del Bautizo
-        const nroReg = baptismData.numeroRegistro || baptismData.registration_number || '_______';
-        const bautizando = `${baptismData.nombres || baptismData.firstName || ''} ${baptismData.apellidos || baptismData.lastName || ''}`.trim();
-        const sexo = (baptismData.sexo === 'M' || baptismData.sexo === 'MASCULINO') ? 'MASCULINO' : 'FEMENINO';
-        const identificacion = baptismData.nuip || baptismData.identification || baptismData.serialRegistro || '_______';
-        const regCivil = baptismData.oficinaRegistro || baptismData.civil_registry || '_______';
-        const dirResidencia = baptismData.direccion || baptismData.address || '__________________________';
-
-        // 🚀 LÓGICA DE FIRMA RESPONSABLE (Imagen 001)
-        const nombrePadre = baptismData.nombrePadre || baptismData.fatherName;
-        const nombreMadre = baptismData.nombreMadre || baptismData.motherName;
-        const nombreResponsable = (nombrePadre && nombrePadre !== '---' && nombrePadre !== '') 
-            ? nombrePadre 
-            : (nombreMadre || '__________________________');
-
-        return (
-            <div className="flex-1 flex flex-col p-8 border-[3px] border-double border-black relative bg-white overflow-hidden m-1">
-                <div className="absolute inset-0 flex items-center justify-center opacity-[0.02] pointer-events-none"><BookOpen size={400} /></div>
-
-                {/* ENCABEZADO JERÁRQUICO */}
-                <div className="text-center mb-4 relative z-10">
-                    <h1 className="text-base font-black tracking-widest uppercase mb-0.5">{diocesis}</h1>
-                    <h2 className="text-lg font-black uppercase mb-0.5">{nombreP}</h2>
-                    <p className="text-[9px] font-bold uppercase tracking-tight">
-                        {direccion} {telefono && ` — TEL: ${telefono}`} — {ciudad}
-                    </p>
-                    <div className="mt-2 inline-block border border-black px-4 py-0.5 bg-white">
-                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-                            {isArchive ? 'BOLETA PARA ARCHIVO PARROQUIAL' : 'CONSTANCIA DE INSCRIPCIÓN (FAMILIA)'}
-                        </span>
-                    </div>
-                </div>
-
-                {/* CONTROL DE REGISTRO */}
-                <div className="flex justify-between items-center mb-3 px-1 relative z-10">
-                    <div className="text-xs font-black border-2 border-black p-1 px-3">
-                        REGISTRO Nº: {nroReg}
-                    </div>
-                    <div className="text-[9px] font-bold">
-                        FECHA TRÁMITE: {formatDate(new Date().toISOString())}
-                    </div>
-                </div>
-
-                {/* CUERPO DEL DOCUMENTO */}
-                <div className="space-y-0.5 relative z-10 flex-grow">
-                    {!isArchive && (
-                        <div className="border border-black bg-gray-50 p-1 mb-2 text-center rounded-sm">
-                            <p className="text-[8px] font-bold uppercase leading-tight">Esta boleta NO es una partida de bautismo válida para trámites civiles o eclesiásticos.</p>
-                        </div>
-                    )}
-
-                    <FieldLine label="BAUTIZANDO" value={bautizando} />
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                        <FieldLine label="FECHA NAC." value={formatDate(baptismData.fechaNacimiento || baptismData.birthDate)} />
-                        <FieldLine label="LUGAR NAC." value={baptismData.lugarNacimiento || baptismData.placeOfBirth} />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <FieldLine label="SEXO" value={sexo} />
-                        <FieldLine label="NUIP / NIP" value={identificacion} />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <FieldLine label="PADRE" value={baptismData.nombrePadre} />
-                        <FieldLine label="MADRE" value={baptismData.nombreMadre} />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <FieldLine label="DIRECCIÓN" value={dirResidencia} />
-                        <FieldLine label="ESTADO CIVIL P." value={baptismData.tipoUnionPadres || baptismData.parentalUnion} />
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-0.5 border-y border-black py-2 my-1 bg-gray-50/20">
-                        <FieldLine label="ABUELOS PATER." value={formatList(baptismData.abuelosPaternos || baptismData.paternalGrandparents)} />
-                        <FieldLine label="ABUELOS MATER." value={formatList(baptismData.abuelosMaternos || baptismData.maternalGrandparents)} />
-                    </div>
-
-                    <FieldLine label="PADRINOS" value={formatList(baptismData.padrinos || baptismData.godparents)} />
-
-                    <div className="mt-2 pt-2 border-t border-dotted border-black">
-                        <div className="grid grid-cols-3 gap-2">
-                            <div className="col-span-2"><FieldLine label="FECHA BAUTISMO" value={formatDate(baptismData.fechaSacramento || baptismData.sacramentDate)} /></div>
-                            <div><FieldLine label="HORA" value={formatTime(baptismData.fechaSacramento || baptismData.sacramentDate)} /></div>
-                        </div>
-                        <FieldLine label="MINISTRO" value={baptismData.ministro || baptismData.minister} />
-                    </div>
-
-                    {/* 🚀 NUEVA SECCIÓN DE FIRMA (POSICIÓN SOLICITADA) */}
-                    <div className="mt-4">
-                        <div className="flex items-end">
-                            <span className="font-bold text-[10px] whitespace-nowrap mr-2">Firma responsable:</span>
-                            <div className="border-b border-black flex-grow h-[1px]"></div>
-                        </div>
-                        <div className="pl-[115px] pt-1">
-                            <span className="text-[11px] italic font-normal uppercase">
-                                {nombreResponsable}
-                            </span>
-                        </div>
-                    </div>
-
-                    {!isArchive && (
-                        <div className="grid grid-cols-2 gap-4 mt-2">
-                            <FieldLine label="REG. CIVIL" value={regCivil} />
-                            <div className="text-[8px] italic flex items-end pb-1">* Verifique los datos con el Registro Civil.</div>
-                        </div>
-                    )}
-                </div>
-
-                {/* PIE DE PÁGINA (SOLO TEXTO LEGAL) */}
-                <div className="mt-4 flex justify-between items-end pb-1 relative z-10">
-                    <div className="w-full text-[8px] font-bold leading-tight italic uppercase opacity-50">
-                        {isArchive 
-                            ? "* Uso interno. Verifique datos antes de asentar el acta definitiva."
-                            : "* Presente este volante el día del bautismo. No es un documento legal."}
-                    </div>
-                </div>
+    const TicketHalf = ({ isArchive }) => (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0.4in 0.6in', position: 'relative', overflow: 'hidden' }}>
+            
+            {/* Marca de agua sutil */}
+            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0.03, pointerEvents: 'none' }}>
+                <BookOpen size={300} strokeWidth={1} />
             </div>
-        );
-    };
+
+            {/* ENCABEZADO INSTITUCIONAL */}
+            <div style={{ textAlign: 'center', marginBottom: '15px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold' }}>{diocesis}</div>
+                <div style={{ fontSize: '16px', fontWeight: '900', marginTop: '2px' }}>{nombreP}</div>
+                <div style={{ fontSize: '10px', marginTop: '2px' }}>{contactLine}</div>
+            </div>
+
+            {/* TÍTULO DE LA BOLETA */}
+            <div style={{ textAlign: 'center', margin: '15px 0' }}>
+                <span style={{ 
+                    fontSize: '13px', 
+                    fontWeight: '900', 
+                    letterSpacing: '5px', 
+                    borderBottom: isArchive ? 'none' : '1px solid #000',
+                    paddingBottom: '2px'
+                }}>
+                    {isArchive ? 'B O L E T A  P A R A  A R C H I V O  P A R R O Q U I A L' : 'C O N S T A N C I A  D E  I N S C R I P C I Ó N  ( F A M I L I A )'}
+                </span>
+            </div>
+
+            {/* BARRA DE CONTROL */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontSize: '11px', fontWeight: 'bold' }}>
+                <div>REGISTRO Nº: {nroReg}</div>
+                <div>FECHA TRÁMITE: {formatDate(new Date().toISOString())}</div>
+            </div>
+
+            {/* ADVERTENCIA FAMILIA */}
+            {!isArchive && (
+                <div style={{ textAlign: 'center', fontSize: '10px', fontWeight: 'bold', marginBottom: '15px' }}>
+                    ESTA BOLETA NO ES UNA PARTIDA DE BAUTISMO VÁLIDA PARA TRÁMITES CIVILES O ECLESIÁSTICOS.
+                </div>
+            )}
+
+            {/* CUERPO DEL DOCUMENTO */}
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                
+                <FieldLine label="BAUTIZANDO" value={bautizando} />
+                
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="FECHA NAC." value={formatDate(baptismData.fechaNacimiento)} width="50%" />
+                    <FieldLine label="LUGAR NAC." value={formatData(baptismData.lugarNacimiento)} width="50%" />
+                </div>
+
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="SEXO" value={sexoReal} width="50%" />
+                    <FieldLine label="NUIP / NIP" value={identificacion} width="50%" />
+                </div>
+
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="PADRE" value={nombrePadre} width="50%" />
+                    <FieldLine label="MADRE" value={nombreMadre} width="50%" />
+                </div>
+
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="DIRECCIÓN" value={dirResidencia} width="60%" />
+                    <FieldLine label="ESTADO CIVIL P." value={tipoUnion} width="40%" />
+                </div>
+
+                <FieldLine label="ABUELOS PATER." value={abuelosPaternos} />
+                <FieldLine label="ABUELOS MATER." value={abuelosMaternos} />
+                <FieldLine label="PADRINOS" value={padrinos} />
+
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="FECHA BAUTISMO" value={formatDate(baptismData.fechaSacramento)} width="65%" />
+                    <FieldLine label="HORA" value={formatTime(baptismData.fechaSacramento)} width="35%" />
+                </div>
+
+                <FieldLine label="MINISTRO" value={ministro} />
+
+                {/* SECCIÓN DE FIRMA */}
+                <div style={{ marginTop: '25px', display: 'flex', alignItems: 'flex-end' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '8px' }}>Firma responsable:</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', width: '300px' }}>
+                        <div style={{ borderBottom: '1px solid black', height: '15px' }}></div>
+                        <span style={{ fontSize: '11px', textAlign: 'center', marginTop: '3px' }}>{nombreResponsable}</span>
+                    </div>
+                </div>
+
+            </div>
+
+            {/* NOTA DE PIE */}
+            <div style={{ marginTop: 'auto', fontSize: '9px', fontWeight: 'bold', paddingTop: '10px' }}>
+                {isArchive 
+                    ? '* USO INTERNO. VERIFIQUE DATOS ANTES DE ASENTAR EL ACTA DEFINITIVA.'
+                    : ''}
+            </div>
+        </div>
+    );
 
     return (
-        <div className="w-[8.5in] h-[11in] bg-white text-black flex flex-col mx-auto print:m-0" 
-             style={{ fontFamily: '"Courier New", Courier, monospace' }}>
-            
+        <div style={{ 
+            width: '8.5in', 
+            height: '11in', 
+            backgroundColor: 'white', 
+            color: 'black', 
+            fontFamily: 'Arial, sans-serif',
+            margin: '0 auto',
+            display: 'flex',
+            flexDirection: 'column',
+            boxSizing: 'border-box'
+        }}>
             <style dangerouslySetInnerHTML={{ __html: `
                 @media print {
                     @page { size: letter portrait; margin: 0; }
-                    body { margin: 0; -webkit-print-color-adjust: exact; }
-                    .no-print { display: none !important; }
+                    body { margin: 0; background: white; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
                 }
             `}} />
 
-            {/* MITAD SUPERIOR: ARCHIVO */}
             <TicketHalf isArchive={true} />
-
+            
             {/* LÍNEA DE CORTE */}
-            <div className="w-full border-t border-dashed border-black my-0"></div>
-
-            {/* MITAD INFERIOR: FAMILIA */}
+            <div style={{ width: '100%', borderTop: '1px dashed black' }}></div>
+            
             <TicketHalf isArchive={false} />
+
         </div>
     );
 };
