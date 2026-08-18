@@ -13,7 +13,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { generateUUID, incrementPaddedValue } from '@/utils/supabaseHelpers';
-import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
+import { marginalNotesEngine } from '@/utils/marginalNotesEngine'; // 🚀 IMPORTAMOS EL CEREBRO
 
 const BaptismRepositionNewPage = () => {
   const { user } = useAuth();
@@ -24,7 +24,6 @@ const BaptismRepositionNewPage = () => {
   const { 
       getConceptosAnulacion, 
       getParrocoActual,
-      getMisDatosList,
       purificarRegistroBautismo,
       guardarEnPermanentes
   } = useAppData();
@@ -67,7 +66,6 @@ const BaptismRepositionNewPage = () => {
   // --- 1. CARGA INICIAL ---
   useEffect(() => {
       if (user?.parishId) {
-          // Filtrar solo conceptos de Reposición
           const allConcepts = getConceptosAnulacion(user.parishId);
           setConceptos(allConcepts.filter(c => 
               c.tipo === 'porReposicion' || 
@@ -75,7 +73,6 @@ const BaptismRepositionNewPage = () => {
               c.concepto?.toLowerCase().includes('reposicion')
           ));
           
-          // Firma automática (párroco activo)
           const priest = getParrocoActual(user.parishId);
           if (priest) {
               const name = `${priest.nombre} ${priest.apellido || ''}`.trim().toUpperCase();
@@ -106,11 +103,12 @@ const BaptismRepositionNewPage = () => {
           let params = JSON.parse(localStorage.getItem(`baptismParameters_${parishId}`) || '{}');
           if (!params.suplementarioLibro) params = { ...params, suplementarioLibro: 1, suplementarioFolio: 1, suplementarioNumero: 1 };
 
-          // B. Generar Nota Marginal de Reposición
-          const conceptoText = conceptos.find(c => String(c.id) === String(decreeData.conceptoAnulacionId))?.concepto || 'REPOSICIÓN POR DETERIORO O PÉRDIDA';
-          const fechaTexto = convertDateToSpanishText(decreeData.fechaDecreto).replace(/^EL\s+/i, '').toUpperCase();
-          
-          const notaMarginalTecnica = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${decreeData.numeroDecreto.toUpperCase()} DE FECHA ${fechaTexto}, DEBIDO A LA ${conceptoText.toUpperCase()} DEL ORIGINAL. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
+          // B. 🧠 LLAMADA AL MOTOR INTELIGENTE PARA NOTA DE REPOSICIÓN
+          const notaMarginalTecnica = marginalNotesEngine.forReposition(parishId, {
+              numeroDecreto: decreeData.numeroDecreto,
+              fechaDecreto: decreeData.fechaDecreto,
+              ministro: formData.ministerFaith
+          });
 
           // C. 🧠 PASAR POR EL CEREBRO DE PURIFICACIÓN
           const registroParaPurificar = {
@@ -124,7 +122,7 @@ const BaptismRepositionNewPage = () => {
               book_number: params.suplementarioLibro,
               page_number: params.suplementarioFolio,
               entry_number: params.suplementarioNumero,
-              // Forzamos la nota técnica de reposición
+              // Forzamos la nota técnica
               marginNote: notaMarginalTecnica
           };
 

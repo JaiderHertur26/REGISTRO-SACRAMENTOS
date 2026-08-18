@@ -10,6 +10,7 @@ import { Save, ArrowLeft, FileText, UserPlus, AlertCircle, CheckCircle2, Search,
 import { useNavigate } from 'react-router-dom';
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 import { supabase } from '@/lib/supabaseClient';
+import { marginalNotesEngine } from '@/utils/marginalNotesEngine'; // 🚀 IMPORTAMOS EL CEREBRO
 
 const BaptismCorrectionNewPage = () => {
   const { user } = useAuth();
@@ -18,16 +19,13 @@ const BaptismCorrectionNewPage = () => {
     getMatrimonios,
     createBaptismCorrection,
     getParrocoActual,
-    getMisDatosList,
-    obtenerNotasAlMargen
+    getMisDatosList
   } = useAppData();
   const { toast } = useToast();
   const navigate = useNavigate();
 
   // --- STATE MANAGEMENT ---
   const [isLoading, setIsLoading] = useState(false);
-
-  // 🚀 NUEVO ESTADO: Guardará los parámetros frescos de la nube
   const [cloudParams, setCloudParams] = useState({});
 
   // --- BAPTISM STATE ---
@@ -108,7 +106,6 @@ const BaptismCorrectionNewPage = () => {
   const [activePriest, setActivePriest] = useState(null);
 
   // --- INITIALIZATION ---
-
   useEffect(() => {
     const initializeData = async () => {
       if (!user) return;
@@ -190,7 +187,6 @@ const BaptismCorrectionNewPage = () => {
     };
 
     initializeData();
-
   }, [user, getParrocoActual, getMisDatosList, toast]);
 
   useEffect(() => {
@@ -362,12 +358,11 @@ const BaptismCorrectionNewPage = () => {
     setIsLoading(true);
 
     try {
-        // 🚀 VALIDACIÓN DE DUPLICIDAD DE NÚMERO DE DECRETO EN SUPABASE
+        // 🚀 VALIDACIÓN DE DUPLICIDAD DE NÚMERO DE DECRETO
         const { data: existingDecree, error: checkError } = await supabase
             .from('decretos')
             .select('id')
             .eq('tipo', 'correccion')
-            // Buscamos si ya existe ese numero en el payload de los decretos
             .contains('payload', { decreeNumber: decreeData.numeroDeDecreto })
             .maybeSingle();
 
@@ -380,34 +375,31 @@ const BaptismCorrectionNewPage = () => {
                 description: `El decreto número ${decreeData.numeroDeDecreto} ya se encuentra registrado en el sistema. Por favor, asigne un número diferente.`, 
                 variant: "destructive" 
             });
-            return; // Detenemos la ejecución aquí si hay duplicado
+            return;
         }
-
-        // --- FIN DE VALIDACIÓN ---
-
-        const notasConfig = obtenerNotasAlMargen(user?.parishId);
 
         const supletorioLibro = cloudParams.suplementarioLibro || 1;
         const supletorioFolio = cloudParams.suplementarioFolio || 1;
         const supletorioNumero = cloudParams.suplementarioNumero || 1;
 
-        let noteAnulada = notasConfig?.porCorreccion?.anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO]";
-        noteAnulada = noteAnulada
-          .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
-          .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
-          .replace(/\[LIBRO_NUEVA\]/g, String(supletorioLibro).padStart(4, '0'))
-          .replace(/\[FOLIO_NUEVA\]/g, String(supletorioFolio).padStart(4, '0'))
-          .replace(/\[NUMERO_PARTIDA_NUEVA\]/g, String(supletorioNumero).padStart(4, '0'));
+        // 🧠 LLAMADA AL MOTOR INTELIGENTE PARA NOTA ANULADA
+        const noteAnulada = marginalNotesEngine.forAnnulledCorrection(user?.parishId, {
+            numeroDecreto: decreeData.numeroDecreto,
+            fechaDecreto: decreeData.fechaEmision,
+            libroNuevo: supletorioLibro,
+            folioNuevo: supletorioFolio,
+            numeroNuevo: supletorioNumero
+        });
 
-        let notaSupletoriaFinal = notasConfig?.porCorreccion?.nuevaPartida || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] DE FECHA: [FECHA_DECRETO] Y ANULA LA PARTIDA DEL LIBRO: [LIBRO_ANULADA], FOLIO: [FOLIO_ANULADA], NÚMERO: [NUMERO_PARTIDA_ANULADA]. DA FE: [NOMBRE_SACERDOTE].";
-        
-        notaSupletoriaFinal = notaSupletoriaFinal
-          .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
-          .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
-          .replace(/\[LIBRO_ANULADA\]/g, String(decreeData.Libro).padStart(4, '0'))
-          .replace(/\[FOLIO_ANULADA\]/g, String(decreeData.folio).padStart(4, '0'))
-          .replace(/\[NUMERO_PARTIDA_ANULADA\]/g, String(decreeData.numero).padStart(4, '0'))
-          .replace(/\[NOMBRE_SACERDOTE\]/g, newPartida.daFe);
+        // 🧠 LLAMADA AL MOTOR INTELIGENTE PARA NOTA NUEVA (SUPLETORIA)
+        const notaSupletoriaFinal = marginalNotesEngine.forNewCorrection(user?.parishId, {
+            numeroDecreto: decreeData.numeroDecreto,
+            fechaDecreto: decreeData.fechaEmision,
+            libroAnulada: decreeData.Libro,
+            folioAnulada: decreeData.folio,
+            numeroAnulada: decreeData.numero,
+            ministro: newPartida.daFe
+        });
 
         const partidaToSave = {
           ...newPartida,
@@ -460,6 +452,7 @@ const BaptismCorrectionNewPage = () => {
           user?.parishId
         );
 
+        // 🚀 Aplicamos la nota de anulación al localStorage para inmediatez
         const baptismsKey = `baptisms_${user?.parishId}`;
         let allBaptisms = JSON.parse(localStorage.getItem(baptismsKey) || '[]');
         const originalIndex = allBaptisms.findIndex(b => b.id === foundRecord.id);
@@ -483,6 +476,7 @@ const BaptismCorrectionNewPage = () => {
     }
   };
 
+  // ... rest of the code (ConfDecreeChange, handleNewMarPartidaChange, etc)
   const handleConfDecreeChange = (e) => {
     const { name, value } = e.target;
     setConfDecreeData(prev => ({ ...prev, [name]: value }));
@@ -820,11 +814,10 @@ const BaptismCorrectionNewPage = () => {
                 <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Padrinos</label><Input name="padrinos" value={newPartida.padrinos} onChange={handleNewPartidaChange} className="py-6 font-bold uppercase" /></div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t pt-10">
-                  <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Sacerdote Celebrante</label><Input name="ministro" value={newPartida.ministro} onChange={handleNewPartidaChange} className="py-6 uppercase font-black text-blue-900" /></div>
+                  <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Sacerdote Celebrante</label><Input name="ministro" value={newPartida.ministro} onChange={handleNewPartidaChange} className="py-6 uppercase font-black text-blue-900" placeholder="NOMBRE DEL MINISTRO" /></div>
                   <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Da Fe (Firma)</label><Input name="daFe" value={newPartida.daFe} onChange={handleNewPartidaChange} className="py-6 uppercase font-bold text-gray-500 bg-gray-50" /></div>
                 </div>
 
-                {/* 🚀 NOTA MARGINAL MANUAL PARA DECRETO */}
                 <div className="space-y-2 border-t pt-10">
                   <label className="text-[10px] font-black text-gray-400 uppercase">Observaciones del Decreto (Opcional)</label>
                   <textarea
@@ -851,7 +844,7 @@ const BaptismCorrectionNewPage = () => {
             </div>
           </TabsContent>
 
-          {/* Nota: Los contenidos de Confirmaciones y Matrimonios siguen el mismo patrón lógico */}
+          {/* Confirmaciones y Matrimonios */}
           <TabsContent value="confirmaciones">
             <div className="p-20 text-center text-gray-400 italic">Módulo de Corrección de Confirmaciones bajo construcción con el Cerebro Global...</div>
           </TabsContent>
