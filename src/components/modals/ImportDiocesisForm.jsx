@@ -77,7 +77,8 @@ const ImportDiocesisForm = ({ isOpen, onClose }) => {
     reader.readAsText(selectedFile);
   };
 
-  const handleConfirm = () => {
+  // 🚀 CORRECCIÓN: Agregamos 'async' para poder esperar la respuesta de Supabase
+  const handleConfirm = async () => {
       if (!jsonContent || !jsonContent.data) return;
       
       setLoading(true);
@@ -103,7 +104,8 @@ const ImportDiocesisForm = ({ isOpen, onClose }) => {
       let result;
       if (filteredData.length > 0) {
           const filteredJson = { ...jsonContent, data: filteredData };
-          result = importDiocesis(filteredJson, contextId, false);
+          // 🚀 CORRECCIÓN: Agregamos 'await' a la llamada del servicio
+          result = await importDiocesis(filteredJson, contextId, false);
       } else {
           result = { success: true, count: 0 };
       }

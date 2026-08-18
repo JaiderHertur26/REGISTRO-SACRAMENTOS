@@ -90,7 +90,13 @@ export const actualizarParrocoActual = async (parishId) => {
             estado: p.estado || '2',
             payload: p
         }));
-        await supabase.from('parrocos').upsert(upsertPayload, { onConflict: 'id' });
+        
+        // Inserción en lotes de 200
+        const chunkSize = 200;
+        for (let i = 0; i < upsertPayload.length; i += chunkSize) {
+            const chunk = upsertPayload.slice(i, i + chunkSize);
+            await supabase.from('parrocos').upsert(chunk, { onConflict: 'id' });
+        }
     } catch(e) {
         console.error("Error sincronizando párrocos con Supabase:", e);
     }
@@ -194,7 +200,12 @@ export const importParrocos = async (payload, parishId, append = false) => {
         }));
         
         if (dbRecords.length > 0) {
-            await supabase.from('parrocos').insert(dbRecords);
+            const chunkSize = 200;
+            for (let i = 0; i < dbRecords.length; i += chunkSize) {
+                const chunk = dbRecords.slice(i, i + chunkSize);
+                const { error } = await supabase.from('parrocos').insert(chunk);
+                if (error) throw error;
+            }
         }
         return { success: true, count: newItems.length };
     } catch (e) {
@@ -306,8 +317,12 @@ export const importIglesias = async (jsonData, parishId, append = false) => {
         }));
 
         if (newItems.length > 0) {
-            const { error } = await supabase.from('iglesias').insert(newItems);
-            if (error) throw error;
+            const chunkSize = 200;
+            for (let i = 0; i < newItems.length; i += chunkSize) {
+                const chunk = newItems.slice(i, i + chunkSize);
+                const { error } = await supabase.from('iglesias').insert(chunk);
+                if (error) throw error;
+            }
         }
 
         localStorage.setItem(key, JSON.stringify([...currentData, ...newItems]));
@@ -511,7 +526,12 @@ export const importCiudades = async (jsonData, contextId, append = false) => {
         }));
 
         if (dbRecords.length > 0) {
-            await supabase.from('ciudades').insert(dbRecords);
+            const chunkSize = 200;
+            for (let i = 0; i < dbRecords.length; i += chunkSize) {
+                const chunk = dbRecords.slice(i, i + chunkSize);
+                const { error } = await supabase.from('ciudades').insert(chunk);
+                if (error) throw error;
+            }
         }
 
         localStorage.setItem(key, JSON.stringify([...currentData, ...newItems]));

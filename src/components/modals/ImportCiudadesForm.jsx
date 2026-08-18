@@ -85,7 +85,8 @@ const ImportCiudadesForm = ({ isOpen, onClose }) => {
   };
 
   // --- 2. EJECUCIÓN DE LA IMPORTACIÓN ---
-  const handleConfirm = () => {
+  // 🚀 CORRECCIÓN: Agregado 'async'
+  const handleConfirm = async () => {
       if (!jsonContent?.data) return;
       
       setLoading(true);
@@ -113,7 +114,8 @@ const ImportCiudadesForm = ({ isOpen, onClose }) => {
           return;
       }
 
-      const result = importCiudades({ ...jsonContent, data: filteredData }, targetContextId, false);
+      // 🚀 CORRECCIÓN: Agregado 'await' para esperar la respuesta asíncrona de Supabase
+      const result = await importCiudades({ ...jsonContent, data: filteredData }, targetContextId, false);
 
       if (result.success) {
            toast({
