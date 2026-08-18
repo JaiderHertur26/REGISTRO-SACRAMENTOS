@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, ShieldCheck, Info, Loader2, Settings2 } from 'lucide-react';
+import { X, Save, ShieldCheck, Info, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Input } from '@/components/ui/Input';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 IMPORTACIÓN DE SUPABASE
+import { supabase } from '@/lib/supabaseClient'; 
 
 const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
     const { toast } = useToast();
@@ -21,7 +21,7 @@ const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
     
     const [isLoading, setIsLoading] = useState(false);
 
-    // 🚀 EFECTO: Carga los datos del concepto seleccionado cuando se abre el modal
+    // 🚀 Carga los datos del concepto seleccionado cuando se abre el modal
     useEffect(() => {
         if (concept && isOpen) {
             setFormData({
@@ -58,13 +58,6 @@ const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
                 throw new Error("No se detectó el ID del concepto a editar.");
             }
 
-            // 🚀 REGLA DE NEGOCIO: Solo Cancillería puede editar
-            const chanceryId = user?.chancery_id || user?.chanceryId;
-            
-            if (!chanceryId) {
-                throw new Error("Acceso Denegado: Solo un usuario de Cancillería puede editar estos conceptos normativos.");
-            }
-
             // 🚀 ACTUALIZACIÓN DIRECTA EN SUPABASE
             const { error } = await supabase
                 .from('conceptos_anulacion')
@@ -80,17 +73,17 @@ const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
             
             toast({
                 title: "Concepto Actualizado",
-                description: "El catálogo legal ha sido modificado en la base de datos.",
+                description: "El catálogo legal ha sido modificado en la base de datos central.",
                 className: "bg-green-50 border-green-200 text-green-900"
             });
             
-            onSuccess?.(); // Recarga la tabla de atrás
-            onClose();     // Cierra este modal
+            onSuccess?.(); // Recarga la tabla en segundo plano
+            onClose();     // Cierra el modal
             
         } catch (error) {
             console.error("Error editando en Supabase:", error);
             
-            // 🚀 MANEJO INTELIGENTE DE ERRORES (Código Postgres para violación de Unique)
+            // Manejo inteligente de error por Código Duplicado (Postgres code 23505)
             const isDuplicate = error?.code === '23505'; 
             
             toast({
@@ -145,7 +138,6 @@ const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
                         </div>
 
                         <form onSubmit={handleSubmit} className="p-8 space-y-6">
-                            
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Código ID *</label>

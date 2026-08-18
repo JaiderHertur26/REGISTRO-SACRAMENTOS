@@ -5,7 +5,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Search, Edit, Trash2, FileText } from 'lucide-react';
 import Table from '@/components/ui/Table';
 import EditAnnulmentConceptModal from '@/components/modals/EditAnnulmentConceptModal';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 IMPORTACIÓN DE SUPABASE
+import { supabase } from '@/lib/supabaseClient'; 
 
 const AnnulmentConceptsTab = ({ onSelectConcept }) => {
     const { user } = useAuth();
@@ -22,7 +22,7 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
         loadData();
     }, [user]);
 
-    // 🚀 CARGA DIRECTA RELACIONAL DESDE SUPABASE
+    // 🚀 CARGA DIRECTA Y CORREGIDA DESDE SUPABASE
     const loadData = async () => {
         if (!user) return;
         setIsLoading(true);
@@ -52,33 +52,27 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
                 throw new Error("No se pudo determinar a qué Diócesis pertenece el usuario.");
             }
 
-            // JOIN: Traemos todos los conceptos cuya cancillería pertenezca a esta Diócesis
+            // 🚀 SOLUCIÓN ERROR 400: Consulta directa a diocese_id sin JOIN fantasma
             const { data, error } = await supabase
                 .from('conceptos_anulacion')
-                .select(`
-                    id, codigo, concepto, expide, tipo, created_at,
-                    chancelleries!inner ( diocese_id )
-                `)
-                .eq('chancelleries.diocese_id', targetDioceseId)
+                .select('id, codigo, concepto, expide, tipo, created_at, diocese_id')
+                .eq('diocese_id', targetDioceseId)
                 .order('codigo', { ascending: true });
 
             if (error) {
-                console.error("❌ Error de Supabase:", error.message);
                 throw error;
             }
             
-            console.log("✅ Datos recibidos de Supabase:", data);
             setConcepts(data || []);
             
         } catch (error) {
-            console.error("Error loading concepts from Supabase:", error);
+            console.error("Error loading concepts from Supabase:", error.message);
             toast({ title: "Error", description: "No se pudieron cargar los conceptos desde la nube.", variant: "destructive" });
         } finally {
             setIsLoading(false);
         }
     };
 
-    // Filter and sort concepts by code ascending
     const filteredConcepts = concepts
         .filter(c => {
             const term = searchTerm.toLowerCase();
@@ -86,7 +80,6 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
         })
         .sort((a, b) => (a.codigo || '').localeCompare(b.codigo || '', undefined, { numeric: true }));
 
-    // 🚀 ELIMINACIÓN DIRECTA EN SUPABASE
     const handleDelete = async (id, e) => {
         e?.stopPropagation();
         if (window.confirm("¿Está seguro de eliminar este concepto permanentemente de la nube?")) {
@@ -99,7 +92,7 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
                 if (error) throw error;
 
                 toast({ title: "Eliminado", description: "El concepto ha sido eliminado de la base de datos.", className: "bg-green-600 text-white" });
-                loadData(); // Recargamos la lista desde la nube
+                loadData(); 
             } catch (error) {
                 console.error("Error deleting concept:", error);
                 toast({ title: "Error", description: "No se pudo eliminar el concepto.", variant: "destructive" });
@@ -126,70 +119,83 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
     };
 
     const columns = [
-        { header: 'Código', render: (row) => <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{row.codigo}</span> },
-        { header: 'Concepto', render: (row) => <span className="font-semibold text-gray-900">{row.concepto}</span> },
-        { header: 'Expide', render: (row) => <span className="text-gray-600 text-sm">{row.expide}</span> },
+        { header: 'Código', render: (row) => <span className="font-mono text-xs font-black text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg">{row.codigo}</span> },
+        { header: 'Concepto', render: (row) => <span className="font-bold text-gray-900 uppercase text-xs tracking-tight">{row.concepto}</span> },
+        { header: 'Expide', render: (row) => <span className="text-gray-500 font-bold text-[10px] uppercase tracking-widest">{row.expide}</span> },
         { 
             header: 'Tipo', 
             render: (row) => {
-                let badgeClass = 'bg-gray-100 text-gray-800';
+                let badgeClass = 'bg-gray-100 text-gray-800 border-gray-200';
                 let label = 'Desconocido';
 
                 if (row.tipo === 'porCorreccion') {
-                    badgeClass = 'bg-blue-50 text-blue-600';
-                    label = 'Por Corrección';
+                    badgeClass = 'bg-blue-50 text-blue-700 border-blue-200';
+                    label = 'Corrección';
                 } else if (row.tipo === 'porReposicion') {
-                    badgeClass = 'bg-green-50 text-green-600';
-                    label = 'Por Reposición';
+                    badgeClass = 'bg-green-50 text-green-700 border-green-200';
+                    label = 'Reposición';
                 } else if (row.tipo === 'porRepeticion') {
-                    badgeClass = 'bg-purple-50 text-purple-600';
-                    label = 'Por Repetición';
+                    badgeClass = 'bg-purple-50 text-purple-700 border-purple-200';
+                    label = 'Repetición';
                 } else if (row.tipo === 'porNulidad') {
-                    badgeClass = 'bg-amber-50 text-amber-600';
-                    label = 'Por Nulidad';
+                    badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
+                    label = 'Nulidad';
                 } else if (row.concepto?.toLowerCase().includes('notificaci')) {
-                    badgeClass = 'bg-indigo-50 text-indigo-600';
+                    badgeClass = 'bg-indigo-50 text-indigo-700 border-indigo-200';
                     label = 'Notificación';
                 }
 
                 return (
-                    <span className={`text-xs px-2 py-1 rounded-full ${badgeClass}`}>
+                    <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border ${badgeClass}`}>
                         {label}
                     </span>
                 );
             } 
+        },
+        {
+            header: 'Acciones',
+            className: 'text-right',
+            render: (row) => (
+                <div className="flex justify-end gap-2">
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-green-600 hover:bg-green-50 rounded-xl" onClick={(e) => handleSelectForNotes(row, e)} title="Generar Nota Marginal">
+                        <FileText className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-[#4B7BA7] hover:bg-blue-50 rounded-xl" onClick={(e) => handleEdit(row, e)} title="Editar">
+                        <Edit className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-red-500 hover:bg-red-50 rounded-xl" onClick={(e) => handleDelete(row.id, e)} title="Eliminar">
+                        <Trash2 className="w-4 h-4" />
+                    </Button>
+                </div>
+            )
         }
     ];
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-in fade-in duration-500">
             <div className="flex justify-between items-center mb-4">
-                 <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                 <div className="relative w-full max-w-md group">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-[#4B7BA7] w-5 h-5 transition-colors" />
                     <input 
                         type="text" 
                         placeholder="Buscar por código o concepto..." 
-                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#4B7BA7] outline-none text-gray-900" 
+                        className="w-full pl-12 pr-4 py-4 border-none bg-white rounded-2xl shadow-sm focus:ring-4 focus:ring-[#4B7BA7]/10 outline-none text-gray-900 text-sm font-bold uppercase transition-all" 
                         value={searchTerm} 
                         onChange={e => setSearchTerm(e.target.value)}
                     />
                 </div>
             </div>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <div className="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden">
                 <Table 
                     columns={columns} 
                     data={filteredConcepts} 
                     isLoading={isLoading}
-                    actions={[
-                        { label: <FileText className="w-4 h-4" />, type: 'select', onClick: handleSelectForNotes, className: "text-green-600 hover:bg-green-50 p-2 rounded-full", title: "Generar Nota Marginal" },
-                        { label: <Edit className="w-4 h-4" />, type: 'edit', onClick: handleEdit, className: "text-[#4B7BA7] hover:bg-blue-50 p-2 rounded-full", title: "Editar" },
-                        { label: <Trash2 className="w-4 h-4" />, type: 'delete', onClick: (row, e) => handleDelete(row.id, e), className: "text-red-500 hover:bg-red-50 p-2 rounded-full", title: "Eliminar" }
-                    ]}
+                    className="border-none"
                 />
                 {!isLoading && filteredConcepts.length === 0 && (
-                    <div className="p-8 text-center text-gray-500">
-                        No se encontraron conceptos de anulación.
+                    <div className="p-16 text-center text-gray-400 font-bold uppercase tracking-widest text-[10px]">
+                        No se encontraron conceptos en la Nube.
                     </div>
                 )}
             </div>
