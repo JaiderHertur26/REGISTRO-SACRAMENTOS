@@ -1,48 +1,101 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useState, useEffect } from 'react';
 import { convertDateToSpanishTextNatural } from '@/utils/dateTimeFormatters';
 import { useAppData } from '@/context/AppDataContext';
 import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/lib/supabaseClient';
 
 const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
   const { getParrocos, getMisDatosList } = useAppData();
   const { user: authUser } = useAuth();
 
+  const [chanceryData, setChanceryData] = useState({});
+  const [targetParishInfo, setTargetParishInfo] = useState({ name: '', city: '', priest: '' });
+
+  useEffect(() => {
+      let isMounted = true;
+
+      const fetchDataFromCloud = async () => {
+          try {
+              // 1. BUSCAR DATOS EXACTOS DE LA CANCILLERÍA
+              let chanceryIdToUse = authUser?.chanceryId || authUser?.chancery_id;
+
+              if (!chanceryIdToUse) {
+                  let dioceseId = authUser?.dioceseId || authUser?.diocese_id;
+                  
+                  if (!dioceseId && authUser?.parishId) {
+                      const { data: pData } = await supabase.from('parishes').select('diocese_id').eq('id', authUser.parishId).single();
+                      if (pData) dioceseId = pData.diocese_id;
+                  }
+
+                  if (dioceseId) {
+                      const { data: chanceryRecord } = await supabase.from('chancelleries').select('id').eq('diocese_id', dioceseId).maybeSingle();
+                      if (chanceryRecord) chanceryIdToUse = chanceryRecord.id;
+                  }
+              }
+
+              if (chanceryIdToUse) {
+                  const { data: misDatosCancilleria } = await supabase.from('mis_datos').select('payload').eq('entity_id', chanceryIdToUse).maybeSingle();
+
+                  if (misDatosCancilleria && misDatosCancilleria.payload && isMounted) {
+                      let p = misDatosCancilleria.payload;
+                      if (typeof p === 'string') p = JSON.parse(p);
+                      if (Array.isArray(p)) p = p[0];
+                      setChanceryData(p || {});
+                  }
+              }
+
+              // 2. BUSCAR DATOS DE LA PARROQUIA DESTINO
+              let pId = decreeData?.targetParishId || decreeData?.parish_id || authUser?.parishId;
+
+              if (pId) {
+                  const { data: parishMisDatos } = await supabase.from('mis_datos').select('payload').eq('entity_id', pId).maybeSingle();
+                  let pName = ''; let pCity = '';
+                  
+                  if (parishMisDatos && parishMisDatos.payload) {
+                      let p = parishMisDatos.payload;
+                      if (typeof p === 'string') p = JSON.parse(p);
+                      if (Array.isArray(p)) p = p[0]; p = p || {};
+                      pName = p.nombre || ''; pCity = p.ciudad || '';
+                  }
+
+                  if (isMounted) {
+                      setTargetParishInfo({ name: pName.toUpperCase(), city: pCity.toUpperCase() });
+                  }
+              }
+          } catch (err) {
+              console.error("Error buscando datos en Supabase:", err);
+          }
+      };
+
+      if (decreeData) fetchDataFromCloud();
+      return () => { isMounted = false; };
+  }, [authUser, decreeData]);
+
   if (!decreeData) return null;
 
   const {
-    decreeNumber,
-    decreeDate,
-    targetName,
-    newPartidaSummary = {},
-    datosNuevaPartida = {},
-    concepto
+    decreeNumber, decreeDate, targetName,
+    newPartidaSummary = {}, datosNuevaPartida = {}, concepto
   } = decreeData;
 
-  // =========================================================================
-  // 🏛️ IDENTIDAD OFICIAL (Single Source of Truth)
-  // =========================================================================
-  
-  const targetParishId = decreeData.targetParishId || authUser?.parishId;
-  const misDatosParroquia = getMisDatosList(targetParishId)[0] || {};
-  
-  // Buscamos la Cancillería en el almacén global
-  const allMisDatos = JSON.parse(localStorage.getItem('mis_datos') || '[]');
-  const chanceryData = allMisDatos.find(md => {
-      const p = Array.isArray(md.payload) ? md.payload[0] : md.payload;
-      return p?.cargo?.toLowerCase().includes('canciller') || p?.nombre?.toLowerCase().includes('cancillería');
-  })?.payload || misDatosParroquia;
+  const misDatosList = authUser?.parishId ? getMisDatosList(authUser.parishId) : [];
+  const misDatosParroquia = misDatosList[0] || {}; 
+
+  const orgData = {
+    name: chanceryData.nombreCancilleria || chanceryData.nombre || 'CURIA ARZOBISPAL - CANCILLERÍA',
+    address: chanceryData.direccion || '[Dirección no configurada]',
+    phone: chanceryData.telefono || '[Teléfono no configurado]',
+    city: chanceryData.ciudad || 'BARRANQUILLA',
+    email: chanceryData.email || '[Email no configurado]'
+  };
 
   const diocesisName = (chanceryData.diocesis || authUser?.dioceseName || 'DIÓCESIS').toUpperCase();
-  const cancillerName = (chanceryData.canciller || chanceryData.nombreSacerdote || 'PBRO. CANCILLER').toUpperCase();
+  const cancillerName = (chanceryData.canciller || chanceryData.nombreSacerdote || 'CANCILLER DIOCESANO').toUpperCase();
   const cargoName = (chanceryData.cargo || 'Canciller').toUpperCase();
 
-  const parroquiaNombre = (misDatosParroquia.nombre || authUser?.parishName || 'NUESTRA PARROQUIA').toUpperCase();
-  const ciudadParroquia = (misDatosParroquia.ciudad || authUser?.city || 'CIUDAD').toUpperCase();
+  const parroquiaNombre = targetParishInfo.name || misDatosParroquia.nombre || authUser?.parishName || 'NUESTRA PARROQUIA';
+  const ciudadParroquia = targetParishInfo.city || misDatosParroquia.ciudad || authUser?.city || 'CIUDAD';
 
-  // =========================================================================
-  // 🧬 NORMALIZACIÓN DE DATOS DE LA PARTIDA SUPLETORIA
-  // =========================================================================
-  
   const bd = datosNuevaPartida || newPartidaSummary || {};
 
   const getFormattedSex = (val) => {
@@ -53,7 +106,7 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
   };
 
   const baptismRecord = {
-    book: String(bd.book || bd.book_number || bd.numeroLibro || '---').padStart(4, '0'),
+    book: String(bd.book || bd.book_number || bd.numeroLibro || bd.Libro || '---').padStart(4, '0'),
     page: String(bd.page || bd.page_number || bd.folio || '---').padStart(4, '0'),
     entry: String(bd.entry || bd.entry_number || bd.numero || bd.numeroActa || '---').padStart(4, '0'),
     sacramentDate: bd.sacramentDate || bd.fechaSacramento || '---',
@@ -116,8 +169,8 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
           <div className="flex justify-between items-start mb-6">
             <div className="w-2/3 text-[10pt] leading-tight">
                <p className="mb-1">Al Señor Cura Párroco de:</p>
-               <p className="font-black text-[11pt]">{parroquiaNombre}</p>
-               <p className="font-bold text-gray-600 italic">{ciudadParroquia} — COLOMBIA</p>
+               <p className="font-black text-[11pt] uppercase">{parroquiaNombre}</p>
+               <p className="font-bold text-gray-600 italic uppercase">{ciudadParroquia} — COLOMBIA</p>
             </div>
             <div className="w-1/3 border-2 border-black p-3 bg-gray-50 text-right shadow-sm">
               <div className="font-black text-[7pt] uppercase tracking-widest text-gray-500 mb-1">Registro de Control</div>
@@ -171,7 +224,6 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
             </div>
           </div>
 
-          {/* --- DISPOSICIÓN LEGAL --- */}
           <div className="mb-4 relative border-2 border-black p-4 bg-gray-50 shadow-inner">
              <div className="absolute -top-3 left-6 bg-white px-3 font-black text-[8pt] tracking-widest uppercase border border-black">
               Disposición
@@ -200,13 +252,12 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
             </div>
           </div>
 
-          {/* PIE DE PÁGINA OFICIAL */}
           <div className="w-full text-center text-[7.5pt] text-gray-500 border-t border-gray-200 pt-3">
-            <p className="font-black uppercase tracking-widest mb-1 text-gray-700">{chanceryData.nombreCancilleria || diocesisName}</p>
+            <p className="font-black uppercase tracking-widest mb-1 text-gray-700">{orgData.name}</p>
             <p className="font-medium">
-                {chanceryData.direccion} • Tel: {chanceryData.telefono} • {chanceryData.email}
+                {orgData.address} • Tel: {orgData.phone} • {orgData.email}
             </p>
-            <p className="font-bold mt-1 tracking-widest uppercase">Barranquilla, Atlántico — República de Colombia</p>
+            <p className="font-bold mt-1 tracking-widest uppercase">{orgData.city} — COLOMBIA</p>
           </div>
       </div>
     </div>
