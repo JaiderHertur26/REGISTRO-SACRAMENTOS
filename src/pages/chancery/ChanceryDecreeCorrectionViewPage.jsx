@@ -15,30 +15,24 @@ const ChanceryDecreeCorrectionViewPage = () => {
     const navigate = useNavigate();
     const { toast } = useToast();
 
-    // --- ESTADOS DE DECRETOS ---
     const [activeTab, setActiveTab] = useState("bautismo");
     const [records, setRecords] = useState([]);
     const [filteredRecords, setFilteredRecords] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoadingDecrees, setIsLoadingDecrees] = useState(true);
 
-    // --- ESTADOS ESTRUCTURA ECLESIÁSTICA ---
     const [vicaries, setVicaries] = useState([]);
     const [deaneries, setDeaneries] = useState([]);
     const [parishes, setParishes] = useState([]);
     const [isLoadingStructure, setIsLoadingStructure] = useState(true);
 
-    // --- ESTADOS PARA ACORDEONES (Colapsables) ---
-    // Guardamos los IDs de los elementos que están ABIERTOS. Si no está en el array, está cerrado.
     const [openVicaries, setOpenVicaries] = useState([]);
     const [openDeaneries, setOpenDeaneries] = useState([]);
     const [openParishes, setOpenParishes] = useState([]);
 
-    // --- ESTADOS PARA MODAL ---
     const [viewModalOpen, setViewModalOpen] = useState(false);
     const [selectedDecree, setSelectedDecree] = useState(null);
 
-    // 1. CARGAR ESTRUCTURA DESDE SUPABASE
     useEffect(() => {
         const fetchStructure = async () => {
             let targetDioceseId = user?.dioceseId || user?.diocese_id;
@@ -70,7 +64,6 @@ const ChanceryDecreeCorrectionViewPage = () => {
         fetchStructure();
     }, [user]);
 
-    // 2. CARGAR TODOS LOS DECRETOS DE LA DIÓCESIS DESDE SUPABASE
     useEffect(() => {
         const fetchAllDecrees = async () => {
             if (isLoadingStructure) return; 
@@ -95,11 +88,15 @@ const ChanceryDecreeCorrectionViewPage = () => {
                 if (error) throw error;
 
                 if (data) {
-                    const mappedDecrees = data.map(d => ({
-                        ...d.payload,
-                        id: d.id, 
-                        targetParishId: d.parish_id 
-                    }));
+                    const mappedDecrees = data.map(d => {
+                        const targetParish = parishes.find(p => p.id === d.parish_id);
+                        return {
+                            ...d.payload,
+                            id: d.id, 
+                            targetParishId: d.parish_id,
+                            targetParishName: targetParish ? `${targetParish.name} - ${targetParish.city}` : '' // 🚀 Añadimos nombre
+                        };
+                    });
                     
                     setRecords(mappedDecrees);
                 }
@@ -115,11 +112,9 @@ const ChanceryDecreeCorrectionViewPage = () => {
         fetchAllDecrees();
     }, [isLoadingStructure, parishes, toast]);
 
-    // 3. APLICAR BÚSQUEDA Y FILTRO ESTRICTO POR SACRAMENTO
     useEffect(() => {
         const term = searchTerm.toLowerCase();
         
-        // 🚀 FILTRO ESTRICTO: Solo decretos cuyo sacramento coincida con la pestaña activa
         const filtered = records.filter(r => {
             const recordSacrament = (r.sacrament || 'bautismo').toLowerCase();
             const matchesSacrament = recordSacrament === activeTab.toLowerCase();
@@ -130,6 +125,7 @@ const ChanceryDecreeCorrectionViewPage = () => {
 
             return (
                 (r.targetName || r.nombres || '').toLowerCase().includes(term) ||
+                (r.newTargetName || '').toLowerCase().includes(term) ||
                 (r.decreeNumber || r.numeroDecreto || '').toLowerCase().includes(term) ||
                 (r.targetParishName || '').toLowerCase().includes(term)
             );
@@ -153,48 +149,16 @@ const ChanceryDecreeCorrectionViewPage = () => {
         }
     };
 
-    // --- FUNCIONES PARA MANEJAR ACORDEONES ---
-    const toggleVicary = (id) => {
-        setOpenVicaries(prev => prev.includes(id) ? prev.filter(vId => vId !== id) : [...prev, id]);
-    };
+    const toggleVicary = (id) => setOpenVicaries(prev => prev.includes(id) ? prev.filter(vId => vId !== id) : [...prev, id]);
+    const toggleDeanery = (id) => setOpenDeaneries(prev => prev.includes(id) ? prev.filter(dId => dId !== id) : [...prev, id]);
+    const toggleParish = (id) => setOpenParishes(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]);
 
-    const toggleDeanery = (id) => {
-        setOpenDeaneries(prev => prev.includes(id) ? prev.filter(dId => dId !== id) : [...prev, id]);
-    };
+    const getParishDecrees = (parishId) => filteredRecords.filter(r => String(r.targetParishId) === String(parishId));
+    const getDeaneryParishesWithDecrees = (deaneryId) => parishes.filter(p => String(p.decanate_id) === String(deaneryId) || String(p.decanateId) === String(deaneryId)).filter(p => getParishDecrees(p.id).length > 0);
+    const getVicaryDeaneriesWithDecrees = (vicaryId) => deaneries.filter(d => String(d.vicaria_id) === String(vicaryId) || String(d.vicaryId) === String(vicaryId)).filter(d => getDeaneryParishesWithDecrees(d.id).length > 0);
+    const getDirectParishesWithDecrees = (vicaryId) => parishes.filter(p => (String(p.vicary_id) === String(vicaryId) || String(p.vicaryId) === String(vicaryId)) && (!p.decanate_id && !p.decanateId)).filter(p => getParishDecrees(p.id).length > 0);
+    const getUnassignedDecrees = () => { const parishIds = parishes.map(p => String(p.id)); return filteredRecords.filter(r => !r.targetParishId || !parishIds.includes(String(r.targetParishId))); };
 
-    const toggleParish = (id) => {
-        setOpenParishes(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]);
-    };
-
-    // --- LÓGICA DE AGRUPACIÓN JERÁRQUICA ---
-    const getParishDecrees = (parishId) => {
-        return filteredRecords.filter(r => String(r.targetParishId) === String(parishId));
-    };
-
-    const getDeaneryParishesWithDecrees = (deaneryId) => {
-        return parishes
-            .filter(p => String(p.decanate_id) === String(deaneryId) || String(p.decanateId) === String(deaneryId))
-            .filter(p => getParishDecrees(p.id).length > 0);
-    };
-
-    const getVicaryDeaneriesWithDecrees = (vicaryId) => {
-        return deaneries
-            .filter(d => String(d.vicaria_id) === String(vicaryId) || String(d.vicaryId) === String(vicaryId))
-            .filter(d => getDeaneryParishesWithDecrees(d.id).length > 0);
-    };
-
-    const getDirectParishesWithDecrees = (vicaryId) => {
-        return parishes
-            .filter(p => (String(p.vicary_id) === String(vicaryId) || String(p.vicaryId) === String(vicaryId)) && (!p.decanate_id && !p.decanateId))
-            .filter(p => getParishDecrees(p.id).length > 0);
-    };
-
-    const getUnassignedDecrees = () => {
-        const parishIds = parishes.map(p => String(p.id));
-        return filteredRecords.filter(r => !r.targetParishId || !parishIds.includes(String(r.targetParishId)));
-    };
-
-    // --- COMPONENTE DE TABLA DE DECRETOS ---
     const DecreeTable = ({ decrees }) => {
         if (decrees.length === 0) return null;
 
@@ -227,7 +191,6 @@ const ChanceryDecreeCorrectionViewPage = () => {
         );
     };
 
-    // --- RENDERIZADO DEL CONTENIDO JERÁRQUICO ---
     const renderHierarchicalContent = () => {
         if (isLoadingStructure || isLoadingDecrees) return <div className="py-20 text-center text-gray-400 uppercase font-black text-xs animate-pulse flex flex-col items-center"><Loader2 className="w-8 h-8 animate-spin mb-3 text-blue-500" /> Buscando Decretos de {activeTab}...</div>;
         if (filteredRecords.length === 0) return <EmptyState />;
@@ -237,8 +200,6 @@ const ChanceryDecreeCorrectionViewPage = () => {
 
         return (
             <div className="animate-in fade-in duration-500 mt-6 space-y-8">
-
-                {/* RECORRIDO POR VICARÍAS */}
                 {vicaries.map(vicary => {
                     const validDeaneries = getVicaryDeaneriesWithDecrees(vicary.id);
                     const validDirectParishes = getDirectParishesWithDecrees(vicary.id);
@@ -250,11 +211,7 @@ const ChanceryDecreeCorrectionViewPage = () => {
 
                     return (
                         <div key={vicary.id} className="bg-white rounded-[2.5rem] shadow-xl shadow-blue-900/5 border border-slate-100 overflow-hidden transition-all duration-300">
-                            {/* CABECERA VICARÍA (CLICKABLE) */}
-                            <div 
-                                className="bg-slate-50 hover:bg-slate-100 p-6 flex items-center justify-between cursor-pointer border-b border-slate-200 transition-colors"
-                                onClick={() => toggleVicary(vicary.id)}
-                            >
+                            <div className="bg-slate-50 hover:bg-slate-100 p-6 flex items-center justify-between cursor-pointer border-b border-slate-200 transition-colors" onClick={() => toggleVicary(vicary.id)}>
                                 <div className="flex items-center gap-4">
                                     <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-100">
                                         <Network className="w-6 h-6 text-[#4B7BA7]" />
@@ -269,21 +226,15 @@ const ChanceryDecreeCorrectionViewPage = () => {
                                 </div>
                             </div>
 
-                            {/* CONTENIDO VICARÍA (COLAPSABLE) */}
                             {isVicaryOpen && (
                                 <div className="p-6 lg:p-8 space-y-8 animate-in slide-in-from-top-4 duration-300">
-                                    {/* DECANATOS DE ESTA VICARÍA */}
                                     {validDeaneries.map(decanate => {
                                         const decanateParishes = getDeaneryParishesWithDecrees(decanate.id);
                                         const isDeaneryOpen = openDeaneries.includes(decanate.id);
 
                                         return (
                                             <div key={decanate.id} className="relative ml-4 pl-8 before:absolute before:left-0 before:top-2 before:bottom-0 before:w-1 before:bg-slate-100 before:rounded-full space-y-4">
-                                                {/* CABECERA DECANATO (CLICKABLE) */}
-                                                <div 
-                                                    className="flex items-center justify-between cursor-pointer hover:bg-slate-50 p-2 rounded-xl transition-colors"
-                                                    onClick={() => toggleDeanery(decanate.id)}
-                                                >
+                                                <div className="flex items-center justify-between cursor-pointer hover:bg-slate-50 p-2 rounded-xl transition-colors" onClick={() => toggleDeanery(decanate.id)}>
                                                     <div className="flex items-center gap-3">
                                                         <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center shadow-sm">
                                                             <LayoutGrid className="w-4 h-4 text-slate-500" />
@@ -295,18 +246,13 @@ const ChanceryDecreeCorrectionViewPage = () => {
                                                     </div>
                                                 </div>
 
-                                                {/* CONTENIDO DECANATO (COLAPSABLE) */}
                                                 {isDeaneryOpen && (
                                                     <div className="space-y-4 animate-in slide-in-from-top-2 duration-300">
                                                         {decanateParishes.map(parish => {
                                                             const isParishOpen = openParishes.includes(parish.id);
                                                             return (
                                                                 <div key={parish.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm ml-6 overflow-hidden">
-                                                                    {/* CABECERA PARROQUIA (CLICKABLE) */}
-                                                                    <div 
-                                                                        className="flex items-center gap-2 p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                                                                        onClick={() => toggleParish(parish.id)}
-                                                                    >
+                                                                    <div className="flex items-center gap-2 p-4 cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => toggleParish(parish.id)}>
                                                                         <Church className="w-4 h-4 text-[#D4AF37]" />
                                                                         <h5 className="font-black text-gray-900 uppercase text-sm">{parish.name}</h5>
                                                                         <span className="ml-auto bg-blue-50 text-[#4B7BA7] text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest border border-blue-100">
@@ -316,7 +262,6 @@ const ChanceryDecreeCorrectionViewPage = () => {
                                                                             {isParishOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                                                                         </div>
                                                                     </div>
-                                                                    {/* TABLA DE DECRETOS DE LA PARROQUIA (COLAPSABLE) */}
                                                                     {isParishOpen && (
                                                                         <div className="px-4 pb-4 animate-in fade-in duration-300">
                                                                             <DecreeTable decrees={getParishDecrees(parish.id)} />
@@ -331,15 +276,11 @@ const ChanceryDecreeCorrectionViewPage = () => {
                                         );
                                     })}
 
-                                    {/* PARROQUIAS DIRECTAS DE ESTA VICARÍA (SIN DECANATO) */}
                                     {validDirectParishes.map(parish => {
                                         const isParishOpen = openParishes.includes(parish.id);
                                         return (
                                             <div key={parish.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm ml-4 overflow-hidden">
-                                                <div 
-                                                    className="flex items-center gap-2 p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                                                    onClick={() => toggleParish(parish.id)}
-                                                >
+                                                <div className="flex items-center gap-2 p-4 cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => toggleParish(parish.id)}>
                                                     <Church className="w-4 h-4 text-[#D4AF37]" />
                                                     <h5 className="font-black text-gray-900 uppercase text-sm">{parish.name} <span className="text-[10px] text-gray-400 ml-2 font-bold">(Sin Decanato)</span></h5>
                                                     <span className="ml-auto bg-blue-50 text-[#4B7BA7] text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest border border-blue-100">
@@ -363,7 +304,6 @@ const ChanceryDecreeCorrectionViewPage = () => {
                     );
                 })}
 
-                {/* DECRETOS SIN PARROQUIA ASIGNADA / DECRETOS LOCALES DE CANCILLERÍA */}
                 {unassignedDecrees.length > 0 && (
                     <div className="bg-amber-50/30 rounded-[2.5rem] shadow-sm border border-dashed border-amber-200 overflow-hidden">
                         <div className="p-6 flex items-center gap-4 border-b border-amber-100/50">
@@ -381,7 +321,6 @@ const ChanceryDecreeCorrectionViewPage = () => {
                     </div>
                 )}
 
-                {/* Si no se renderizó nada a pesar de tener filtros */}
                 {!renderedAny && unassignedDecrees.length === 0 && <EmptyState />}
             </div>
         );
@@ -391,7 +330,6 @@ const ChanceryDecreeCorrectionViewPage = () => {
         <DashboardLayout entityName={user?.dioceseName || "Cancillería"}>
             <div className="max-w-7xl mx-auto px-4 md:px-6 pb-20">
 
-                {/* 🏛️ HEADER */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-6">
                     <div>
                         <h1 className="text-3xl font-black text-gray-900 uppercase tracking-tighter leading-none">Decretos de Corrección</h1>
@@ -407,10 +345,8 @@ const ChanceryDecreeCorrectionViewPage = () => {
                     </Button>
                 </div>
 
-                {/* 📝 CONTROLES DE BÚSQUEDA Y PESTAÑAS */}
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                     <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-[2rem] border border-gray-100 shadow-sm">
-
                         <TabsList className="grid w-full md:w-auto grid-cols-1 sm:grid-cols-3 gap-2 bg-transparent p-0">
                             <TabsTrigger value="bautismo" className="px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest data-[state=active]:bg-[#4B7BA7] data-[state=active]:text-white data-[state=active]:shadow-md transition-all bg-gray-50 text-gray-400">
                                 Bautizos
@@ -423,7 +359,6 @@ const ChanceryDecreeCorrectionViewPage = () => {
                             </TabsTrigger>
                         </TabsList>
 
-                        {/* 🔍 BUSCADOR */}
                         <div className="relative w-full md:w-80">
                             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
                             <input
@@ -436,7 +371,6 @@ const ChanceryDecreeCorrectionViewPage = () => {
                         </div>
                     </div>
 
-                    {/* RENDERIZADO JERÁRQUICO */}
                     <TabsContent value="bautismo">{renderHierarchicalContent()}</TabsContent>
                     <TabsContent value="confirmacion">{renderHierarchicalContent()}</TabsContent>
                     <TabsContent value="matrimonio">{renderHierarchicalContent()}</TabsContent>
@@ -444,12 +378,10 @@ const ChanceryDecreeCorrectionViewPage = () => {
 
             </div>
 
-            {/* MODAL DE VISTA PREVIA E IMPRESIÓN */}
             <ViewCorrectionDecreeModal
                 isOpen={viewModalOpen}
                 onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }}
                 decreeData={selectedDecree}
-                // 🚀 AQUÍ AÑADIMOS LA BANDERA DE QUE SOMOS CANCILLERÍA (MAESTRO)
                 isMasterCopy={true}
             />
         </DashboardLayout>

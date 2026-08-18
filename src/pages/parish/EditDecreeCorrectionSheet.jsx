@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Save, ArrowLeft, FileText, UserPlus, Trash2, Loader2, AlertCircle } from 'lucide-react';
+import { Save, ArrowLeft, FileText, UserPlus, Trash2, Loader2, AlertCircle, Search, CheckCircle2 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { Modal } from '@/components/ui/Modal';
@@ -65,7 +65,7 @@ const EditDecreeCorrectionSheet = () => {
                 const payload = typeof decree.payload === 'string' ? JSON.parse(decree.payload) : decree.payload;
                 setOriginalPayload(payload);
 
-                // 🧠 MAGIA: Búsqueda Inteligente de la Partida Original para rescatar datos vacíos
+                // Búsqueda Inteligente de la Partida Original para rescatar datos vacíos
                 const pad = (num) => String(num).padStart(4, '0');
                 let origDataRaw = {};
                 
@@ -85,13 +85,13 @@ const EditDecreeCorrectionSheet = () => {
                     numeroDeDecreto: payload.decreeNumber || '',
                     fechaEmision: payload.decreeDate || '',
                     conceptoAnulacion: payload.conceptoAnulacionId || '',
-                    nombreBautizado: payload.targetName || '',
+                    nombreBautizado: payload.targetName || '', // El Nombre Viejo
                     Libro: payload.originalPartidaSummary?.book || payload.originalPartidaSummary?.Libro || '',
                     folio: payload.originalPartidaSummary?.page || payload.originalPartidaSummary?.folio || '',
                     numero: payload.originalPartidaSummary?.entry || payload.originalPartidaSummary?.numero || ''
                 });
 
-                // 🚀 POBLACIÓN INTELIGENTE: Mezcla lo editado con los datos de la original
+                // POBLACIÓN INTELIGENTE
                 setNewPartida({
                     lugarBautismo: payload.lugarBautismo || origDataRaw.lugarBautismo || origDataRaw.lugar_bautismo || '',
                     fechaSacramento: payload.fechaSacramento || origDataRaw.fechaSacramento || origDataRaw.celebration_date || '',
@@ -143,6 +143,7 @@ const EditDecreeCorrectionSheet = () => {
                 ministro: newPartida.daFe
             });
 
+            // Actualizar Partida Original
             const { data: origData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
                 .eq('book_number', pad(decreeData.Libro)).eq('folio', pad(decreeData.folio)).eq('number', pad(decreeData.numero)).maybeSingle();
 
@@ -152,6 +153,7 @@ const EditDecreeCorrectionSheet = () => {
                 }).eq('id', origData.id);
             }
 
+            // Actualizar Partida Supletoria
             const { data: supData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
                 .eq('book_number', pad(supSum.book || supSum.Libro)).eq('folio', pad(supSum.page || supSum.folio)).eq('number', pad(supSum.entry || supSum.numero)).maybeSingle();
 
@@ -175,13 +177,21 @@ const EditDecreeCorrectionSheet = () => {
                 }).eq('id', supData.id);
             }
 
+            // 🚀 ACTUALIZAR DECRETO (MANTIENE VIEJO, ACTUALIZA NUEVO)
             const newPayload = {
                 ...originalPayload,
-                decreeNumber: decreeData.numeroDeDecreto, decreeDate: decreeData.fechaEmision,
-                conceptoAnulacionId: decreeData.conceptoAnulacion, observaciones: newPartida.observaciones,
-                targetName: decreeData.nombreBautizado, newTargetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(),
+                decreeNumber: decreeData.numeroDeDecreto, 
+                decreeDate: decreeData.fechaEmision,
+                conceptoAnulacionId: decreeData.conceptoAnulacion, 
+                observaciones: newPartida.observaciones,
+                targetName: decreeData.nombreBautizado, // <-- El viejo se respeta
+                newTargetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(), // <-- El nuevo se actualiza
                 ...newPartida,
-                newPartidaSummary: { ...supSum, nombres: newPartida.nombres, apellidos: newPartida.apellidos }
+                newPartidaSummary: { 
+                    ...supSum, 
+                    nombres: newPartida.nombres, 
+                    apellidos: newPartida.apellidos 
+                }
             };
 
             await supabase.from('decretos').update({ payload: newPayload }).eq('id', decreeId);
@@ -351,7 +361,7 @@ const EditDecreeCorrectionSheet = () => {
                             <Button type="button" onClick={() => setShowDeleteModal(true)} disabled={isSubmitting} className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-6 py-8 rounded-full font-black uppercase tracking-widest text-[10px] shadow-lg transition-all active:scale-95">
                                 <Trash2 className="w-5 h-5" />
                             </Button>
-                            <Button onClick={handleSave} disabled={isSubmitting} className="bg-gradient-to-r from-blue-600 to-[#4B7BA7] hover:shadow-2xl text-white px-10 py-8 rounded-full font-black uppercase tracking-widest text-[10px] shadow-xl active:scale-95 transition-all">
+                            <Button onClick={handleSave} disabled={!foundRecord || isLoading} className="bg-gradient-to-r from-green-600 to-green-700 hover:shadow-2xl text-white px-10 py-8 rounded-full font-black uppercase tracking-widest text-[10px] shadow-xl active:scale-95 transition-all">
                                 {isSubmitting ? <Loader2 className="animate-spin w-5 h-5 mr-3" /> : <Save className="w-5 h-5 mr-3" />} Guardar Cambios
                             </Button>
                         </div>
