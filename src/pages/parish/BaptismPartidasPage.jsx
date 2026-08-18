@@ -206,7 +206,7 @@ const BaptismPartidasPage = () => {
         render: (r) => <span className="font-mono text-[10px] font-black text-[#4B7BA7] bg-blue-50 px-2.5 py-1 rounded-xl border border-blue-100 uppercase text-center min-w-[110px] inline-block shadow-sm">L:{r.Libro} F:{r.folio} N:{r.numero}</span>
     },
     { header: 'Apellidos', render: (r) => <span className="font-black text-slate-900 uppercase text-xs">{r.apellidos}</span> },
-    { header: 'Nombres', render: (r) => <span className="font-bold text-slate-700 uppercase text-xs">{r.nombres}</span> },
+    { header: 'Nombres', render: (r) => <span className="font-black text-slate-900 uppercase text-xs">{r.nombres}</span> },
     { header: 'Fecha', render: (r) => <span className="text-slate-500 text-xs font-bold font-mono">{r.fechaSacramento}</span> },
     { header: 'Padres', render: (r) => <span className="text-[10px] text-slate-400 font-bold uppercase truncate max-w-[200px] block">{r.nombrePadre} / {r.nombreMadre}</span> },
     {
