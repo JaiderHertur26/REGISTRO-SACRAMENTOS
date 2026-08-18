@@ -203,12 +203,11 @@ const BaptismPartidasPage = () => {
   const columns = [
     { 
         header: 'Archivo',
-        render: (r) => <span className="font-mono text-[10px] font-black text-[#4B7BA7] bg-blue-50 px-2.5 py-1 rounded-xl border border-blue-100 uppercase text-center min-w-[110px] inline-block shadow-sm">L:{r.Libro} F:{r.folio} N:{r.numero}</span>
+        render: (r) => <span className="font-black text-[20px] font-black text-[#4B7BA7] bg-blue-50 px-2.5 py-1 rounded-xl border border-blue-100 uppercase text-center min-w-[110px] inline-block shadow-sm">L:{r.Libro} F:{r.folio} N:{r.numero}</span>
     },
     { header: 'Apellidos', render: (r) => <span className="font-black text-slate-900 uppercase text-xs">{r.apellidos}</span> },
     { header: 'Nombres', render: (r) => <span className="font-black text-slate-900 uppercase text-xs">{r.nombres}</span> },
-    { header: 'Fecha', render: (r) => <span className="font-black text-slate-900 uppercase text-xs">{r.fechaSacramento}</span> },
-    { header: 'Padres', render: (r) => <span className="font-black text-slate-900 uppercase text-xs uppercase truncate max-w-[200px] block">{r.nombrePadre} / {r.nombreMadre}</span> },
+    { header: 'Fecha', render: (r) => <span className="font-black text-slate-900 uppercase text-xs">{r.fechaSacramento}</span> },    
     {
         header: 'Estado',
         render: (r) => (
