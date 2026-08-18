@@ -19,8 +19,16 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
     const region = formatData(header.region || 'ATLÁNTICO');
 
     let ubicacionFinal = ciudad;
-    if (region && !ciudad.includes(region)) ubicacionFinal += `, ${region}`;
-    if (!ubicacionFinal.includes('COLOMBIA')) ubicacionFinal += ' - COLOMBIA';
+    // Normalizamos para evitar duplicar "ATLANTICO" y "ATLÁNTICO"
+    const ciudadNorm = ciudad.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const regionNorm = region.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+    if (region && !ciudadNorm.includes(regionNorm)) {
+        ubicacionFinal += `, ${region}`;
+    }
+    if (!ubicacionFinal.includes('COLOMBIA')) {
+        ubicacionFinal += ' - COLOMBIA';
+    }
 
     const contactLine = [direccion, telefono ? `TEL: ${telefono}` : '', ubicacionFinal]
         .filter(Boolean)
@@ -53,7 +61,6 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
                 minute: '2-digit',
                 hour12: true
             }).toUpperCase();
-            // Asegurar formato A. M. / P. M.
             timeStr = timeStr.replace('A.M.', 'A. M.').replace('P.M.', 'P. M.');
             return timeStr;
         } catch (e) { return ''; }
@@ -62,7 +69,6 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
     // --- 3. MAPEO DE DATOS DEL BAUTIZO ---
     const nroReg = formatData(baptismData.numeroRegistro || baptismData.registration_number || '');
     const bautizando = `${formatData(baptismData.nombres || baptismData.firstName)} ${formatData(baptismData.apellidos || baptismData.lastName)}`.trim();
-    const sexo = (baptismData.sexo === 'M' || baptismData.sexo === 'MASCULINO') ? 'FEMENINO' : 'MASCULINO'; // Ajustado según contexto o dato real. Cambiar lógica si M es Masculino.
     const sexoReal = formatData(baptismData.sexo) || '';
     const identificacion = formatData(baptismData.nuip || baptismData.identification || baptismData.serialRegistro);
     const dirResidencia = formatData(baptismData.direccion || baptismData.address);
@@ -78,7 +84,7 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
 
     // --- 4. COMPONENTES ESTRUCTURALES ---
     const FieldLine = ({ label, value, width = "100%" }) => (
-        <div style={{ display: 'flex', alignItems: 'flex-end', width: width, marginBottom: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', width: width, marginBottom: '6px' }}>
             <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '6px', whiteSpace: 'nowrap' }}>
                 {label}:
             </span>
@@ -98,7 +104,7 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
     );
 
     const TicketHalf = ({ isArchive }) => (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0.4in 0.6in', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0.25in 0.6in', position: 'relative', overflow: 'hidden' }}>
             
             {/* Marca de agua sutil */}
             <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0.03, pointerEvents: 'none' }}>
@@ -106,34 +112,34 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
             </div>
 
             {/* ENCABEZADO INSTITUCIONAL */}
-            <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 'bold' }}>{diocesis}</div>
-                <div style={{ fontSize: '16px', fontWeight: '900', marginTop: '2px' }}>{nombreP}</div>
-                <div style={{ fontSize: '10px', marginTop: '2px' }}>{contactLine}</div>
+            <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 'bold' }}>{diocesis}</div>
+                <div style={{ fontSize: '15px', fontWeight: '900', marginTop: '2px' }}>{nombreP}</div>
+                <div style={{ fontSize: '9px', marginTop: '2px' }}>{contactLine}</div>
             </div>
 
             {/* TÍTULO DE LA BOLETA */}
-            <div style={{ textAlign: 'center', margin: '15px 0' }}>
+            <div style={{ textAlign: 'center', margin: '8px 0' }}>
                 <span style={{ 
                     fontSize: '13px', 
                     fontWeight: '900', 
-                    letterSpacing: '5px', 
+                    letterSpacing: '3px', 
                     borderBottom: isArchive ? 'none' : '1px solid #000',
                     paddingBottom: '2px'
                 }}>
-                    {isArchive ? 'B O L E T A  P A R A  A R C H I V O  P A R R O Q U I A L' : 'C O N S T A N C I A  D E  I N S C R I P C I Ó N  ( F A M I L I A )'}
+                    {isArchive ? 'BOLETA PARA ARCHIVO PARROQUIAL' : 'CONSTANCIA DE INSCRIPCIÓN (FAMILIA)'}
                 </span>
             </div>
 
             {/* BARRA DE CONTROL */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontSize: '11px', fontWeight: 'bold' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '11px', fontWeight: 'bold' }}>
                 <div>REGISTRO Nº: {nroReg}</div>
                 <div>FECHA TRÁMITE: {formatDate(new Date().toISOString())}</div>
             </div>
 
             {/* ADVERTENCIA FAMILIA */}
             {!isArchive && (
-                <div style={{ textAlign: 'center', fontSize: '10px', fontWeight: 'bold', marginBottom: '15px' }}>
+                <div style={{ textAlign: 'center', fontSize: '10px', fontWeight: 'bold', marginBottom: '8px' }}>
                     ESTA BOLETA NO ES UNA PARTIDA DE BAUTISMO VÁLIDA PARA TRÁMITES CIVILES O ECLESIÁSTICOS.
                 </div>
             )}
@@ -174,8 +180,8 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
 
                 <FieldLine label="MINISTRO" value={ministro} />
 
-                {/* SECCIÓN DE FIRMA */}
-                <div style={{ marginTop: '25px', display: 'flex', alignItems: 'flex-end' }}>
+                {/* SECCIÓN DE FIRMA (Anclada firmemente al fondo mediante margin-top: auto) */}
+                <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', paddingTop: '10px' }}>
                     <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '8px' }}>Firma responsable:</span>
                     <div style={{ display: 'flex', flexDirection: 'column', width: '300px' }}>
                         <div style={{ borderBottom: '1px solid black', height: '15px' }}></div>
@@ -186,7 +192,7 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
             </div>
 
             {/* NOTA DE PIE */}
-            <div style={{ marginTop: 'auto', fontSize: '9px', fontWeight: 'bold', paddingTop: '10px' }}>
+            <div style={{ fontSize: '9px', fontWeight: 'bold', paddingTop: '8px', minHeight: '14px' }}>
                 {isArchive 
                     ? '* USO INTERNO. VERIFIQUE DATOS ANTES DE ASENTAR EL ACTA DEFINITIVA.'
                     : ''}
