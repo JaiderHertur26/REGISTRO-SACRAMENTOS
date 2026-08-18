@@ -21,24 +21,43 @@ const BaptismJsonImporter = () => {
     const [isProcessing, setIsProcessing] = useState(false);
     const [importComplete, setImportComplete] = useState(false);
     const [validationResult, setValidationResult] = useState(null);
+    
     const [parrocoActual, setParrocoActual] = useState('');
+    const [diccionarioDaFe, setDiccionarioDaFe] = useState({});
 
     const parishId = user?.parish_id || user?.parishId;
 
-    // --- 1. CARGAR PÁRROCO ACTUAL PARA "DA FE" ---
+    // --- 1. CARGAR PÁRROCOS Y CREAR DICCIONARIO DE CÓDIGOS "DA FE" ---
     useEffect(() => {
         if (parishId) {
             const parrocos = getParrocos(parishId) || [];
+            
+            // A. Buscar Párroco Actual
             const actual = parrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
             if (actual) {
                 setParrocoActual(`PBRO. ${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase());
             } else {
                 setParrocoActual('PÁRROCO ENCARGADO');
             }
+
+            // B. Generar Diccionario de Códigos (Orden cronológico ascendente)
+            const sortedParrocos = [...parrocos].sort((a, b) => {
+                const dateA = new Date(a.fechaIngreso || a.fechaNombramiento || '1900-01-01');
+                const dateB = new Date(b.fechaIngreso || b.fechaNombramiento || '1900-01-01');
+                return dateA - dateB;
+            });
+
+            const map = {};
+            sortedParrocos.forEach((p, index) => {
+                const code = String(index + 1).padStart(4, '0');
+                map[code] = `PBRO. ${p.nombre} ${p.apellido || ''}`.trim().toUpperCase();
+            });
+            
+            setDiccionarioDaFe(map);
         }
     }, [parishId, getParrocos]);
 
-    // --- 2. PROCESAMIENTO DEL ARCHIVO Y FILTRO DE DUPLICADOS ---
+    // --- 2. PROCESAMIENTO DEL ARCHIVO, TRADUCCIÓN Y CEREBRO ---
     const handleFileChange = async (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
@@ -56,7 +75,6 @@ const BaptismJsonImporter = () => {
                 
                 if (rawData.length === 0) throw new Error("El archivo no contiene registros válidos en la llave 'data'.");
 
-                // Obtener registros existentes en la Nube para evitar duplicados
                 const { data: existingData, error: dbError } = await supabase
                     .from('baptisms')
                     .select('book_number, page_number, entry_number')
@@ -64,6 +82,7 @@ const BaptismJsonImporter = () => {
 
                 if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
 
+                // La llave única es L-F-N, por lo tanto, las correcciones en otros libros pasarán perfecto
                 const existingKeys = new Set((existingData || []).map(b => 
                     `${String(b.book_number).padStart(4, '0')}-${String(b.page_number).padStart(4, '0')}-${String(b.entry_number).padStart(4, '0')}`
                 ));
@@ -77,13 +96,49 @@ const BaptismJsonImporter = () => {
                 rawData.forEach((item, index) => {
                     const rowNum = index + 1;
                     
-                    // 🧠 Purificación Inteligente
-                    const cleanItem = purificarRegistroBautismo(item);
+                    // 🚀 TRADUCTOR UNIVERSAL DE LLAVES
+                    const mappedItem = {
+                        Libro: item["LIBRO N°"] || item.Libro || item.libro || '',
+                        folio: item["FOLIO N°"] || item.folio || '',
+                        numero: item["NÚMERO N°"] || item.numero || item.numeroActa || '',
+                        fechaSacramento: item["FECHA DEL BAUTISMO"] || item.fechaSacramento || '',
+                        lugarBautismo: item["LUGAR DE BAUTISMO"] || item.lugarBautismo || '',
+                        apellidos: item["APELLIDOS"] || item.apellidos || '',
+                        nombres: item["NOMBRES"] || item.nombres || '',
+                        fechaNacimiento: item["FECHA DE NACIMIENTO"] || item.fechaNacimiento || '',
+                        lugarNacimiento: item["LUGAR DE NACIMIENTO"] || item.lugarNacimiento || '',
+                        sexo: item["SEXO"] || item.sexo || '',
+                        tipoUnionPadres: item["TIPO DE UNIÓN"] || item.tipoUnionPadres || '',
+                        nombrePadre: item["NOMBRE DE PADRE"] || item.nombrePadre || '',
+                        cedulaPadre: item["CÉDULA DE PADRE"] || item.cedulaPadre || '',
+                        nombreMadre: item["NOMBRE DE MADRE"] || item.nombreMadre || '',
+                        cedulaMadre: item["CÉDULA DE MADRE"] || item.cedulaMadre || '',
+                        abuelosPaternos: item["ABUELOS PATERNOS"] || item.abuelosPaternos || '',
+                        abuelosMaternos: item["ABUELOS MATERNOS"] || item.abuelosMaternos || '',
+                        padrinos: item["PADRINOS"] || item.padrinos || '',
+                        ministro: item["MINISTRO"] || item.ministro || '',
+                        daFe: item["DA FE"] || item.daFe || '',
+                        notaMarginal: item["NOTAS MARGINALES"] || item.notaMarginal || ''
+                    };
 
-                    // Si no tiene quién da fe, inyectamos el Párroco Actual automáticamente
-                    if (!cleanItem.daFe || cleanItem.daFe === '---' || cleanItem.daFe.includes('ENCARGADO')) {
-                        cleanItem.daFe = parrocoActual;
+                    // Purificación Inteligente
+                    const cleanItem = purificarRegistroBautismo(mappedItem);
+
+                    // 🚀 INTELIGENCIA DE TRADUCCIÓN "CÓDIGO DA FE"
+                    const rawDaFe = String(mappedItem.daFe).trim();
+                    let finalDaFe = parrocoActual; 
+
+                    if (/^\d+$/.test(rawDaFe)) {
+                        // Si es un número (ej. "0004"), lo buscamos en el diccionario calculado
+                        if (diccionarioDaFe[rawDaFe]) {
+                            finalDaFe = diccionarioDaFe[rawDaFe];
+                        } 
+                    } else if (rawDaFe && rawDaFe !== '---' && !rawDaFe.includes('ENCARGADO')) {
+                        // Si es un nombre textual en vez de código, lo respetamos
+                        finalDaFe = rawDaFe;
                     }
+                    
+                    cleanItem.daFe = finalDaFe;
 
                     const key = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
                     const nombreBautizado = `${cleanItem.nombres} ${cleanItem.apellidos}`.trim();
@@ -131,13 +186,12 @@ const BaptismJsonImporter = () => {
                 book_number: item.Libro,
                 page_number: item.folio,
                 entry_number: item.numero,
-                status: 'seated', // Las históricas siempre entran como asentadas (firmadas)
+                status: 'seated', 
                 raw_data: item, 
                 margin_note: item.notaMarginal || null,
                 created_at: new Date().toISOString()
             }));
 
-            // Inserción en Lotes (Batches de 200) para no saturar Supabase
             const batchSize = 200;
             for (let i = 0; i < dbRecords.length; i += batchSize) {
                 const batch = dbRecords.slice(i, i + batchSize);
@@ -181,7 +235,6 @@ const BaptismJsonImporter = () => {
 
             <div className="flex flex-col xl:flex-row gap-10 items-start">
                 
-                {/* ZONA IZQUIERDA: DRAG & DROP */}
                 <div className="w-full xl:w-1/3">
                     <label className={cn(
                         "flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-[2rem] cursor-pointer transition-all relative overflow-hidden",
@@ -202,7 +255,7 @@ const BaptismJsonImporter = () => {
                             </p>
                             {!validationResult && !isProcessing && (
                                 <p className="text-[10px] text-gray-400 mt-2 font-bold uppercase tracking-widest">
-                                    El sistema unificará nombres, fechas y abuelos automáticamente.
+                                    El sistema traducirá códigos de párroco y depurará la información.
                                 </p>
                             )}
                         </div>
@@ -210,7 +263,6 @@ const BaptismJsonImporter = () => {
                     </label>
                 </div>
 
-                {/* ZONA DERECHA: RESULTADOS Y BOTONES */}
                 <div className="w-full xl:w-2/3 space-y-6">
                     <div className="flex items-center justify-between border-b border-gray-100 pb-4">
                         <div className="flex items-center gap-3">
@@ -268,7 +320,6 @@ const BaptismJsonImporter = () => {
                 </div>
             </div>
 
-            {/* VISTA PREVIA INFERIOR */}
             {validationResult?.count > 0 && (
                 <div className="mt-10 pt-8 border-t border-gray-100 animate-in fade-in duration-700">
                     <div className="bg-gray-50/50 px-6 py-4 rounded-t-3xl border border-b-0 border-gray-100 flex items-center justify-between">
@@ -285,7 +336,6 @@ const BaptismJsonImporter = () => {
     );
 };
 
-// --- COMPONENTES AUXILIARES ESTÉTICOS ---
 const StatCard = ({ label, val, color }) => {
     const colors = {
         green: "bg-green-50 border-green-100 text-green-700",
