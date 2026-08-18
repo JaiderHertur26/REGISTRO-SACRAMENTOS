@@ -26,7 +26,6 @@ const EditDecreeCorrectionSheet = () => {
     const [conceptos, setConceptos] = useState([]);
     const [originalPayload, setOriginalPayload] = useState(null);
 
-    // 🚀 AHORA EL ESTADO RESPETA LOS NOMBRES QUE ESPERA EL MOTOR
     const [decreeData, setDecreeData] = useState({
         parroquia: '', numeroDeDecreto: '', fechaEmision: '', conceptoAnulacion: '', nombreBautizado: '', Libro: '', folio: '', numero: ''
     });
@@ -66,34 +65,49 @@ const EditDecreeCorrectionSheet = () => {
                 const payload = typeof decree.payload === 'string' ? JSON.parse(decree.payload) : decree.payload;
                 setOriginalPayload(payload);
 
-                // 🚀 MAPEO AL ESTADO CORREGIDO
+                // 🧠 MAGIA: Búsqueda Inteligente de la Partida Original para rescatar datos vacíos
+                const pad = (num) => String(num).padStart(4, '0');
+                let origDataRaw = {};
+                
+                if (payload.originalPartidaSummary?.book || payload.originalPartidaSummary?.Libro) {
+                    const b = payload.originalPartidaSummary.book || payload.originalPartidaSummary.Libro;
+                    const p = payload.originalPartidaSummary.page || payload.originalPartidaSummary.folio;
+                    const e = payload.originalPartidaSummary.entry || payload.originalPartidaSummary.numero;
+                    
+                    const { data: origData } = await supabase.from('baptisms').select('raw_data')
+                        .eq('parish_id', user.parishId).eq('book_number', pad(b)).eq('folio', pad(p)).eq('number', pad(e)).maybeSingle();
+                        
+                    if (origData) origDataRaw = origData.raw_data || {};
+                }
+
                 setDecreeData({
                     parroquia: parishLabel,
                     numeroDeDecreto: payload.decreeNumber || '',
                     fechaEmision: payload.decreeDate || '',
                     conceptoAnulacion: payload.conceptoAnulacionId || '',
                     nombreBautizado: payload.targetName || '',
-                    Libro: payload.originalPartidaSummary?.book || '',
-                    folio: payload.originalPartidaSummary?.page || '',
-                    numero: payload.originalPartidaSummary?.entry || ''
+                    Libro: payload.originalPartidaSummary?.book || payload.originalPartidaSummary?.Libro || '',
+                    folio: payload.originalPartidaSummary?.page || payload.originalPartidaSummary?.folio || '',
+                    numero: payload.originalPartidaSummary?.entry || payload.originalPartidaSummary?.numero || ''
                 });
 
+                // 🚀 POBLACIÓN INTELIGENTE: Mezcla lo editado con los datos de la original
                 setNewPartida({
-                    lugarBautismo: payload.lugarBautismo || payload.lugarBautismoDetalle || '',
-                    fechaSacramento: payload.fechaSacramento || '',
-                    apellidos: payload.apellidos || payload.lastName || payload.newPartidaSummary?.apellidos || '',
-                    nombres: payload.nombres || payload.firstName || payload.newPartidaSummary?.nombres || '',
-                    fechaNacimiento: payload.fechaNacimiento || '',
-                    lugarNacimiento: payload.lugarNacimiento || payload.lugarNacimientoDetalle || '',
-                    sexo: payload.sexo || payload.sex || '',
-                    nombrePadre: payload.nombrePadre || payload.fatherName || '',
-                    nombreMadre: payload.nombreMadre || payload.motherName || '',
-                    tipoUnionPadres: payload.tipoUnionPadres || '',
-                    abuelosPaternos: payload.abuelosPaternos || payload.paternalGrandparents || '',
-                    abuelosMaternos: payload.abuelosMaternos || payload.maternalGrandparents || '',
-                    padrinos: payload.padrinos || payload.godparents || '',
-                    ministro: payload.ministro || payload.minister || '',
-                    daFe: payload.daFe || payload.ministerFaith || '',
+                    lugarBautismo: payload.lugarBautismo || origDataRaw.lugarBautismo || origDataRaw.lugar_bautismo || '',
+                    fechaSacramento: payload.fechaSacramento || origDataRaw.fechaSacramento || origDataRaw.celebration_date || '',
+                    apellidos: payload.apellidos || payload.newPartidaSummary?.apellidos || origDataRaw.apellidos || origDataRaw.lastName || '',
+                    nombres: payload.nombres || payload.newPartidaSummary?.nombres || origDataRaw.nombres || origDataRaw.firstName || '',
+                    fechaNacimiento: payload.fechaNacimiento || origDataRaw.fechaNacimiento || origDataRaw.birthDate || '',
+                    lugarNacimiento: payload.lugarNacimiento || origDataRaw.lugarNacimiento || origDataRaw.lugarNacimientoDetalle || '',
+                    sexo: payload.sexo || origDataRaw.sexo || origDataRaw.sex || '',
+                    nombrePadre: payload.nombrePadre || origDataRaw.nombrePadre || origDataRaw.fatherName || '',
+                    nombreMadre: payload.nombreMadre || origDataRaw.nombreMadre || origDataRaw.motherName || '',
+                    tipoUnionPadres: payload.tipoUnionPadres || origDataRaw.tipoUnionPadres || origDataRaw.tipohijo || '',
+                    abuelosPaternos: payload.abuelosPaternos || origDataRaw.abuelosPaternos || origDataRaw.paternalGrandparents || '',
+                    abuelosMaternos: payload.abuelosMaternos || origDataRaw.abuelosMaternos || origDataRaw.maternalGrandparents || '',
+                    padrinos: payload.padrinos || origDataRaw.padrinos || origDataRaw.godparents || '',
+                    ministro: payload.ministro || origDataRaw.ministro || origDataRaw.minister || '',
+                    daFe: payload.daFe || origDataRaw.daFe || origDataRaw.ministerFaith || '',
                     observaciones: payload.observaciones || ''
                 });
 
@@ -110,7 +124,6 @@ const EditDecreeCorrectionSheet = () => {
     const handleNewPartidaChange = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
     const handleNewPartidaChangeRaw = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
-    // --- GUARDAR Y RECALCULAR ---
     const handleSave = async (e) => {
         e.preventDefault();
         setIsSubmitting(true);
@@ -119,10 +132,9 @@ const EditDecreeCorrectionSheet = () => {
             const pad = (num) => String(num).padStart(4, '0');
             const supSum = originalPayload.newPartidaSummary;
 
-            // 🧠 RECALCULAMOS LAS NOTAS CON LOS DATOS CORREGIDOS (Esto arregla el "___")
             const noteAnulada = marginalNotesEngine.forAnnulledCorrection(user?.parishId, {
                 numeroDecreto: decreeData.numeroDeDecreto, fechaDecreto: decreeData.fechaEmision,
-                libroNuevo: supSum.book, folioNuevo: supSum.page, numeroNuevo: supSum.entry
+                libroNuevo: supSum.book || supSum.Libro, folioNuevo: supSum.page || supSum.folio, numeroNuevo: supSum.entry || supSum.numero
             });
 
             const notaSupletoriaFinal = marginalNotesEngine.forNewCorrection(user?.parishId, {
@@ -131,7 +143,6 @@ const EditDecreeCorrectionSheet = () => {
                 ministro: newPartida.daFe
             });
 
-            // Actualizar Partida Original
             const { data: origData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
                 .eq('book_number', pad(decreeData.Libro)).eq('folio', pad(decreeData.folio)).eq('number', pad(decreeData.numero)).maybeSingle();
 
@@ -141,9 +152,8 @@ const EditDecreeCorrectionSheet = () => {
                 }).eq('id', origData.id);
             }
 
-            // Actualizar Partida Supletoria
             const { data: supData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
-                .eq('book_number', pad(supSum.book)).eq('folio', pad(supSum.page)).eq('number', pad(supSum.entry)).maybeSingle();
+                .eq('book_number', pad(supSum.book || supSum.Libro)).eq('folio', pad(supSum.page || supSum.folio)).eq('number', pad(supSum.entry || supSum.numero)).maybeSingle();
 
             if (supData) {
                 const updatedRaw = {
@@ -165,7 +175,6 @@ const EditDecreeCorrectionSheet = () => {
                 }).eq('id', supData.id);
             }
 
-            // Actualizar Decreto
             const newPayload = {
                 ...originalPayload,
                 decreeNumber: decreeData.numeroDeDecreto, decreeDate: decreeData.fechaEmision,
@@ -200,7 +209,7 @@ const EditDecreeCorrectionSheet = () => {
             }
 
             if (supSum) {
-                await supabase.from('baptisms').delete().eq('parish_id', user.parishId).eq('book_number', pad(supSum.book)).eq('folio', pad(supSum.page)).eq('number', pad(supSum.entry));
+                await supabase.from('baptisms').delete().eq('parish_id', user.parishId).eq('book_number', pad(supSum.book || supSum.Libro)).eq('folio', pad(supSum.page || supSum.folio)).eq('number', pad(supSum.entry || supSum.numero));
             }
 
             await supabase.from('decretos').delete().eq('id', decreeId);
@@ -277,9 +286,9 @@ const EditDecreeCorrectionSheet = () => {
                             <div className="bg-gray-50 px-8 py-4 border-b border-gray-200 flex items-center justify-between">
                                 <div className="flex items-center gap-2"><UserPlus className="w-4 h-4 text-green-600" /><h3 className="text-xs font-black text-green-600 uppercase tracking-widest">02. Datos Corregidos</h3></div>
                                 <div className="flex gap-2">
-                                    <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded">L:{originalPayload?.newPartidaSummary?.book}</span>
-                                    <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded">F:{originalPayload?.newPartidaSummary?.page}</span>
-                                    <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded">N:{originalPayload?.newPartidaSummary?.entry}</span>
+                                    <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded">L:{originalPayload?.newPartidaSummary?.book || originalPayload?.newPartidaSummary?.Libro}</span>
+                                    <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded">F:{originalPayload?.newPartidaSummary?.page || originalPayload?.newPartidaSummary?.folio}</span>
+                                    <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded">N:{originalPayload?.newPartidaSummary?.entry || originalPayload?.newPartidaSummary?.numero}</span>
                                 </div>
                             </div>
                             <div className="p-10 space-y-10">
@@ -332,8 +341,8 @@ const EditDecreeCorrectionSheet = () => {
                                 </div>
 
                                 <div className="space-y-2 border-t pt-10">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase">Observaciones del Decreto</label>
-                                    <textarea name="observaciones" value={newPartida.observaciones} onChange={handleNewPartidaChange} rows={4} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-500/20 uppercase font-bold text-gray-700 bg-amber-50" placeholder="OBSERVACIONES PARA EL DECRETO..." />
+                                    <label className="text-[10px] font-black text-gray-400 uppercase">Observaciones del Decreto (Opcional)</label>
+                                    <textarea name="observaciones" value={newPartida.observaciones} onChange={handleNewPartidaChange} rows={4} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-500/20 uppercase font-bold text-gray-700 bg-amber-50" />
                                 </div>
                             </div>
                         </div>
@@ -355,7 +364,7 @@ const EditDecreeCorrectionSheet = () => {
                     <div className="bg-red-50 p-4 rounded-xl border border-red-100 flex items-start gap-3">
                         <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
                         <p className="text-xs text-red-800 font-medium leading-relaxed">
-                            Al confirmar, el decreto <strong>{decreeData.numeroDeDecreto}</strong> será eliminado permanentemente de la Nube. La partida supletoria será destruida y la partida original recuperará su validez legal.
+                            Al confirmar, el decreto <strong>{decreeData.numeroDeDecreto}</strong> será eliminado permanentemente. La partida supletoria será destruida y la partida original recuperará su validez legal.
                         </p>
                     </div>
                     <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">

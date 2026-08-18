@@ -51,7 +51,6 @@ const BaptismCorrectionListPage = () => {
         finally { setDeleteConfig({ isOpen: false, id: null, name: '' }); }
     };
 
-    // 🧠 RESUELVE EL NOMBRE LIMPIO SIN COMAS
     const resolveName = (summary, fallbackName) => {
         if (summary) {
             const lName = summary.lastName || summary.apellidos || '';
@@ -60,6 +59,8 @@ const BaptismCorrectionListPage = () => {
         }
         return (fallbackName || '---').toUpperCase();
     };
+
+    const pad = (val) => val ? String(val).padStart(4, '0') : '----';
 
     const filteredCorrections = corrections.filter(item => {
         const term = searchTerm.toLowerCase();
@@ -81,7 +82,7 @@ const BaptismCorrectionListPage = () => {
             render: (row) => (
                 <div className="flex flex-col">
                     <span className="font-bold text-red-600 text-xs uppercase">{resolveName(row.originalPartidaSummary, row.targetName)}</span>
-                    <span className="text-[10px] text-gray-400 font-mono">L:{row.originalPartidaSummary?.book || row.originalPartidaSummary?.Libro || '-'} F:{row.originalPartidaSummary?.page || row.originalPartidaSummary?.folio || '-'} N:{row.originalPartidaSummary?.entry || row.originalPartidaSummary?.numero || '-'}</span>
+                    <span className="text-[10px] text-gray-400 font-mono">L:{pad(row.originalPartidaSummary?.book || row.originalPartidaSummary?.Libro)} F:{pad(row.originalPartidaSummary?.page || row.originalPartidaSummary?.folio)} N:{pad(row.originalPartidaSummary?.entry || row.originalPartidaSummary?.numero)}</span>
                 </div>
             )
         },
@@ -91,7 +92,7 @@ const BaptismCorrectionListPage = () => {
             render: (row) => (
                 <div className="flex flex-col">
                     <span className="font-bold text-green-600 text-xs uppercase">{resolveName(row.newPartidaSummary, row.newTargetName)}</span>
-                    <span className="text-[10px] text-gray-400 font-mono font-bold">L:{row.newPartidaSummary?.book || row.newPartidaSummary?.Libro || '-'} F:{row.newPartidaSummary?.page || row.newPartidaSummary?.folio || '-'} N:{row.newPartidaSummary?.entry || row.newPartidaSummary?.numero || '-'}</span>
+                    <span className="text-[10px] text-gray-400 font-mono font-bold">L:{pad(row.newPartidaSummary?.book || row.newPartidaSummary?.Libro)} F:{pad(row.newPartidaSummary?.page || row.newPartidaSummary?.folio)} N:{pad(row.newPartidaSummary?.entry || row.newPartidaSummary?.numero)}</span>
                 </div>
             )
         },
