@@ -58,26 +58,8 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   const abuelosMaternos = formatData(raw.abuelosMaternos);
   const padrinos = formatData(raw.padrinos);
   
-  // 🧠 Limpieza de Títulos Redundantes (Evita el "PBRO. PBRO.")
+  // 🧠 Limpieza de Títulos Redundantes
   const cleanTitle = (nameStr) => nameStr.replace(/^(PBRO\.?|PADRE|FRAY|MONS\.?)\s+/i, '').trim();
-
-  let ministro = formatData(raw.ministro);
-  if (ministro) ministro = `PBRO. ${cleanTitle(ministro)}`;
-
-  let daFe = formatData(raw.daFe);
-  if (daFe && !daFe.includes("ENCARGADO")) daFe = `PBRO. ${cleanTitle(daFe)}`;
-
-  // 🧠 Limpieza Inteligente de Notas Marginales Antiguas (Evita que se corte la palabra ESTA)
-  const noteTextRaw = raw.notaMarginal || '';
-  let finalNote = formatData(noteTextRaw);
-  
-  finalNote = finalNote.replace(/LA INFORMACIÓN SUMINISTRADA ES FIEL.*/i, '').trim();
-  finalNote = finalNote.replace(/ESTA INFORMACIÓN SUMINISTRADA ES FIEL.*/i, '').trim();
-  finalNote = finalNote.replace(/SE EXPIDE EN.*/i, '').trim();
-  
-  if (!finalNote || finalNote === '---') {
-      finalNote = "SIN NOTAS MARGINALES DE MATRIMONIO U OTRAS HASTA LA FECHA.";
-  }
 
   // Párroco Actual (El que firma el papel hoy en la parte inferior)
   const getPárrocoActual = () => {
@@ -92,6 +74,31 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   
   let parrocoFirma = formatData(getPárrocoActual());
   parrocoFirma = cleanTitle(parrocoFirma);
+
+  let ministro = formatData(raw.ministro);
+  if (ministro) ministro = `PBRO. ${cleanTitle(ministro)}`;
+
+  // 🚀 SOLUCIÓN 1: INTELIGENCIA "DOY FE"
+  let daFeRaw = formatData(raw.daFe);
+  let daFe = '';
+  if (!daFeRaw || daFeRaw.includes("ENCARGADO") || daFeRaw === "---") {
+      daFe = `PBRO. ${parrocoFirma}`;
+  } else {
+      daFe = `PBRO. ${cleanTitle(daFeRaw)}`;
+  }
+
+  // 🧠 Limpieza Inteligente de Notas Marginales Antiguas
+  const noteTextRaw = raw.notaMarginal || '';
+  let finalNote = formatData(noteTextRaw);
+  
+  finalNote = finalNote.replace(/LA INFORMACIÓN SUMINISTRADA ES FIEL.*/i, '').trim();
+  finalNote = finalNote.replace(/ESTA INFORMACIÓN SUMINISTRADA ES FIEL.*/i, '').trim();
+  finalNote = finalNote.replace(/SE EXPIDE EN.*/i, '').trim();
+  finalNote = finalNote.replace(/ES COPIA FIEL.*/i, '').trim();
+  
+  if (!finalNote || finalNote === '---') {
+      finalNote = "SIN NOTAS MARGINALES DE MATRIMONIO U OTRAS HASTA LA FECHA.";
+  }
 
   // FECHA DE EXPEDICIÓN CONVERTIDA A LETRAS PERFECTAS
   const getFechaExpedicion = () => {
@@ -121,22 +128,23 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   const telefono = formatData(header.telefono || '');
   const email = header.email ? header.email.toLowerCase().trim() : '';
 
-  // Componente de Fila Segura e Inquebrantable
   const LinedRow = ({ label, value }) => (
-      <div style={{ display: 'flex', borderBottom: '1.5px solid #000', minHeight: '32px', boxSizing: 'border-box' }}>
-          <div style={{ padding: '6px 12px', fontWeight: 'bold', fontSize: '11px', whiteSpace: 'nowrap', borderRight: '1.5px solid #000', width: '180px', display: 'flex', alignItems: 'center', backgroundColor: '#fbfbfb' }}>
+      <div style={{ display: 'flex', borderBottom: '1.5px solid #000', minHeight: '30px', boxSizing: 'border-box' }}>
+          <div style={{ padding: '4px 10px', fontWeight: 'bold', fontSize: '11px', whiteSpace: 'nowrap', borderRight: '1.5px solid #000', width: '180px', display: 'flex', alignItems: 'center', backgroundColor: '#fbfbfb' }}>
               {label}
           </div>
-          <div style={{ padding: '6px 12px', fontFamily: '"Courier New", Courier, monospace', fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase', flex: 1, display: 'flex', alignItems: 'center' }}>
+          <div style={{ padding: '4px 10px', fontFamily: '"Courier New", Courier, monospace', fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase', flex: 1, display: 'flex', alignItems: 'center' }}>
               {value}
           </div>
       </div>
   );
 
   return (
+    // 🚀 SOLUCIÓN 2: CANDADO DE 1 SOLA PÁGINA (height: '11in' y overflow: 'hidden')
     <div ref={ref} style={{
-        width: '8.5in', minHeight: '11in', padding: '0.8in', color: '#000', backgroundColor: 'white', 
-        boxSizing: 'border-box', margin: '0 auto', display: 'flex', flexDirection: 'column', position: 'relative'
+        width: '8.5in', height: '11in', padding: '0.6in 0.8in', color: '#000', backgroundColor: 'white', 
+        boxSizing: 'border-box', margin: '0 auto', display: 'flex', flexDirection: 'column', position: 'relative',
+        overflow: 'hidden'
     }}>
         <style dangerouslySetInnerHTML={{__html: `
             @media print {
@@ -145,34 +153,33 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
             }
         `}} />
 
-        {/* 1. ENCABEZADO INSTITUCIONAL */}
-        <div style={{ textAlign: 'center', marginBottom: '25px', fontFamily: 'Arial, sans-serif' }}>
-            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{diocesis}</div>
-            <div style={{ fontSize: '18px', fontWeight: '900', marginTop: '4px' }}>{parroquia}</div>
-            <div style={{ fontSize: '12px', marginTop: '2px', color: '#333' }}>{ubicacionFinal}</div>
+        {/* 🚀 SOLUCIÓN 4: ENCABEZADO UNIFORME */}
+        <div style={{ textAlign: 'center', marginBottom: '20px', fontFamily: 'Arial, sans-serif', color: '#000' }}>
+            <div style={{ fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase' }}>{diocesis}</div>
+            <div style={{ fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', marginTop: '3px' }}>{parroquia}</div>
+            <div style={{ fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', marginTop: '3px' }}>{ubicacionFinal}</div>
         </div>
 
-        {/* 2. PREÁMBULO LEGAL */}
-        <div style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', textAlign: 'justify', marginBottom: '15px', lineHeight: '1.6' }}>
+        {/* PREÁMBULO LEGAL */}
+        <div style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', textAlign: 'justify', marginBottom: '12px', lineHeight: '1.6' }}>
             El suscrito Párroco <strong>CERTIFICA</strong> que en el archivo parroquial reposa un acta que a la letra dice:
         </div>
 
-        {/* 3. CAJA DE REGISTRO (DISEÑO TABULAR OFICIAL Y DINÁMICO) */}
-        <div style={{ border: '1.5px solid black', borderRadius: '4px', width: '100%', marginBottom: '25px', overflow: 'hidden' }}>
+        {/* CAJA DE REGISTRO (DISEÑO TABULAR OFICIAL) */}
+        <div style={{ border: '1.5px solid black', borderRadius: '4px', width: '100%', overflow: 'hidden' }}>
             
-            {/* FILA DE UBICACIÓN */}
             <div style={{ display: 'flex', borderBottom: '1.5px solid black', backgroundColor: '#f4f4f5' }}>
-                <div style={{ flex: 1, padding: '8px 12px', borderRight: '1.5px solid black', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ flex: 1, padding: '6px 12px', borderRight: '1.5px solid black', display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <span style={{ fontWeight: 'bold', fontSize: '11px', fontFamily: 'Arial, sans-serif' }}>LIBRO:</span>
-                    <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '15px', fontWeight: 'bold' }}>{libro}</span>
+                    <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '14px', fontWeight: 'bold' }}>{libro}</span>
                 </div>
-                <div style={{ flex: 1, padding: '8px 12px', borderRight: '1.5px solid black', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ flex: 1, padding: '6px 12px', borderRight: '1.5px solid black', display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <span style={{ fontWeight: 'bold', fontSize: '11px', fontFamily: 'Arial, sans-serif' }}>FOLIO:</span>
-                    <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '15px', fontWeight: 'bold' }}>{folio}</span>
+                    <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '14px', fontWeight: 'bold' }}>{folio}</span>
                 </div>
-                <div style={{ flex: 1, padding: '8px 12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ flex: 1, padding: '6px 12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <span style={{ fontWeight: 'bold', fontSize: '11px', fontFamily: 'Arial, sans-serif' }}>NÚMERO:</span>
-                    <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '15px', fontWeight: 'bold' }}>{acta}</span>
+                    <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '14px', fontWeight: 'bold' }}>{acta}</span>
                 </div>
             </div>
 
@@ -189,25 +196,23 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
             <LinedRow label="MINISTRO:" value={ministro} />
             <LinedRow label="DOY FE:" value={daFe} />
 
-            {/* ANOTACIONES MARGINALES (Caja Expandible que nunca se rompe) */}
-            <div style={{ padding: '12px', minHeight: '70px', backgroundColor: '#fff' }}>
-                <span style={{ fontWeight: 'bold', fontSize: '11px', fontFamily: 'Arial, sans-serif', display: 'block', marginBottom: '8px' }}>ANOTACIONES MARGINALES:</span>
-                <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>{finalNote}</span>
+            {/* ANOTACIONES MARGINALES */}
+            <div style={{ padding: '8px 12px', minHeight: '60px', backgroundColor: '#fff' }}>
+                <span style={{ fontWeight: 'bold', fontSize: '11px', fontFamily: 'Arial, sans-serif', display: 'block', marginBottom: '6px' }}>ANOTACIONES MARGINALES:</span>
+                <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>{finalNote}</span>
             </div>
         </div>
 
-        {/* 4. PÁRRAFO DE CERTIFICACIÓN FINAL */}
-        <div style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', textAlign: 'justify', lineHeight: '1.6', marginTop: '10px' }}>
+        {/* PÁRRAFO DE CERTIFICACIÓN FINAL */}
+        <div style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', textAlign: 'justify', lineHeight: '1.6', marginTop: '15px' }}>
             Es copia fiel del original. Se expide en <strong>{ciudad.toUpperCase()}</strong> el día <strong>{getFechaExpedicion()}</strong>.
         </div>
 
-        {/* 5. ZONA DE FIRMAS Y SELLOS */}
-        <div style={{ marginTop: '80px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', fontFamily: 'Arial, sans-serif', padding: '0 20px' }}>
+        {/* 5. ZONA DE FIRMAS Y SELLOS (Empujado siempre al final, garantizando 1 sola página) */}
+        <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', fontFamily: 'Arial, sans-serif', padding: '0 20px', paddingBottom: '10px' }}>
             
-            {/* Sello Físico */}
-            <div style={{ width: '120px', height: '120px', border: '1.5px dashed #ccc', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ccc', fontSize: '11px', textAlign: 'center', fontWeight: 'bold' }}>
-                SELLO<br/>PARROQUIAL
-            </div>
+            {/* 🚀 SOLUCIÓN 3: Sello Físico Invisible (Espacio en blanco exacto para estampar manual) */}
+            <div style={{ width: '120px', height: '120px' }}></div>
 
             {/* Firma del Párroco */}
             <div style={{ textAlign: 'center', width: '300px' }}>
@@ -218,7 +223,7 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
         </div>
 
         {/* 6. PIE DE PÁGINA INSTITUCIONAL (Footer) */}
-        <div style={{ marginTop: 'auto', paddingTop: '15px', textAlign: 'center', fontSize: '10px', color: '#555', borderTop: '1.5px solid #eee', fontFamily: 'Arial, sans-serif' }}>
+        <div style={{ paddingTop: '12px', textAlign: 'center', fontSize: '10px', color: '#555', borderTop: '1.5px solid #eee', fontFamily: 'Arial, sans-serif' }}>
             {header.direccion && header.direccion !== '---' && <span>{header.direccion.toUpperCase()}</span>}
             {telefono && telefono !== '---' && <span> • TEL: {telefono}</span>}
             {email && <span> • {email}</span>}
