@@ -43,7 +43,7 @@ const BaptismCorrectionListPage = () => {
         finally { setLoading(false); }
     };
 
-    // 🚀 LÓGICA DE RESTAURACIÓN COMPLETA (ROLLBACK)
+    // 🚀 LÓGICA DE RESTAURACIÓN COMPLETA (ROLLBACK TOTAL)
     const confirmDelete = async () => {
         setIsDeleting(true);
         try {
@@ -84,7 +84,7 @@ const BaptismCorrectionListPage = () => {
                 }
             }
 
-            // 3. Eliminar la Partida Supletoria (La Nueva)
+            // 3. Eliminar la Partida Supletoria y Revertir el Parámetro
             if (newSum) {
                 const newBook = pad(newSum.book || newSum.Libro);
                 const newPage = pad(newSum.page || newSum.folio);
@@ -95,6 +95,32 @@ const BaptismCorrectionListPage = () => {
                     .eq('book_number', newBook)
                     .eq('folio', newPage)
                     .eq('number', newEntry);
+
+                // 🚀 AQUÍ OCURRE LA MAGIA DEL REVERSO DEL LIBRO SUPLETORIO
+                const { data: pData } = await supabase
+                    .from('parish_parameters')
+                    .select('bautizos_params')
+                    .eq('parish_id', user.parishId)
+                    .maybeSingle();
+
+                if (pData && pData.bautizos_params) {
+                    const currentParams = pData.bautizos_params;
+                    const currentSupNum = Number(currentParams.suplementarioNumero);
+                    const deletedEntryNum = Number(newEntry);
+
+                    // Validamos si el registro borrado fue el último generado
+                    if (deletedEntryNum === currentSupNum - 1) {
+                        const newParamsObj = { 
+                            ...currentParams, 
+                            suplementarioNumero: currentSupNum - 1 
+                        };
+                        
+                        await supabase
+                            .from('parish_parameters')
+                            .update({ bautizos_params: newParamsObj })
+                            .eq('parish_id', user.parishId);
+                    }
+                }
             }
 
             // 4. Eliminar el Decreto
@@ -102,7 +128,7 @@ const BaptismCorrectionListPage = () => {
 
             toast({ 
                 title: "Restauración Completada", 
-                description: "Decreto eliminado, supletoria borrada y partida original restaurada.", 
+                description: "Decreto borrado, partida restaurada y consecutivos actualizados.", 
                 className: "bg-green-50 text-green-900 border-green-200" 
             });
             loadParishCorrectionsFromCloud();
