@@ -46,38 +46,75 @@ export const genericAuxCRUD = (type, contextId) => ({
 });
 
 // ============================================================================
-// 🕊️ PÁRROCOS
+// 🕊️ PÁRROCOS (ESPEJO INTELIGENTE CON SUPABASE)
 // ============================================================================
 export const getParrocos = (parishId) => genericAuxCRUD('parrocos', parishId).get();
 
 export const getParrocoActual = (parishId) => {
     const list = getParrocos(parishId);
-    return list.find(p => p.estado === "1" || String(p.estado).toUpperCase() === 'ACTIVO');
+    return list.find(p => String(p.estado) === "1" || String(p.estado).toUpperCase() === 'ACTIVO');
 };
 
+// Utilidad para parsear fechas y que el motor no se confunda
+const parseDateSafe = (dateStr) => {
+    if (!dateStr) return new Date('1900-01-01');
+    if (dateStr.includes('/')) {
+        const parts = dateStr.split('/');
+        if (parts.length === 3) return new Date(`${parts[2]}-${parts[1]}-${parts[0]}T00:00:00`);
+    }
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? new Date('1900-01-01') : d;
+};
+
+// 🚀 MOTOR DE AUTO-CÁLCULO DEL PÁRROCO ACTUAL
 export const actualizarParrocoActual = async (parishId) => {
     if (!parishId) return;
-    const key = `parrocos_${parishId}`;
-    const currentList = safeJsonParse(localStorage.getItem(key), []);
-    if (currentList.length === 0) return;
-
-    const sorted = [...currentList].sort((a, b) => {
-        const dateA = new Date(a.fechaIngreso || a.fechaNombramiento || '1900-01-01');
-        const dateB = new Date(b.fechaIngreso || b.fechaNombramiento || '1900-01-01');
-        return dateB - dateA;
-    });
-
-    const today = new Date().toISOString().split('T')[0];
-    const updatedList = sorted.map((p, index) => {
-        if (index === 0) return { ...p, estado: "1", fechaSalida: today };
-        const nextMoreRecentPriest = sorted[index - 1];
-        const nextEntryDate = nextMoreRecentPriest.fechaIngreso || nextMoreRecentPriest.fechaNombramiento;
-        return { ...p, estado: "2", fechaSalida: nextEntryDate || p.fechaSalida };
-    });
-
-    localStorage.setItem(key, JSON.stringify(updatedList));
 
     try {
+        // 1. Descargamos la verdad absoluta desde la Base de Datos
+        const { data: dbParrocos, error } = await supabase
+            .from('parrocos')
+            .select('*')
+            .eq('parish_id', parishId);
+
+        if (error) throw error;
+        if (!dbParrocos || dbParrocos.length === 0) return;
+
+        // 2. Normalizamos fechas para el ordenamiento
+        let lista = dbParrocos.map(dbItem => {
+            let p = dbItem.payload || {};
+            if (typeof p === 'string') p = safeJsonParse(p, {});
+            return {
+                ...p,
+                id: dbItem.id, // Mantenemos el ID real
+                _fechaOrden: parseDateSafe(dbItem.fecha_ingreso || p.fechaIngreso || p.fechaNombramiento)
+            };
+        });
+
+        // 3. Orden Cronológico Descendente (El más reciente queda en la posición 0)
+        lista.sort((a, b) => b._fechaOrden.getTime() - a._fechaOrden.getTime());
+
+        // 4. Recalculamos Estados y Fechas de Salida Lógicas
+        const updatedList = lista.map((p, index) => {
+            const { _fechaOrden, ...cleanPayload } = p;
+            
+            if (index === 0) {
+                // EL MÁS RECIENTE ES EL PÁRROCO ACTUAL
+                cleanPayload.estado = "1";
+                cleanPayload.fechaSalida = ""; // No tiene fecha de salida porque está ejerciendo
+            } else {
+                // LOS DEMÁS SON HISTÓRICOS
+                cleanPayload.estado = "2";
+                
+                // Le asignamos como fecha de salida la misma fecha en la que entró el que lo reemplazó (el anterior en el array)
+                const reemplazo = lista[index - 1];
+                const fechaReemplazo = reemplazo.fechaIngreso || reemplazo.fechaNombramiento;
+                cleanPayload.fechaSalida = cleanPayload.fechaSalida || fechaReemplazo || "";
+            }
+            return cleanPayload;
+        });
+
+        // 5. Preparamos inyección a la nube
         const upsertPayload = updatedList.map(p => ({
             id: p.id,
             parish_id: parishId,
@@ -87,18 +124,23 @@ export const actualizarParrocoActual = async (parishId) => {
             telefono: p.telefono || null,
             fecha_ingreso: cleanDate(p.fechaIngreso || p.fechaNombramiento),
             fecha_salida: cleanDate(p.fechaSalida),
-            estado: p.estado || '2',
+            estado: p.estado,
             payload: p
         }));
-        
-        // Inserción en lotes de 200
+
+        // 6. Inyección masiva segura
         const chunkSize = 200;
         for (let i = 0; i < upsertPayload.length; i += chunkSize) {
             const chunk = upsertPayload.slice(i, i + chunkSize);
-            await supabase.from('parrocos').upsert(chunk, { onConflict: 'id' });
+            const { error: upsertError } = await supabase.from('parrocos').upsert(chunk, { onConflict: 'id' });
+            if (upsertError) throw upsertError;
         }
+
+        // 7. Sincronizamos el caché local
+        localStorage.setItem(`parrocos_${parishId}`, JSON.stringify(updatedList));
+
     } catch(e) {
-        console.error("Error sincronizando párrocos con Supabase:", e);
+        console.error("Error en motor de auto-selección de Párroco:", e);
     }
 };
 
@@ -122,8 +164,7 @@ export const addParroco = async (item, parishId) => {
         const { error } = await supabase.from('parrocos').insert([dbRecord]);
         if (error) throw error;
 
-        const current = getAuxData('parrocos', parishId);
-        saveAuxData('parrocos', parishId, [...current, newItem]);
+        // El motor acomodará todo
         await actualizarParrocoActual(parishId); 
         return { success: true, data: newItem }; 
     } catch (e) {
@@ -150,8 +191,7 @@ export const updateParroco = async (id, item, parishId) => {
         const { error } = await supabase.from('parrocos').update(dbRecord).eq('id', id);
         if (error) throw error;
 
-        const updatedList = current.map(i => i.id === id ? updatedItem : i);
-        saveAuxData('parrocos', parishId, updatedList);
+        // El motor acomodará todo
         await actualizarParrocoActual(parishId); 
         return { success: true }; 
     } catch (e) {
@@ -161,30 +201,23 @@ export const updateParroco = async (id, item, parishId) => {
 
 export const deleteParroco = async (id, parishId) => {
     try {
-        const current = getAuxData('parrocos', parishId);
-        const filtered = current.filter(i => i.id !== id);
-        saveAuxData('parrocos', parishId, filtered);
         await supabase.from('parrocos').delete().eq('id', id);
+        // El motor reacomodará las fechas del que quedó activo
         await actualizarParrocoActual(parishId);
         return { success: true, message: "Párroco eliminado correctamente." };
     } catch (error) {
-        return { success: true, message: "Párroco eliminado correctamente." };
+        return { success: false, message: "Error al eliminar: " + error.message };
     }
 };
 
 export const importParrocos = async (payload, parishId, append = false) => {
     if (!parishId) return { success: false, message: "Falta ID de parroquia." };
     try {
-        const key = `parrocos_${parishId}`;
-        const currentData = append ? safeJsonParse(localStorage.getItem(key), []) : [];
         const newItems = (payload.data || []).map(item => ({
             ...item,
             id: generateUUID(),
             createdAt: new Date().toISOString()
         }));
-        
-        localStorage.setItem(key, JSON.stringify([...currentData, ...newItems]));
-        await actualizarParrocoActual(parishId);
         
         const dbRecords = newItems.map(item => ({ 
             id: item.id, 
@@ -207,9 +240,12 @@ export const importParrocos = async (payload, parishId, append = false) => {
                 if (error) throw error;
             }
         }
+
+        // El motor organizará las fechas y estados de los 100 párrocos inyectados
+        await actualizarParrocoActual(parishId);
         return { success: true, count: newItems.length };
     } catch (e) {
-        return { success: true, count: payload?.data?.length || 0 };
+        return { success: false, message: "Error en importación masiva: " + e.message };
     }
 };
 
