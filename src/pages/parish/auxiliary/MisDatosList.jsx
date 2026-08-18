@@ -242,28 +242,47 @@ const MisDatosList = () => {
                                     <tr key={item.id} className="group hover:bg-blue-50/30 transition-all duration-300">
                                         <td className="px-8 py-4">
                                             <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                {/* 🚀 CORRECCIÓN DE BOTONES */}
+                                                
+                                                {/* 🚀 CORRECCIÓN: Eventos de clic aislados y blindados */}
                                                 <button 
                                                     type="button"
-                                                    onClick={(e) => { e.preventDefault(); setSelectedRecord(item); setModals(m => ({ ...m, view: true })); }} 
+                                                    onClick={(e) => { 
+                                                        e.preventDefault(); 
+                                                        e.stopPropagation(); 
+                                                        setSelectedRecord(item); 
+                                                        setModals(m => ({ ...m, view: true })); 
+                                                    }} 
                                                     className="p-2.5 text-gray-400 hover:text-[#4B7BA7] hover:bg-white rounded-xl transition-all cursor-pointer relative z-10"
                                                 >
                                                     <Eye className="w-4 h-4" />
                                                 </button>
+                                                
                                                 <button 
                                                     type="button"
-                                                    onClick={(e) => { e.preventDefault(); setSelectedRecord(item); setModals(m => ({ ...m, edit: true })); }} 
+                                                    onClick={(e) => { 
+                                                        e.preventDefault(); 
+                                                        e.stopPropagation(); 
+                                                        setSelectedRecord(item); 
+                                                        setModals(m => ({ ...m, edit: true })); 
+                                                    }} 
                                                     className="p-2.5 text-[#4B7BA7] hover:bg-white rounded-xl transition-all cursor-pointer relative z-10"
                                                 >
                                                     <Pencil className="w-4 h-4" />
                                                 </button>
+                                                
                                                 <button 
                                                     type="button"
-                                                    onClick={(e) => { e.preventDefault(); setSelectedRecord(item); setModals(m => ({ ...m, delete: true })); }} 
+                                                    onClick={(e) => { 
+                                                        e.preventDefault(); 
+                                                        e.stopPropagation(); 
+                                                        setSelectedRecord(item); 
+                                                        setModals(m => ({ ...m, delete: true })); 
+                                                    }} 
                                                     className="p-2.5 text-red-400 hover:bg-white rounded-xl transition-all cursor-pointer relative z-10"
                                                 >
                                                     <Trash2 className="w-4 h-4" />
                                                 </button>
+
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
@@ -301,39 +320,44 @@ const MisDatosList = () => {
                 </div>
             </div>
 
-            <ManualMisDatosModal 
-                isOpen={modals.manual} 
-                onClose={() => setModals(m => ({ ...m, manual: false }))} 
-                onSave={handleSaveManual} 
-            />
+            {/* 🚀 EL CANDADO CONDICIONAL DE RENDERIZADO ESTRICTO */}
             
-            {/* 🚀 EL CANDADO CONDICIONAL QUE SOLUCIONA EL FALLO */}
-            {selectedRecord && (
-                <>
-                    <ViewMisDatosModal 
-                        isOpen={modals.view} 
-                        onClose={() => { setModals(m => ({ ...m, view: false })); setSelectedRecord(null); }} 
-                        data={selectedRecord} 
-                    />
+            {modals.manual && (
+                <ManualMisDatosModal 
+                    isOpen={modals.manual} 
+                    onClose={() => setModals(m => ({ ...m, manual: false }))} 
+                    onSave={handleSaveManual} 
+                />
+            )}
+            
+            {modals.view && selectedRecord && (
+                <ViewMisDatosModal 
+                    isOpen={modals.view} 
+                    onClose={() => { setModals(m => ({ ...m, view: false })); setSelectedRecord(null); }} 
+                    data={selectedRecord} 
+                />
+            )}
 
-                    <EditMisDatosFormModal 
-                        isOpen={modals.edit} 
-                        onClose={() => { setModals(m => ({ ...m, edit: false })); setSelectedRecord(null); }} 
-                        record={selectedRecord} 
-                        onSave={handleEditSave} 
-                        allItems={items} 
-                    />
+            {modals.edit && selectedRecord && (
+                <EditMisDatosFormModal 
+                    isOpen={modals.edit} 
+                    onClose={() => { setModals(m => ({ ...m, edit: false })); setSelectedRecord(null); }} 
+                    record={selectedRecord} 
+                    onSave={handleEditSave} 
+                    allItems={items} 
+                />
+            )}
 
-                    <ConfirmationDialog 
-                        isOpen={modals.delete} 
-                        title="¿Eliminar Membrete?"
-                        message={`Estás a punto de borrar "${selectedRecord?.nombre}". Esto afectará a los documentos generados con este perfil.`}
-                        onConfirm={handleDeleteConfirm}
-                        onClose={() => { setModals(m => ({ ...m, delete: false })); setSelectedRecord(null); }}
-                        confirmText={isDeleting ? "Borrando..." : "Eliminar Definitivamente"}
-                        variant="destructive"
-                    />
-                </>
+            {modals.delete && selectedRecord && (
+                <ConfirmationDialog 
+                    isOpen={modals.delete} 
+                    title="¿Eliminar Membrete?"
+                    message={`Estás a punto de borrar "${selectedRecord?.nombre}". Esto afectará a los documentos generados con este perfil.`}
+                    onConfirm={handleDeleteConfirm}
+                    onClose={() => { setModals(m => ({ ...m, delete: false })); setSelectedRecord(null); }}
+                    confirmText={isDeleting ? "Borrando..." : "Eliminar Definitivamente"}
+                    variant="destructive"
+                />
             )}
 
             {modals.import && (
