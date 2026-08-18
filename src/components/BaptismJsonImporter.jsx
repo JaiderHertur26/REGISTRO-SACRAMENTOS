@@ -75,16 +75,16 @@ const BaptismJsonImporter = () => {
                 
                 if (rawData.length === 0) throw new Error("El archivo no contiene registros válidos en la llave 'data'.");
 
+                // 🚀 CORRECCIÓN: Nombres exactos de las columnas en Supabase (book_number, folio, number)
                 const { data: existingData, error: dbError } = await supabase
                     .from('baptisms')
-                    .select('book_number, page_number, entry_number')
+                    .select('book_number, folio, number')
                     .eq('parish_id', parishId);
 
-                if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
+                if (dbError) throw new Error(`Fallo de conexión con BD Central: ${dbError.message}`);
 
-                // La llave única es L-F-N, por lo tanto, las correcciones en otros libros pasarán perfecto
                 const existingKeys = new Set((existingData || []).map(b => 
-                    `${String(b.book_number).padStart(4, '0')}-${String(b.page_number).padStart(4, '0')}-${String(b.entry_number).padStart(4, '0')}`
+                    `${String(b.book_number).padStart(4, '0')}-${String(b.folio).padStart(4, '0')}-${String(b.number).padStart(4, '0')}`
                 ));
 
                 const processed = [];
@@ -96,7 +96,7 @@ const BaptismJsonImporter = () => {
                 rawData.forEach((item, index) => {
                     const rowNum = index + 1;
                     
-                    // 🚀 TRADUCTOR UNIVERSAL DE LLAVES
+                    // TRADUCTOR UNIVERSAL DE LLAVES
                     const mappedItem = {
                         Libro: item["LIBRO N°"] || item.Libro || item.libro || '',
                         folio: item["FOLIO N°"] || item.folio || '',
@@ -124,17 +124,15 @@ const BaptismJsonImporter = () => {
                     // Purificación Inteligente
                     const cleanItem = purificarRegistroBautismo(mappedItem);
 
-                    // 🚀 INTELIGENCIA DE TRADUCCIÓN "CÓDIGO DA FE"
+                    // INTELIGENCIA PARA CÓDIGOS NUMÉRICOS EN LA FIRMA
                     const rawDaFe = String(mappedItem.daFe).trim();
                     let finalDaFe = parrocoActual; 
 
                     if (/^\d+$/.test(rawDaFe)) {
-                        // Si es un número (ej. "0004"), lo buscamos en el diccionario calculado
                         if (diccionarioDaFe[rawDaFe]) {
                             finalDaFe = diccionarioDaFe[rawDaFe];
                         } 
                     } else if (rawDaFe && rawDaFe !== '---' && !rawDaFe.includes('ENCARGADO')) {
-                        // Si es un nombre textual en vez de código, lo respetamos
                         finalDaFe = rawDaFe;
                     }
                     
@@ -184,8 +182,8 @@ const BaptismJsonImporter = () => {
                 id: generateUUID(),
                 parish_id: parishId,
                 book_number: item.Libro,
-                page_number: item.folio,
-                entry_number: item.numero,
+                folio: item.folio,        // 🚀 CORRECCIÓN
+                number: item.numero,      // 🚀 CORRECCIÓN
                 status: 'seated', 
                 raw_data: item, 
                 margin_note: item.notaMarginal || null,
@@ -251,7 +249,7 @@ const BaptismJsonImporter = () => {
                             )}
                             
                             <p className="text-sm font-black text-gray-700 uppercase tracking-tight">
-                                {isProcessing ? 'Procesando Archivo...' : validationResult ? 'Archivo Cargado' : 'Seleccionar BAUTIZOS.json'}
+                                {isProcessing ? 'Procesando Archivo...' : validationResult ? 'Archivo Cargado' : 'Seleccionar JSON'}
                             </p>
                             {!validationResult && !isProcessing && (
                                 <p className="text-[10px] text-gray-400 mt-2 font-bold uppercase tracking-widest">
