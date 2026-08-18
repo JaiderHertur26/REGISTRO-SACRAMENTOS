@@ -19,14 +19,14 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
     const region = formatData(header.region || 'ATLÁNTICO');
 
     let ubicacionFinal = ciudad;
-    // Normalizamos para evitar duplicar "ATLANTICO" y "ATLÁNTICO"
-    const ciudadNorm = ciudad.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const regionNorm = region.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    // Normalizamos para evitar duplicar si la ciudad ya incluye el departamento
+    const ciudadNorm = ciudad.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const regionNorm = region.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
 
     if (region && !ciudadNorm.includes(regionNorm)) {
         ubicacionFinal += `, ${region}`;
     }
-    if (!ubicacionFinal.includes('COLOMBIA')) {
+    if (!ciudadNorm.includes('COLOMBIA')) {
         ubicacionFinal += ' - COLOMBIA';
     }
 
@@ -80,7 +80,16 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
     const padrinos = formatData(baptismData.padrinos || baptismData.godparents);
     const ministro = formatData(baptismData.ministro || baptismData.minister);
     
-    const nombreResponsable = nombrePadre ? nombrePadre : nombreMadre;
+    // 🚀 LÓGICA EN CASCADA PARA LA FIRMA DEL RESPONSABLE
+    const getResponsable = () => {
+        if (nombrePadre) return nombrePadre;
+        if (nombreMadre) return nombreMadre;
+        if (abuelosPaternos) return abuelosPaternos;
+        if (abuelosMaternos) return abuelosMaternos;
+        if (padrinos) return padrinos;
+        return '';
+    };
+    const nombreResponsable = getResponsable();
 
     // --- 4. COMPONENTES ESTRUCTURALES ---
     const FieldLine = ({ label, value, width = "100%" }) => (
@@ -111,19 +120,19 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
                 <BookOpen size={300} strokeWidth={1} />
             </div>
 
-            {/* ENCABEZADO INSTITUCIONAL */}
+            {/* ENCABEZADO INSTITUCIONAL UNIFICADO */}
             <div style={{ textAlign: 'center', marginBottom: '8px' }}>
-                <div style={{ fontSize: '12px', fontWeight: 'bold' }}>{diocesis}</div>
-                <div style={{ fontSize: '15px', fontWeight: '900', marginTop: '2px' }}>{nombreP}</div>
-                <div style={{ fontSize: '9px', marginTop: '2px' }}>{contactLine}</div>
+                <div style={{ fontSize: '14px', fontWeight: '900' }}>{diocesis}</div>
+                <div style={{ fontSize: '14px', fontWeight: '900', marginTop: '2px' }}>{nombreP}</div>
+                <div style={{ fontSize: '9px', marginTop: '4px', fontWeight: 'bold' }}>{contactLine}</div>
             </div>
 
             {/* TÍTULO DE LA BOLETA */}
             <div style={{ textAlign: 'center', margin: '8px 0' }}>
                 <span style={{ 
-                    fontSize: '13px', 
+                    fontSize: '12px', 
                     fontWeight: '900', 
-                    letterSpacing: '3px', 
+                    letterSpacing: '1.5px', // Espaciado seguro para evitar saltos de línea
                     borderBottom: isArchive ? 'none' : '1px solid #000',
                     paddingBottom: '2px'
                 }}>
@@ -180,12 +189,12 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
 
                 <FieldLine label="MINISTRO" value={ministro} />
 
-                {/* SECCIÓN DE FIRMA (Anclada firmemente al fondo mediante margin-top: auto) */}
+                {/* SECCIÓN DE FIRMA */}
                 <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', paddingTop: '10px' }}>
                     <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '8px' }}>Firma responsable:</span>
                     <div style={{ display: 'flex', flexDirection: 'column', width: '300px' }}>
                         <div style={{ borderBottom: '1px solid black', height: '15px' }}></div>
-                        <span style={{ fontSize: '11px', textAlign: 'center', marginTop: '3px' }}>{nombreResponsable}</span>
+                        <span style={{ fontSize: '11px', textAlign: 'center', marginTop: '3px', fontWeight: 'bold' }}>{nombreResponsable}</span>
                     </div>
                 </div>
 
