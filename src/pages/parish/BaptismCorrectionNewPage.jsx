@@ -52,10 +52,12 @@ const BaptismCorrectionNewPage = () => {
           const priest = getParrocoActual(user.parishId);
           if (priest) setNewPartida(prev => ({ ...prev, daFe: `${priest.nombre} ${priest.apellido || ''}`.trim() }));
 
+          // 🚀 Traer parámetros de libros supletorios
           const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
           if (paramsData && paramsData.bautizos_params) setCloudParams(paramsData.bautizos_params);
         }
 
+        // 🚀 Traer Conceptos de Anulación desde Supabase
         let targetDioceseId = user.dioceseId || user.diocese_id;
         if (!targetDioceseId && user.parishId) {
           const { data: pData } = await supabase.from('parishes').select('diocese_id').eq('id', user.parishId).single();
@@ -169,6 +171,7 @@ const BaptismCorrectionNewPage = () => {
         const supletorioFolio = cloudParams.suplementarioFolio || 1;
         const supletorioNumero = cloudParams.suplementarioNumero || 1;
 
+        // 🧠 2. MOTOR DE NOTAS (Se asegura de pasar las variables con el nombre correcto)
         const noteAnulada = marginalNotesEngine.forAnnulledCorrection(user?.parishId, {
             numeroDecreto: decreeData.numeroDeDecreto, fechaDecreto: decreeData.fechaEmision,
             libroNuevo: supletorioLibro, folioNuevo: supletorioFolio, numeroNuevo: supletorioNumero
@@ -186,18 +189,11 @@ const BaptismCorrectionNewPage = () => {
           anulado: false, estado: 'permanente', status: 'seated', notaMarginal: notaSupletoriaFinal
         };
 
-        // 🚀 PAYLOAD PERFECCIONADO: Inyectamos todo "newPartida" directamente al payload para que el PDF no salga en blanco
         const payloadDecree = {
-          decreeNumber: decreeData.numeroDeDecreto, 
-          decreeDate: decreeData.fechaEmision,
-          conceptoAnulacionId: decreeData.conceptoAnulacion, 
-          observaciones: newPartida.observaciones,
-          
-          targetName: decreeData.nombreBautizado, 
-          newTargetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(), 
-          
-          ...newPartida, // <--- ESTA ES LA LÍNEA MÁGICA QUE SOLUCIONA LOS CAMPOS VACÍOS
-
+          decreeNumber: decreeData.numeroDeDecreto, decreeDate: decreeData.fechaEmision,
+          conceptoAnulacionId: decreeData.conceptoAnulacion, observaciones: newPartida.observaciones,
+          targetName: decreeData.nombreBautizado, // <-- Nombre viejo
+          newTargetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(), // <-- Nombre nuevo
           originalPartidaId: foundRecord.id,
           originalPartidaSummary: { 
               book: decreeData.Libro, page: decreeData.folio, entry: decreeData.numero,
@@ -209,35 +205,31 @@ const BaptismCorrectionNewPage = () => {
           }
         };
 
-        // 2. Marcar original como anulada en Supabase
+        // 3. Marcar original como anulada en Supabase
         await supabase.from('baptisms').update({ 
             status: 'anulada', nota_marginal: noteAnulada, 
             raw_data: { ...foundRecord, notaMarginal: noteAnulada, anulado: true, status: 'anulada' } 
         }).eq('id', foundRecord.id);
 
-        // 3. Incrementar consecutivos usando UPSERT
+        // 🚀 4. Incrementar consecutivos usando UPSERT
         const newParams = { ...cloudParams, suplementarioNumero: Number(supletorioNumero) + 1 };
         await supabase.from('parish_parameters').upsert({ parish_id: user.parishId, bautizos_params: newParams }, { onConflict: 'parish_id' });
 
-        // 4. Crear Nueva Partida Supletoria
+        // 5. Crear Nueva Partida Supletoria
         const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{
             parish_id: user.parishId,
-            book_number: String(supletorioLibro).padStart(4, '0'),
-            folio: String(supletorioFolio).padStart(4, '0'),
-            number: String(supletorioNumero).padStart(4, '0'),
-            celebration_date: newPartida.fechaSacramento || null,
-            nombres: newPartida.nombres, apellidos: newPartida.apellidos, sexo: newPartida.sexo,
-            fecha_nacimiento: newPartida.fechaNacimiento || null, lugar_nacimiento: newPartida.lugarNacimiento,
-            lugar_bautismo: newPartida.lugarBautismo, nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre,
-            tipo_union_padres: newPartida.tipoUnionPadres, abuelos_paternos: newPartida.abuelosPaternos,
-            abuelos_maternos: newPartida.abuelosMaternos, padrinos: newPartida.padrinos,
+            book_number: String(supletorioLibro).padStart(4, '0'), folio: String(supletorioFolio).padStart(4, '0'), number: String(supletorioNumero).padStart(4, '0'),
+            celebration_date: newPartida.fechaSacramento || null, nombres: newPartida.nombres, apellidos: newPartida.apellidos, sexo: newPartida.sexo,
+            fecha_nacimiento: newPartida.fechaNacimiento || null, lugar_nacimiento: newPartida.lugarNacimiento, lugar_bautismo: newPartida.lugarBautismo,
+            nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre, tipo_union_padres: newPartida.tipoUnionPadres, 
+            abuelos_paternos: newPartida.abuelosPaternos, abuelos_maternos: newPartida.abuelosMaternos, padrinos: newPartida.padrinos,
             ministro: newPartida.ministro, da_fe: newPartida.daFe, status: 'seated', nota_marginal: notaSupletoriaFinal,
             raw_data: partidaToSave
         }]).select('id').single();
 
         if (errBap) throw errBap;
 
-        // 5. Crear Decreto Final
+        // 6. Crear Decreto Final
         payloadDecree.newPartidaId = newBap.id;
         await supabase.from('decretos').insert([{ parish_id: user.parishId, tipo: 'correccion', payload: payloadDecree }]);
 
@@ -295,7 +287,7 @@ const BaptismCorrectionNewPage = () => {
               </div>
 
               <div className="mx-8 mb-8 p-8 bg-[#4B7BA7]/5 rounded-3xl border border-[#4B7BA7]/10">
-                <h4 className="text-[10px] font-black text-[#4B7BA7] uppercase tracking-widest mb-6">Localizar Partida Original para Anulación</h4>
+                <h4 className="text-[10px] font-black text-[#4B7BA7] uppercase tracking-widest mb-6">Localizar Partida en la Nube</h4>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
                   <div className="md:col-span-2 relative" ref={wrapperRef}>
                     <label className="block text-[10px] font-black text-gray-400 uppercase mb-1">Nombre Bautizado</label>
@@ -334,16 +326,16 @@ const BaptismCorrectionNewPage = () => {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                   <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Lugar Bautismo</label><Input name="lugarBautismo" value={newPartida.lugarBautismo} onChange={handleNewPartidaChangeUpper} /></div>
-                  <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">F. Bautismo</label><Input type="date" name="fechaSacramento" value={newPartida.fechaSacramento} onChange={handleNewPartidaChangeRaw} className="py-6" /></div>
+                  <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">F. Bautismo</label><Input type="date" name="fechaSacramento" value={newPartida.fechaSacramento} onChange={handleNewPartidaChange} className="py-6" /></div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase">Sexo</label>
-                    <select name="sexo" value={newPartida.sexo} onChange={handleNewPartidaChangeRaw} className="w-full h-[45px] px-4 border border-gray-200 rounded-xl font-bold bg-gray-50 uppercase">
+                    <select name="sexo" value={newPartida.sexo} onChange={handleNewPartidaChange} className="w-full h-[45px] px-4 border border-gray-200 rounded-xl font-bold bg-gray-50 uppercase">
                       <option value="">SELECCIONE...</option><option value="MASCULINO">MASCULINO</option><option value="FEMENINO">FEMENINO</option>
                     </select>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">F. Nacimiento</label><Input type="date" name="fechaNacimiento" value={newPartida.fechaNacimiento} onChange={handleNewPartidaChangeRaw} /></div>
+                  <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">F. Nacimiento</label><Input type="date" name="fechaNacimiento" value={newPartida.fechaNacimiento} onChange={handleNewPartidaChange} /></div>
                   <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Lugar Nacimiento</label><Input name="lugarNacimiento" value={newPartida.lugarNacimiento} onChange={handleNewPartidaChangeUpper} /></div>
                 </div>
 
@@ -363,7 +355,7 @@ const BaptismCorrectionNewPage = () => {
                   <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Abuelos Maternos</label><Input name="abuelosMaternos" value={newPartida.abuelosMaternos} onChange={handleNewPartidaChangeUpper} /></div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase">Tipo de Unión</label>
-                    <select name="tipoUnionPadres" value={newPartida.tipoUnionPadres} onChange={handleNewPartidaChangeRaw} className="w-full h-[45px] px-4 border border-gray-200 rounded-xl font-bold bg-gray-50 uppercase">
+                    <select name="tipoUnionPadres" value={newPartida.tipoUnionPadres} onChange={handleNewPartidaChange} className="w-full h-[45px] px-4 border border-gray-200 rounded-xl font-bold bg-gray-50 uppercase">
                       <option value="">SELECCIONE...</option><option value="MATRIMONIO CATÓLICO">MATRIMONIO CATÓLICO</option><option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option><option value="UNIÓN LIBRE">UNIÓN LIBRE</option><option value="MADRE SOLTERA">MADRE SOLTERA</option><option value="OTRO CASO">OTRO CASO</option>
                     </select>
                   </div>
