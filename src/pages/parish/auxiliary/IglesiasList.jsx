@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación de Supabase
+import { supabase } from '@/lib/supabaseClient'; 
 import { Plus, Search, Pencil, Trash2, Upload, Loader2 } from 'lucide-react';
 
 import CreateIglesiaModal from '@/components/modals/CreateIglesiaModal';
@@ -45,7 +45,6 @@ const IglesiasList = () => {
 
     const parishId = getParishId();
 
-    // 🚀 Lógica de Espejo 1 a 1 con Supabase
     const loadData = async () => {
         if (!parishId) return;
         setIsLoading(true);
@@ -61,7 +60,7 @@ const IglesiasList = () => {
             localStorage.setItem(`iglesias_${parishId}`, JSON.stringify(data || []));
         } catch (error) {
             console.error("Error cargando iglesias:", error);
-            setItems(getIglesiasList(parishId)); // Fallback a local
+            setItems(getIglesiasList(parishId)); 
         } finally {
             setIsLoading(false);
         }
@@ -80,7 +79,6 @@ const IglesiasList = () => {
              return;
         }
 
-        // 🚀 BLOQUEO DE DUPLICADOS MANUALES
         const isDuplicate = items.some(i => 
             (data.codigo && String(i.codigo).toLowerCase() === String(data.codigo).toLowerCase()) ||
             (data.nombre && String(i.nombre).toLowerCase() === String(data.nombre).toLowerCase())
@@ -109,6 +107,7 @@ const IglesiasList = () => {
         if (result.success) {
             toast({ title: 'Éxito', description: result.message, className: "bg-green-50 border-green-200 text-green-900" });
             setModals(prev => ({ ...prev, edit: false }));
+            setSelectedItem(null);
             await loadData();
         } else {
             toast({ title: 'Error', description: result.message, variant: 'destructive' });
@@ -122,6 +121,7 @@ const IglesiasList = () => {
         if (result.success) {
             toast({ title: 'Eliminado', description: result.message, className: "bg-green-50 border-green-200 text-green-900" });
             setModals(prev => ({ ...prev, delete: false }));
+            setSelectedItem(null);
             await loadData();
         } else {
             toast({ title: 'Error', description: result.message, variant: 'destructive' });
@@ -211,16 +211,19 @@ const IglesiasList = () => {
                                     <tr key={item.id || index} className="hover:bg-gray-50 transition-colors">
                                         <td className="px-4 py-2 sticky left-0 bg-white border-r border-gray-100 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                                             <div className="flex items-center gap-1 justify-center">
+                                                {/* 🚀 EL ESCUDO CONTRA CLICS FANTASMA */}
                                                 <button 
-                                                    onClick={() => openEditModal(item)}
-                                                    className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEditModal(item); }}
+                                                    className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors relative z-10"
                                                     title="Editar"
                                                 >
                                                     <Pencil className="w-4 h-4" />
                                                 </button>
                                                 <button 
-                                                    onClick={() => openDeleteModal(item)}
-                                                    className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); openDeleteModal(item); }}
+                                                    className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors relative z-10"
                                                     title="Eliminar"
                                                 >
                                                     <Trash2 className="w-4 h-4" />
@@ -251,6 +254,7 @@ const IglesiasList = () => {
                 onCreate={handleCreate} 
             />
 
+            {/* 🚀 CANDADO QUE GARANTIZA QUE EL MODAL RECIBA LA DATA */}
             {selectedItem && (
                 <>
                     <EditIglesiaModal 
@@ -271,7 +275,6 @@ const IglesiasList = () => {
             {modals.import && (
                 <ImportIglesiasForm 
                     isOpen={modals.import}
-                    // 🚀 PASAMOS LA LISTA REAL A LA IMPORTACIÓN
                     existingItems={items}
                     onClose={() => {
                         setModals(prev => ({ ...prev, import: false }));

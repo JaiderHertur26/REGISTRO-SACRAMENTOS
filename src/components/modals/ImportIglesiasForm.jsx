@@ -8,10 +8,9 @@ import { useToast } from '@/components/ui/use-toast';
 import Table from '@/components/ui/Table';
 import { cn } from '@/lib/utils';
 
-// 🚀 AHORA RECIBE LA LISTA REAL DE LA BASE DE DATOS COMO PROP (existingItems)
 const ImportIglesiasForm = ({ isOpen, onClose, existingItems = [] }) => {
   const { user } = useAuth();
-  const { importIglesias } = useAppData(); // Se eliminó getIglesiasList de aquí
+  const { importIglesias } = useAppData(); 
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   
@@ -47,7 +46,6 @@ const ImportIglesiasForm = ({ isOpen, onClose, existingItems = [] }) => {
         let validCount = 0;
         const validData = [];
 
-        // 🚀 DOBLE FILTRO: Memoria para no duplicar los que vengan repetidos en el propio archivo
         const codigosEnArchivo = new Set();
         const nombresEnArchivo = new Set();
 
@@ -55,7 +53,7 @@ const ImportIglesiasForm = ({ isOpen, onClose, existingItems = [] }) => {
             const idx = index + 1;
             
             if (!item || typeof item !== 'object') {
-                warnings.push(`Fila ${idx}: Omitida (Fila completamente vacía o corrupta).`);
+                warnings.push(`Fila ${idx}: Omitida (Fila vacía o corrupta).`);
                 return; 
             }
 
@@ -68,11 +66,10 @@ const ImportIglesiasForm = ({ isOpen, onClose, existingItems = [] }) => {
             const codigoLower = codigo.toLowerCase();
 
             if (!nombre) {
-                warnings.push(`Fila ${idx}: Omitida (La iglesia no tiene nombre asignado).`);
+                warnings.push(`Fila ${idx}: Omitida (La iglesia no tiene nombre).`);
                 return; 
             }
 
-            // 1. Validar contra la Base de Datos real
             const isDuplicateDB = existingItems.some(ex => {
                 if (!ex) return false;
                 const matchCodigo = (codigoLower && ex.codigo && String(ex.codigo).toLowerCase() === codigoLower);
@@ -80,13 +77,12 @@ const ImportIglesiasForm = ({ isOpen, onClose, existingItems = [] }) => {
                 return matchCodigo || matchNombre;
             });
 
-            // 2. Validar contra el mismo archivo JSON
             const isDuplicateFile = (codigoLower && codigosEnArchivo.has(codigoLower)) || nombresEnArchivo.has(nombreLower);
             
             if (isDuplicateDB) {
                 warnings.push(`Fila ${idx}: Omitida "${nombre}" (Ya existe en la Base de Datos).`);
             } else if (isDuplicateFile) {
-                warnings.push(`Fila ${idx}: Omitida "${nombre}" (Repetido dentro del mismo archivo).`);
+                warnings.push(`Fila ${idx}: Omitida "${nombre}" (Repetido en el mismo archivo).`);
             } else {
                 if (codigoLower) codigosEnArchivo.add(codigoLower);
                 nombresEnArchivo.add(nombreLower);
@@ -95,7 +91,6 @@ const ImportIglesiasForm = ({ isOpen, onClose, existingItems = [] }) => {
             }
         });
 
-        // Solo guardamos la data que pasó todos los filtros
         setJsonContent({ data: validData });
         setValidationResult({ count: validCount, errors, warnings });
         setPreview(validData.slice(0, 5));
@@ -111,7 +106,7 @@ const ImportIglesiasForm = ({ isOpen, onClose, existingItems = [] }) => {
   };
 
   const handleConfirm = async () => {
-      if (!jsonContent || !jsonContent.data) return;
+      if (!jsonContent?.data) return;
       
       setLoading(true);
 

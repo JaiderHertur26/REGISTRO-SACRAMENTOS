@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación de Supabase
-import { Pencil, Trash2, Plus, Search, Upload, Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient'; 
+import { Pencil, Trash2, Plus, Search, Upload, Loader2, UserCheck } from 'lucide-react';
 import ImportObisposForm from '@/components/modals/ImportObisposForm';
 
 const ObisposList = () => {
@@ -21,7 +21,7 @@ const ObisposList = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isImportOpen, setIsImportOpen] = useState(false);
     const [currentItem, setCurrentItem] = useState(null);
-    const [isLoading, setIsLoading] = useState(true); // 🚀 Estado de carga
+    const [isLoading, setIsLoading] = useState(true); 
     const [formData, setFormData] = useState({ nombre: '', apellido: '', diocesis: '', fechaNombramiento: '', email: '' });
 
     // 🚀 Lógica de Espejo 1 a 1 con Supabase
@@ -82,6 +82,18 @@ const ObisposList = () => {
     const handleSave = async () => {
         if (!formData.nombre || !formData.apellido) {
             toast({ title: 'Error', description: 'Nombre y apellido son requeridos.', variant: 'destructive' });
+            return;
+        }
+
+        // 🚀 BLOQUEO DE DUPLICADOS MANUALES
+        const isDuplicate = items.some(i => 
+            i.id !== currentItem?.id && 
+            (i.nombre || '').toLowerCase() === (formData.nombre || '').toLowerCase() &&
+            (i.apellido || '').toLowerCase() === (formData.apellido || '').toLowerCase()
+        );
+
+        if (isDuplicate) {
+            toast({ title: 'Duplicado', description: 'Este Obispo ya se encuentra registrado.', variant: 'destructive' });
             return;
         }
 
@@ -179,15 +191,18 @@ const ObisposList = () => {
                                     <tr key={item.id || index} className="hover:bg-gray-50 transition-colors">
                                         <td className="px-4 py-2 sticky left-0 bg-white border-r border-gray-100 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                                             <div className="flex items-center gap-1 justify-center">
+                                                {/* 🚀 BOTONES PROTEGIDOS CONTRA EVENT BUBBLING */}
                                                 <button 
-                                                    onClick={() => handleOpenModal(item)}
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOpenModal(item); }}
                                                     className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
                                                     title="Editar"
                                                 >
                                                     <Pencil className="w-4 h-4" />
                                                 </button>
                                                 <button 
-                                                    onClick={() => handleDelete(item)}
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDelete(item); }}
                                                     className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
                                                     title="Eliminar"
                                                 >
@@ -249,6 +264,7 @@ const ObisposList = () => {
             {isImportOpen && (
                 <ImportObisposForm 
                     isOpen={isImportOpen} 
+                    existingItems={items} // 🚀 Pasamos los datos reales a la importación
                     onClose={() => {
                         setIsImportOpen(false);
                         loadData();
