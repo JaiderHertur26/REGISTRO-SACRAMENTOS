@@ -78,7 +78,7 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   let ministro = formatData(raw.ministro);
   if (ministro) ministro = `PBRO. ${cleanTitle(ministro)}`;
 
-  // 🚀 SOLUCIÓN 1: INTELIGENCIA "DOY FE"
+  // 🚀 INTELIGENCIA "DOY FE"
   let daFeRaw = formatData(raw.daFe);
   let daFe = '';
   if (!daFeRaw || daFeRaw.includes("ENCARGADO") || daFeRaw === "---") {
@@ -140,7 +140,7 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   );
 
   return (
-    // 🚀 SOLUCIÓN 2: CANDADO DE 1 SOLA PÁGINA (height: '11in' y overflow: 'hidden')
+    // CANDADO DE 1 SOLA PÁGINA (height: '11in' y overflow: 'hidden')
     <div ref={ref} style={{
         width: '8.5in', height: '11in', padding: '0.6in 0.8in', color: '#000', backgroundColor: 'white', 
         boxSizing: 'border-box', margin: '0 auto', display: 'flex', flexDirection: 'column', position: 'relative',
@@ -153,7 +153,7 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
             }
         `}} />
 
-        {/* 🚀 SOLUCIÓN 4: ENCABEZADO UNIFORME */}
+        {/* 1. ENCABEZADO INSTITUCIONAL */}
         <div style={{ textAlign: 'center', marginBottom: '20px', fontFamily: 'Arial, sans-serif', color: '#000' }}>
             <div style={{ fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase' }}>{diocesis}</div>
             <div style={{ fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', marginTop: '3px' }}>{parroquia}</div>
@@ -208,14 +208,11 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
             Es copia fiel del original. Se expide en <strong>{ciudad.toUpperCase()}</strong> el día <strong>{getFechaExpedicion()}</strong>.
         </div>
 
-        {/* 5. ZONA DE FIRMAS Y SELLOS (Empujado siempre al final, garantizando 1 sola página) */}
-        <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', fontFamily: 'Arial, sans-serif', padding: '0 20px', paddingBottom: '10px' }}>
+        {/* 5. ZONA DE FIRMAS (Centrada y empujada siempre al final) */}
+        <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', fontFamily: 'Arial, sans-serif', paddingBottom: '10px', paddingTop: '80px' }}>
             
-            {/* 🚀 SOLUCIÓN 3: Sello Físico Invisible (Espacio en blanco exacto para estampar manual) */}
-            <div style={{ width: '120px', height: '120px' }}></div>
-
             {/* Firma del Párroco */}
-            <div style={{ textAlign: 'center', width: '300px' }}>
+            <div style={{ textAlign: 'center', width: '320px' }}>
                 <div style={{ borderTop: '1.5px solid black', width: '100%', marginBottom: '8px' }}></div>
                 <div style={{ fontWeight: 'bold', fontSize: '14px', textTransform: 'uppercase' }}>PBRO. {parrocoFirma}</div>
                 <div style={{ fontSize: '12px', marginTop: '3px' }}>PÁRROCO</div>
