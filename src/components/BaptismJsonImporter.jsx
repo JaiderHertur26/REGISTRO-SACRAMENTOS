@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { 
-    Upload, FileJson, CheckCircle, Save, 
-    Loader2, AlertTriangle, Info, Database 
+    Upload, CheckCircle2, AlertTriangle, XCircle, 
+    Loader2, Database, FileJson, Info 
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/context/AuthContext';
@@ -10,245 +10,309 @@ import { useAppData } from '@/context/AppDataContext';
 import { supabase } from '@/lib/supabaseClient';
 import { generateUUID } from '@/utils/supabaseHelpers';
 import Table from '@/components/ui/Table';
+import { cn } from '@/lib/utils';
 
 const BaptismJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth();
-    const { getParrocos } = useAppData();
+    const { getParrocos, purificarRegistroBautismo } = useAppData();
+    const fileInputRef = useRef(null);
     
-    const [file, setFile] = useState(null);
-    const [recordsToImport, setRecordsToImport] = useState([]); 
-    const [duplicateCount, setDuplicateCount] = useState(0); 
     const [isProcessing, setIsProcessing] = useState(false);
     const [importComplete, setImportComplete] = useState(false);
-    const [parrocoActual, setParrocoActual] = useState('---');
+    const [validationResult, setValidationResult] = useState(null);
+    const [parrocoActual, setParrocoActual] = useState('');
+
+    const parishId = user?.parish_id || user?.parishId;
 
     // --- 1. CARGAR PÁRROCO ACTUAL PARA "DA FE" ---
     useEffect(() => {
-        if (user?.parishId) {
-            const parrocos = getParrocos(user.parishId) || [];
-            const actual = parrocos.find(p => String(p.estado) === '1');
+        if (parishId) {
+            const parrocos = getParrocos(parishId) || [];
+            const actual = parrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
             if (actual) {
-                setParrocoActual(`${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase());
+                setParrocoActual(`PBRO. ${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase());
+            } else {
+                setParrocoActual('PÁRROCO ENCARGADO');
             }
         }
-    }, [user, getParrocos]);
+    }, [parishId, getParrocos]);
 
     // --- 2. PROCESAMIENTO DEL ARCHIVO Y FILTRO DE DUPLICADOS ---
     const handleFileChange = async (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
 
-        const fileName = selectedFile.name.toUpperCase();
-        if (!fileName.includes('BAUTIZOS')) {
-            toast({ title: "Archivo incorrecto", description: "El archivo debe contener 'BAUTIZOS' en el nombre.", variant: "destructive" });
-            return;
-        }
-
         setIsProcessing(true);
+        setValidationResult(null);
+        setImportComplete(false);
+
         const reader = new FileReader();
         
         reader.onload = async (e) => {
             try {
                 const json = JSON.parse(e.target.result);
-                if (!json.data || !Array.isArray(json.data)) throw new Error("Formato JSON inválido");
+                const rawData = Array.isArray(json) ? json : (json.data || []);
+                
+                if (rawData.length === 0) throw new Error("El archivo no contiene registros válidos en la llave 'data'.");
 
                 // Obtener registros existentes en la Nube para evitar duplicados
-                const { data: existingData } = await supabase
+                const { data: existingData, error: dbError } = await supabase
                     .from('baptisms')
-                    .select('book_number, folio, number') // 🚀 CORRECCIÓN: Nombres de columnas actualizados
-                    .eq('parish_id', user.parishId);
+                    .select('book_number, page_number, entry_number')
+                    .eq('parish_id', parishId);
+
+                if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
 
                 const existingKeys = new Set((existingData || []).map(b => 
-                    `${String(b.book_number).padStart(4, '0')}-${String(b.folio).padStart(4, '0')}-${String(b.number).padStart(4, '0')}` // 🚀 CORRECCIÓN
+                    `${String(b.book_number).padStart(4, '0')}-${String(b.page_number).padStart(4, '0')}-${String(b.entry_number).padStart(4, '0')}`
                 ));
 
                 const processed = [];
-                let duplicates = 0;
+                const errors = [];
+                const warnings = [];
+                const internalKeys = new Set();
+                let validCount = 0;
 
-                json.data.forEach(item => {
-                    // Mapeo a los campos únicos en español
-                    const recordMap = {
-                        Libro: String(item.libro || item.Libro || '').padStart(4, '0'),
-                        folio: String(item.folio || '').padStart(4, '0'),
-                        numero: String(item.numero || '').padStart(4, '0'),
-                        numeroRegistro: item.numeroRegistro || '',
-                        fechaSacramento: item.fechaSacramento || '',
-                        horaSacramento: item.horaSacramento || '10:00',
-                        lugarBautismo: (item.lugarBautismo || '').toUpperCase(),
-                        apellidos: (item.apellidos || '').toUpperCase(),
-                        nombres: (item.nombres || '').toUpperCase(),
-                        sexo: (item.sexo || '').toUpperCase(),
-                        fechaNacimiento: item.fechaNacimiento || '',
-                        lugarNacimiento: (item.lugarNacimiento || '').toUpperCase(),
-                        tipoUnionPadres: (item.tipoUnionPadres || '').toUpperCase(),
-                        nombrePadre: (item.nombrePadre || '').toUpperCase(),
-                        cedulaPadre: item.cedulaPadre || '',
-                        nombreMadre: (item.nombreMadre || '').toUpperCase(),
-                        cedulaMadre: item.cedulaMadre || '',
-                        abuelosPaternos: (item.abuelosPaternos || '').toUpperCase(),
-                        abuelosMaternos: (item.abuelosMaternos || '').toUpperCase(),
-                        direccion: (item.direccion || '').toUpperCase(),
-                        padrinos: (item.padrinos || '').toUpperCase(),
-                        ministro: (item.ministro || '').toUpperCase(),
-                        daFe: parrocoActual,
-                        notaMarginal: item.notaMarginal || '',
-                        serialRegistro: item.serialRegistro || '',
-                        nuip: item.nuip || '',
-                        oficinaRegistro: item.oficinaRegistro || '',
-                        fechaExpedicionRegistro: item.fechaExpedicionRegistro || ''
-                    };
-
-                    const key = `${recordMap.Libro}-${recordMap.folio}-${recordMap.numero}`;
+                rawData.forEach((item, index) => {
+                    const rowNum = index + 1;
                     
-                    if (existingKeys.has(key)) {
-                        duplicates++;
+                    // 🧠 Purificación Inteligente
+                    const cleanItem = purificarRegistroBautismo(item);
+
+                    // Si no tiene quién da fe, inyectamos el Párroco Actual automáticamente
+                    if (!cleanItem.daFe || cleanItem.daFe === '---' || cleanItem.daFe.includes('ENCARGADO')) {
+                        cleanItem.daFe = parrocoActual;
+                    }
+
+                    const key = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
+                    const nombreBautizado = `${cleanItem.nombres} ${cleanItem.apellidos}`.trim();
+
+                    if (!cleanItem.nombres || !cleanItem.apellidos || cleanItem.Libro === '0000') {
+                        errors.push(`Fila ${rowNum}: Faltan datos críticos (Nombres, Apellidos o Libro).`);
+                    } else if (existingKeys.has(key)) {
+                        warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe en la Nube).`);
+                    } else if (internalKeys.has(key)) {
+                        warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Acta duplicada dentro del mismo archivo).`);
                     } else {
-                        processed.push(recordMap);
-                        existingKeys.add(key); 
+                        processed.push(cleanItem);
+                        internalKeys.add(key);
+                        validCount++;
                     }
                 });
 
-                setRecordsToImport(processed);
-                setDuplicateCount(duplicates);
-                setFile(selectedFile);
-                toast({ title: "Validación Completa", description: `${processed.length} registros listos.` });
+                setValidationResult({ 
+                    dataToImport: processed, 
+                    count: validCount, 
+                    errors, 
+                    warnings 
+                });
 
             } catch (err) {
-                toast({ title: "Error", description: "No se pudo procesar el archivo JSON.", variant: "destructive" });
+                toast({ title: "Error Estructural", description: err.message, variant: "destructive" });
+                setValidationResult({ dataToImport: [], count: 0, errors: [err.message], warnings: [] });
             } finally {
                 setIsProcessing(false);
+                if (fileInputRef.current) fileInputRef.current.value = '';
             }
         };
         reader.readAsText(selectedFile);
     };
 
-    // --- 3. INYECCIÓN MASIVA A PERMANENTES ---
+    // --- 3. INYECCIÓN MASIVA A LA NUBE ---
     const handleImport = async () => {
-        if (recordsToImport.length === 0) return;
+        if (!validationResult || validationResult.dataToImport.length === 0) return;
         setIsProcessing(true);
 
         try {
-            const batchSize = 50;
-            for (let i = 0; i < recordsToImport.length; i += batchSize) {
-                const batch = recordsToImport.slice(i, i + batchSize);
-                
-                // 🚀 CORRECCIÓN: Inserción 1 a 1 con la nueva estructura de Supabase
-                const dbRecords = batch.map(item => ({
-                    id: generateUUID(),
-                    parish_id: user.parishId,
-                    book_id: null, // Asumimos null por simplicidad en importación masiva, o puedes resolverlo si tienes la lógica a mano
-                    book_number: item.Libro,
-                    folio: item.folio,
-                    number: item.numero,
-                    numero_registro: item.numeroRegistro || null,
-                    celebration_date: item.fechaSacramento || null,
-                    hora_sacramento: item.horaSacramento || null,
-                    lugar_bautismo: item.lugarBautismo || null,
-                    apellidos: item.apellidos || null,
-                    nombres: item.nombres || null,
-                    sexo: item.sexo || null,
-                    fecha_nacimiento: item.fechaNacimiento || null,
-                    lugar_nacimiento: item.lugarNacimiento || null,
-                    nuip: item.nuip || null,
-                    serial_registro: item.serialRegistro || null,
-                    oficina_registro: item.oficinaRegistro || null,
-                    fecha_expedicion_registro: item.fechaExpedicionRegistro || null,
-                    tipo_union_padres: item.tipoUnionPadres || null,
-                    nombre_padre: item.nombrePadre || null,
-                    cedula_padre: item.cedulaPadre || null,
-                    nombre_madre: item.nombreMadre || null,
-                    cedula_madre: item.cedulaMadre || null,
-                    abuelos_paternos: item.abuelosPaternos || null,
-                    abuelos_maternos: item.abuelosMaternos || null,
-                    direccion: item.direccion || null,
-                    padrinos: item.padrinos || null,
-                    ministro: item.ministro || null,
-                    da_fe: item.daFe || null,
-                    nota_marginal: item.notaMarginal || null,
-                    status: 'seated',
-                    raw_data: item, 
-                    created_at: new Date().toISOString()
-                }));
+            const dbRecords = validationResult.dataToImport.map(item => ({
+                id: generateUUID(),
+                parish_id: parishId,
+                book_number: item.Libro,
+                page_number: item.folio,
+                entry_number: item.numero,
+                status: 'seated', // Las históricas siempre entran como asentadas (firmadas)
+                raw_data: item, 
+                margin_note: item.notaMarginal || null,
+                created_at: new Date().toISOString()
+            }));
 
-                const { error } = await supabase.from('baptisms').insert(dbRecords);
+            // Inserción en Lotes (Batches de 200) para no saturar Supabase
+            const batchSize = 200;
+            for (let i = 0; i < dbRecords.length; i += batchSize) {
+                const batch = dbRecords.slice(i, i + batchSize);
+                const { error } = await supabase.from('baptisms').insert(batch);
                 if (error) throw error;
             }
 
-            toast({ title: "Importación Exitosa", description: "Datos inyectados en la Base de Datos Permanente.", className: "bg-green-50 border-green-200" });
+            toast({ 
+                title: "¡Importación Exitosa!", 
+                description: `${dbRecords.length} registros inyectados en la Base de Datos Permanente.`, 
+                className: "bg-green-50 border-green-200 text-green-900" 
+            });
+            
             setImportComplete(true);
-            setRecordsToImport([]);
 
         } catch (err) {
-            toast({ title: "Error de Importación", description: err.message, variant: "destructive" });
+            toast({ title: "Fallo de Inyección", description: err.message, variant: "destructive" });
         } finally {
             setIsProcessing(false);
         }
     };
 
+    const resetImporter = () => {
+        setValidationResult(null);
+        setImportComplete(false);
+    };
+
     const columns = [
-        { header: 'L:F:N', render: r => `${r.Libro}/${r.folio}/${r.numero}` },
-        { header: 'Bautizado', render: r => `${r.apellidos}, ${r.nombres}` },
-        { header: 'NUIP / Serial', render: r => <span className="text-[10px] font-mono text-gray-500">{r.nuip || '---'} / {r.serialRegistro || '---'}</span> },
-        { header: 'Párroco Da Fe', render: () => <span className="text-blue-600 font-bold">{parrocoActual}</span> }
+        { header: 'Ubicación (L:F:N)', render: r => <span className="font-mono text-[#4B7BA7] font-black">{r.Libro}:{r.folio}:{r.numero}</span> },
+        { header: 'Bautizado', render: r => <span className="font-bold uppercase text-slate-800">{r.apellidos} {r.nombres}</span> },
+        { header: 'Párroco Da Fe', render: r => <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 px-2 py-1 rounded">{r.daFe}</span> },
+        { header: 'Fecha', render: r => <span className="text-[10px] font-bold text-gray-500">{r.fechaSacramento || '---'}</span> }
     ];
 
+    const hasErrors = validationResult?.errors?.length > 0;
+    const canConfirm = validationResult && validationResult.count > 0 && !hasErrors && !isProcessing && !importComplete;
+
     return (
-        <div className="bg-white border border-gray-100 rounded-[2rem] p-8 space-y-6 shadow-sm">
-            <div className="flex flex-col md:flex-row gap-8 items-start">
-                <div className="w-full md:w-1/3">
-                    <label className="flex flex-col items-center justify-center w-full h-44 border-2 border-dashed border-gray-200 rounded-[2rem] cursor-pointer bg-gray-50 hover:bg-blue-50 hover:border-[#4B7BA7] transition-all">
-                        <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                            {isProcessing ? <Loader2 className="w-10 h-10 mb-3 text-[#4B7BA7] animate-spin" /> : <Upload className="w-10 h-10 mb-3 text-gray-300" />}
-                            <p className="text-xs font-black text-gray-500 uppercase tracking-widest">{isProcessing ? 'Procesando...' : 'Cargar BAUTIZOS.json'}</p>
+        <div className="bg-white border border-gray-100 rounded-[2.5rem] p-8 md:p-12 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#4B7BA7] to-[#D4AF37]"></div>
+
+            <div className="flex flex-col xl:flex-row gap-10 items-start">
+                
+                {/* ZONA IZQUIERDA: DRAG & DROP */}
+                <div className="w-full xl:w-1/3">
+                    <label className={cn(
+                        "flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-[2rem] cursor-pointer transition-all relative overflow-hidden",
+                        validationResult ? "border-green-200 bg-green-50/30" : "border-gray-200 bg-gray-50 hover:bg-blue-50/50 hover:border-[#4B7BA7]"
+                    )}>
+                        <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none"><FileJson className="w-40 h-40" /></div>
+                        <div className="flex flex-col items-center justify-center pt-5 pb-6 relative z-10 text-center px-4">
+                            {isProcessing ? (
+                                <Loader2 className="w-12 h-12 mb-4 text-[#4B7BA7] animate-spin" />
+                            ) : validationResult ? (
+                                <CheckCircle2 className="w-12 h-12 mb-4 text-green-500" />
+                            ) : (
+                                <Upload className="w-12 h-12 mb-4 text-gray-400 group-hover:text-[#4B7BA7]" />
+                            )}
+                            
+                            <p className="text-sm font-black text-gray-700 uppercase tracking-tight">
+                                {isProcessing ? 'Procesando Archivo...' : validationResult ? 'Archivo Cargado' : 'Seleccionar BAUTIZOS.json'}
+                            </p>
+                            {!validationResult && !isProcessing && (
+                                <p className="text-[10px] text-gray-400 mt-2 font-bold uppercase tracking-widest">
+                                    El sistema unificará nombres, fechas y abuelos automáticamente.
+                                </p>
+                            )}
                         </div>
-                        <input type="file" className="hidden" accept=".json" onChange={handleFileChange} disabled={isProcessing} />
+                        <input type="file" className="hidden" accept=".json" onChange={handleFileChange} disabled={isProcessing} ref={fileInputRef} />
                     </label>
                 </div>
 
-                <div className="w-full md:w-2/3 space-y-4">
-                    <div className="flex items-center gap-3 border-b pb-4">
-                        <Database className="w-5 h-5 text-[#4B7BA7]" />
-                        <h3 className="font-black text-gray-800 uppercase text-sm tracking-widest">Inyección Masiva (23 Campos)</h3>
+                {/* ZONA DERECHA: RESULTADOS Y BOTONES */}
+                <div className="w-full xl:w-2/3 space-y-6">
+                    <div className="flex items-center justify-between border-b border-gray-100 pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-blue-50 p-2 rounded-xl"><Database className="w-5 h-5 text-[#4B7BA7]" /></div>
+                            <div>
+                                <h3 className="font-black text-gray-900 uppercase text-sm tracking-widest">Motor de Inyección (Bautismos)</h3>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase">Sincronización Directa a Base de Datos Permanente</p>
+                            </div>
+                        </div>
+                        {validationResult && (
+                            <Button variant="ghost" onClick={resetImporter} className="text-gray-400 hover:text-gray-700 text-xs font-black uppercase">
+                                Cargar Otro Archivo
+                            </Button>
+                        )}
                     </div>
 
-                    {file ? (
-                        <div className="space-y-6">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-green-50 p-4 rounded-2xl border border-green-100">
-                                    <span className="block text-2xl font-black text-green-700">{recordsToImport.length}</span>
-                                    <span className="text-[9px] font-black text-green-600 uppercase tracking-widest">Listos para Inyectar</span>
-                                </div>
-                                <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100">
-                                    <span className="block text-2xl font-black text-amber-700">{duplicateCount}</span>
-                                    <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest">Duplicados Omitidos</span>
-                                </div>
-                            </div>
-                            
-                            <Button 
-                                onClick={handleImport} 
-                                disabled={recordsToImport.length === 0 || isProcessing || importComplete} 
-                                className="w-full py-7 bg-[#4B7BA7] hover:bg-[#3A6286] text-white rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl"
-                            >
-                                {isProcessing ? 'Sincronizando con la Nube...' : `Sincronizar ${recordsToImport.length} Registros`}
-                            </Button>
+                    {!validationResult && !isProcessing && (
+                        <div className="py-12 text-center bg-slate-50/50 rounded-[2rem] border border-slate-100">
+                            <Info className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+                            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Esperando archivo para auditoría de datos...</p>
                         </div>
-                    ) : (
-                        <div className="py-10 text-center">
-                            <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">Seleccione el archivo JSON para auditar datos</p>
+                    )}
+
+                    {validationResult && (
+                        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            <div className="grid grid-cols-3 gap-4">
+                                <StatCard label="Listos" val={validationResult.count} color="green" />
+                                <StatCard label="Errores" val={validationResult.errors.length} color="red" />
+                                <StatCard label="Omitidos" val={validationResult.warnings.length} color="amber" />
+                            </div>
+
+                            {(validationResult.errors.length > 0 || validationResult.warnings.length > 0) && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {validationResult.errors.length > 0 && (
+                                        <AlertBox title="Errores Críticos" list={validationResult.errors} type="error" />
+                                    )}
+                                    {validationResult.warnings.length > 0 && (
+                                        <AlertBox title="Duplicados Omitidos" list={validationResult.warnings} type="warning" />
+                                    )}
+                                </div>
+                            )}
+
+                            {!hasErrors && validationResult.count > 0 && (
+                                <Button 
+                                    onClick={handleImport} 
+                                    disabled={!canConfirm} 
+                                    className="w-full py-8 bg-gradient-to-r from-[#4B7BA7] to-[#3A6286] hover:shadow-xl text-white rounded-2xl font-black uppercase text-[11px] tracking-[0.2em] transition-all transform active:scale-95 disabled:opacity-50"
+                                >
+                                    {isProcessing ? <Loader2 className="w-5 h-5 mr-3 animate-spin" /> : <Database className="w-5 h-5 mr-3" />}
+                                    {isProcessing ? 'Inyectando a la Nube...' : importComplete ? 'Importación Finalizada' : `Inyectar ${validationResult.count} Registros Permanentes`}
+                                </Button>
+                            )}
                         </div>
                     )}
                 </div>
             </div>
 
-            {recordsToImport.length > 0 && (
-                <div className="mt-8 pt-6 border-t border-gray-50">
-                    <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                        <Info className="w-4 h-4 text-blue-500" /> Vista Previa del Mapeo de Seguridad
-                    </h4>
-                    <Table columns={columns} data={recordsToImport.slice(0, 5)} />
+            {/* VISTA PREVIA INFERIOR */}
+            {validationResult?.count > 0 && (
+                <div className="mt-10 pt-8 border-t border-gray-100 animate-in fade-in duration-700">
+                    <div className="bg-gray-50/50 px-6 py-4 rounded-t-3xl border border-b-0 border-gray-100 flex items-center justify-between">
+                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                            <Info className="w-4 h-4 text-[#4B7BA7]" /> Vista Previa de Purificación (Top 5)
+                        </span>
+                    </div>
+                    <div className="border border-gray-100 rounded-b-3xl overflow-hidden bg-white shadow-sm">
+                        <Table columns={columns} data={validationResult.dataToImport.slice(0, 5)} />
+                    </div>
                 </div>
             )}
+        </div>
+    );
+};
+
+// --- COMPONENTES AUXILIARES ESTÉTICOS ---
+const StatCard = ({ label, val, color }) => {
+    const colors = {
+        green: "bg-green-50 border-green-100 text-green-700",
+        red: "bg-red-50 border-red-100 text-red-700",
+        amber: "bg-amber-50 border-amber-100 text-amber-700"
+    };
+    return (
+        <div className={cn("p-5 rounded-3xl border text-center shadow-sm", colors[color])}>
+            <div className="text-3xl font-black leading-none mb-1 tracking-tighter">{val}</div>
+            <div className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70">{label}</div>
+        </div>
+    );
+};
+
+const AlertBox = ({ title, list, type }) => {
+    const isError = type === 'error';
+    return (
+        <div className={cn("rounded-3xl border p-5 max-h-48 overflow-y-auto custom-scrollbar shadow-sm", isError ? "bg-red-50/50 border-red-100" : "bg-amber-50/50 border-amber-100")}>
+            <div className="flex items-center gap-2 mb-3">
+                {isError ? <XCircle className="w-5 h-5 text-red-500" /> : <AlertTriangle className="w-5 h-5 text-amber-500" />}
+                <span className={cn("text-[10px] font-black uppercase tracking-widest", isError ? "text-red-800" : "text-amber-800")}>{title}</span>
+            </div>
+            <ul className="space-y-2">
+                {list.map((msg, i) => (
+                    <li key={i} className={cn("text-[10px] font-bold leading-tight border-b pb-2", isError ? "text-red-600 border-red-100/50" : "text-amber-700 border-amber-100/50")}>• {msg}</li>
+                ))}
+            </ul>
         </div>
     );
 };
