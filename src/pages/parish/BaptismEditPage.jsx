@@ -6,7 +6,10 @@ import { useAppData } from '@/context/AppDataContext';
 import { supabase } from '@/lib/supabaseClient'; 
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { Save, ArrowLeft, Loader2, BookOpen } from 'lucide-react';
+import { 
+    Save, ArrowLeft, Loader2, BookOpen, 
+    Hash, Calendar, User, ScrollText, Users, PenTool 
+} from 'lucide-react';
 import CityAutocomplete from '@/components/CityAutocomplete';
 
 const BaptismEditPage = () => {
@@ -25,6 +28,10 @@ const BaptismEditPage = () => {
     const [formData, setFormData] = useState(null);
     const [ciudades, setCiudades] = useState([]); 
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
+    
+    // 🚀 Lógica inteligente de sacerdotes
+    const [listaSacerdotes, setListaSacerdotes] = useState([]);
+    const [userChangedDate, setUserChangedDate] = useState(false);
 
     const toInputDate = (dateStr) => {
         if (!dateStr) return '';
@@ -65,10 +72,23 @@ const BaptismEditPage = () => {
                     numero: dbRecord.entry_number || raw.numero || raw.number
                 });
 
-                // 🚀 CARGA ESTRICTA: Los campos que usa el formulario Edit
+                // Carga de Sacerdotes y Autocompletados
+                const listaCiudadesRaw = getCiudadesList(parishId) || [];
+                setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
+                
+                const listaParrocos = getParrocos(parishId) || [];
+                setListaSacerdotes(listaParrocos);
+                setParrocosSugeridos(listaParrocos.map(p => `${p.nombre} ${p.apellido || ''}`.trim().toUpperCase()));
+
+                // Verificamos quién es el párroco actual por si los campos vienen vacíos
+                const parrocoActualObj = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
+                const nombreParrocoActual = parrocoActualObj ? `${parrocoActualObj.nombre} ${parrocoActualObj.apellido || ''}`.trim().toUpperCase() : '';
+
+                // 🚀 CARGA ESTRICTA
                 setFormData({
                     id: purificado.id,
                     status: purificado.status,
+                    numeroRegistro: purificado.numeroRegistro || '',
                     Libro: purificado.Libro,
                     folio: purificado.folio,
                     numero: purificado.numero,
@@ -87,17 +107,11 @@ const BaptismEditPage = () => {
                     abuelosPaternos: purificado.abuelosPaternos,
                     abuelosMaternos: purificado.abuelosMaternos,
                     padrinos: purificado.padrinos,
-                    ministro: purificado.ministro,
-                    daFe: purificado.daFe,
+                    // Si el ministro o daFe vienen vacíos, inyectamos el actual, sino respetamos la historia
+                    ministro: purificado.ministro && purificado.ministro !== '---' ? purificado.ministro : nombreParrocoActual,
+                    daFe: purificado.daFe && purificado.daFe !== '---' ? purificado.daFe : nombreParrocoActual,
                     notaMarginal: purificado.notaMarginal
                 });
-
-                // 🚀 SOLUCIÓN FUNCIONAL: Carga real de ciudades y párrocos para los autocompletados
-                const listaCiudadesRaw = getCiudadesList(parishId) || [];
-                setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
-                
-                const listaParrocos = getParrocos(parishId) || [];
-                setParrocosSugeridos(listaParrocos.map(p => `${p.nombre} ${p.apellido || ''}`.trim().toUpperCase()));
 
             } catch (error) {
                 toast({ title: "Error", description: "No se pudo cargar el registro.", variant: "destructive" });
@@ -110,8 +124,31 @@ const BaptismEditPage = () => {
         loadRecord();
     }, [recordId, parishId, getCiudadesList, getParrocos, navigate, purificarRegistroBautismo, toast]);
 
+    // 🚀 INTELIGENCIA: Re-calcula el ministro SOLAMENTE si el usuario cambia la fecha
+    useEffect(() => {
+        if (!userChangedDate || !formData?.fechaSacramento || listaSacerdotes.length === 0) return;
+
+        const fechaSeleccionada = new Date(formData.fechaSacramento);
+        const sacerdoteEncontrado = listaSacerdotes.find(s => {
+            const inicio = new Date(s.fechaIngreso || s.fechaNombramiento);
+            const fin = s.fechaSalida ? new Date(s.fechaSalida) : new Date();
+            return fechaSeleccionada >= inicio && fechaSeleccionada <= fin;
+        });
+
+        if (sacerdoteEncontrado) {
+            setFormData(prev => ({ 
+                ...prev, 
+                ministro: `${sacerdoteEncontrado.nombre} ${sacerdoteEncontrado.apellido || ''}`.trim().toUpperCase() 
+            }));
+        }
+    }, [formData?.fechaSacramento, listaSacerdotes, userChangedDate]);
+
     const handleChange = (e) => {
         const { name, value } = e.target;
+        
+        // Marcamos si el usuario tocó la fecha para activar la inteligencia de sacerdotes
+        if (name === 'fechaSacramento') setUserChangedDate(true);
+
         const uppercaseFields = ['nombres', 'apellidos', 'lugarNacimiento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'abuelosPaternos', 'abuelosMaternos', 'ministro', 'daFe', 'notaMarginal'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
