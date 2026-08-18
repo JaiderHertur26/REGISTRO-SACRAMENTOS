@@ -3,13 +3,12 @@ import { X, Save, ShieldCheck, Info, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
-import { useAuth } from '@/context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabaseClient'; 
 
-const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
+// 🚀 RECIBIMOS LA DIÓCESIS POR PROPS
+const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess, dioceseId }) => {
     const { toast } = useToast();
-    const { user } = useAuth();
     
     const [formData, setFormData] = useState({
         id: '',
@@ -21,22 +20,32 @@ const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
     
     const [isLoading, setIsLoading] = useState(false);
 
-    // 🚀 Carga los datos del concepto seleccionado cuando se abre el modal
     useEffect(() => {
-        if (concept && isOpen) {
-            setFormData({
-                id: concept.id || '',
-                codigo: concept.codigo || '',
-                concepto: concept.concepto || '',
-                expide: concept.expide || 'CANCILLERÍA',
-                tipo: concept.tipo || 'porCorreccion'
-            });
+        if (isOpen) {
+            if (concept) {
+                // Si hay concepto, cargamos para EDITAR
+                setFormData({
+                    id: concept.id || '',
+                    codigo: concept.codigo || '',
+                    concepto: concept.concepto || '',
+                    expide: concept.expide || 'CANCILLERÍA',
+                    tipo: concept.tipo || 'porCorreccion'
+                });
+            } else {
+                // Si NO hay concepto, vaciamos para CREAR UNO NUEVO
+                setFormData({
+                    id: '',
+                    codigo: '',
+                    concepto: '',
+                    expide: 'CANCILLERÍA',
+                    tipo: 'porCorreccion'
+                });
+            }
         }
     }, [concept, isOpen]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        // Blindaje: Todo a MAYÚSCULAS para mantener el rigor del archivo
         setFormData(prev => ({ ...prev, [name]: value.toUpperCase() }));
     };
 
@@ -54,43 +63,62 @@ const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
 
         setIsLoading(true);
         try {
-            if (!formData.id) {
-                throw new Error("No se detectó el ID del concepto a editar.");
+            if (formData.id) {
+                // 🚀 LÓGICA DE ACTUALIZACIÓN (UPDATE)
+                const { error } = await supabase
+                    .from('conceptos_anulacion')
+                    .update({
+                        codigo: formData.codigo,
+                        concepto: formData.concepto,
+                        expide: formData.expide,
+                        tipo: formData.tipo
+                    })
+                    .eq('id', formData.id);
+
+                if (error) throw error;
+                
+                toast({
+                    title: "Concepto Actualizado",
+                    description: "El catálogo ha sido modificado en la base de datos central.",
+                    className: "bg-green-50 border-green-200 text-green-900"
+                });
+            } else {
+                // 🚀 LÓGICA DE CREACIÓN (INSERT)
+                if (!dioceseId) {
+                    throw new Error("No se detectó la Diócesis para guardar el concepto.");
+                }
+
+                const { error } = await supabase
+                    .from('conceptos_anulacion')
+                    .insert([{
+                        diocese_id: dioceseId,
+                        codigo: formData.codigo,
+                        concepto: formData.concepto,
+                        expide: formData.expide,
+                        tipo: formData.tipo
+                    }]);
+
+                if (error) throw error;
+                
+                toast({
+                    title: "Concepto Creado",
+                    description: "El nuevo concepto ha sido guardado exitosamente en la Nube.",
+                    className: "bg-green-50 border-green-200 text-green-900"
+                });
             }
-
-            // 🚀 ACTUALIZACIÓN DIRECTA EN SUPABASE
-            const { error } = await supabase
-                .from('conceptos_anulacion')
-                .update({
-                    codigo: formData.codigo,
-                    concepto: formData.concepto,
-                    expide: formData.expide,
-                    tipo: formData.tipo
-                })
-                .eq('id', formData.id);
-
-            if (error) throw error;
             
-            toast({
-                title: "Concepto Actualizado",
-                description: "El catálogo legal ha sido modificado en la base de datos central.",
-                className: "bg-green-50 border-green-200 text-green-900"
-            });
-            
-            onSuccess?.(); // Recarga la tabla en segundo plano
-            onClose();     // Cierra el modal
+            onSuccess?.(); 
+            onClose();     
             
         } catch (error) {
-            console.error("Error editando en Supabase:", error);
-            
-            // Manejo inteligente de error por Código Duplicado (Postgres code 23505)
+            console.error("Error en Supabase:", error);
             const isDuplicate = error?.code === '23505'; 
             
             toast({
                 title: isDuplicate ? "Código Duplicado" : "Error de Sistema",
                 description: isDuplicate 
                     ? `El código "${formData.codigo}" ya existe en el catálogo. Intente con otro.` 
-                    : error.message || "No se pudo actualizar el concepto en la nube.",
+                    : error.message || "No se pudo guardar el concepto en la nube.",
                 variant: "destructive"
             });
         } finally {
@@ -102,37 +130,31 @@ const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
         <AnimatePresence>
             {isOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                    {/* Backdrop con Blur */}
                     <motion.div 
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                         onClick={onClose}
                         className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
                     />
 
-                    {/* Modal Principal */}
                     <motion.div 
                         initial={{ opacity: 0, scale: 0.95, y: 20 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: 20 }}
                         className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden relative border border-slate-200"
                     >
-                        {/* Cabecera Estilo Cancillería */}
                         <div className="bg-slate-50 px-8 py-6 border-b border-slate-100 flex items-center justify-between">
                             <div className="flex items-center gap-4">
                                 <div className="bg-[#4B7BA7] p-2.5 rounded-2xl text-white shadow-lg shadow-blue-900/20">
                                     <ShieldCheck className="w-5 h-5" />
                                 </div>
                                 <div>
-                                    <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight leading-none">Editar Concepto</h2>
-                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1.5">Modificación de Catálogo</p>
+                                    <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight leading-none">
+                                        {formData.id ? 'Editar Concepto' : 'Nuevo Concepto'}
+                                    </h2>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1.5">Catálogo Normativo</p>
                                 </div>
                             </div>
-                            <button 
-                                onClick={onClose} 
-                                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 p-2 rounded-full transition-all"
-                            >
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 p-2 rounded-full transition-all">
                                 <X className="w-6 h-6" />
                             </button>
                         </div>
@@ -191,7 +213,6 @@ const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
                                 </select>
                             </div>
 
-                            {/* Panel Informativo Dinámico */}
                             <div className="bg-blue-50/50 border border-blue-100 p-5 rounded-[1.5rem] flex items-start gap-4">
                                 <Info className="w-5 h-5 text-blue-500 mt-0.5 shrink-0" />
                                 <div>
@@ -205,7 +226,6 @@ const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
                                 </div>
                             </div>
 
-                            {/* Acciones */}
                             <div className="pt-4 flex gap-4">
                                 <Button 
                                     type="button" 
@@ -223,7 +243,7 @@ const EditAnnulmentConceptModal = ({ isOpen, onClose, concept, onSuccess }) => {
                                     {isLoading ? (
                                         <Loader2 className="w-5 h-5 animate-spin" />
                                     ) : (
-                                        <><Save className="w-4 h-4 mr-2" /> Guardar Cambios</>
+                                        <><Save className="w-4 h-4 mr-2" /> Guardar Concepto</>
                                     )}
                                 </Button>
                             </div>
