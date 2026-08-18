@@ -23,14 +23,16 @@ const BaptismJsonImporter = () => {
     const [validationResult, setValidationResult] = useState(null);
     
     const [parrocoActual, setParrocoActual] = useState('');
+    const [listaSacerdotes, setListaSacerdotes] = useState([]);
     const [diccionarioDaFe, setDiccionarioDaFe] = useState({});
 
     const parishId = user?.parish_id || user?.parishId;
 
-    // --- 1. CARGAR PÁRROCOS Y CREAR DICCIONARIO DE CÓDIGOS "DA FE" ---
+    // --- 1. CARGAR HISTORIAL DE PÁRROCOS Y CREAR DICCIONARIOS ---
     useEffect(() => {
         if (parishId) {
             const parrocos = getParrocos(parishId) || [];
+            setListaSacerdotes(parrocos);
             
             // A. Buscar Párroco Actual
             const actual = parrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
@@ -40,7 +42,7 @@ const BaptismJsonImporter = () => {
                 setParrocoActual('PÁRROCO ENCARGADO');
             }
 
-            // B. Generar Diccionario de Códigos (Orden cronológico ascendente)
+            // B. Generar Diccionario de Códigos (Orden cronológico)
             const sortedParrocos = [...parrocos].sort((a, b) => {
                 const dateA = new Date(a.fechaIngreso || a.fechaNombramiento || '1900-01-01');
                 const dateB = new Date(b.fechaIngreso || b.fechaNombramiento || '1900-01-01');
@@ -57,7 +59,7 @@ const BaptismJsonImporter = () => {
         }
     }, [parishId, getParrocos]);
 
-    // --- 2. PROCESAMIENTO DEL ARCHIVO, TRADUCCIÓN Y CEREBRO ---
+    // --- 2. PROCESAMIENTO, TRADUCCIÓN Y LÓGICA DE BAPTISM CELEBRATED ---
     const handleFileChange = async (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
@@ -75,13 +77,12 @@ const BaptismJsonImporter = () => {
                 
                 if (rawData.length === 0) throw new Error("El archivo no contiene registros válidos en la llave 'data'.");
 
-                // 🚀 CORRECCIÓN: Nombres exactos de las columnas en Supabase (book_number, folio, number)
                 const { data: existingData, error: dbError } = await supabase
                     .from('baptisms')
                     .select('book_number, folio, number')
                     .eq('parish_id', parishId);
 
-                if (dbError) throw new Error(`Fallo de conexión con BD Central: ${dbError.message}`);
+                if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
 
                 const existingKeys = new Set((existingData || []).map(b => 
                     `${String(b.book_number).padStart(4, '0')}-${String(b.folio).padStart(4, '0')}-${String(b.number).padStart(4, '0')}`
@@ -121,21 +122,33 @@ const BaptismJsonImporter = () => {
                         notaMarginal: item["NOTAS MARGINALES"] || item.notaMarginal || ''
                     };
 
-                    // Purificación Inteligente
+                    // 🚀 INTELIGENCIA: AUTO-COMPLETAR MINISTRO (Igual que BaptismCelebratedPage)
+                    if (!mappedItem.ministro || mappedItem.ministro === '---') {
+                        if (mappedItem.fechaSacramento && listaSacerdotes.length > 0) {
+                            const fechaBautismo = new Date(mappedItem.fechaSacramento);
+                            const ministroHistorico = listaSacerdotes.find(s => {
+                                const inicio = new Date(s.fechaIngreso || s.fechaNombramiento || '1900-01-01');
+                                const fin = s.fechaSalida ? new Date(s.fechaSalida) : new Date();
+                                return fechaBautismo >= inicio && fechaBautismo <= fin;
+                            });
+                            if (ministroHistorico) {
+                                mappedItem.ministro = `PBRO. ${ministroHistorico.nombre} ${ministroHistorico.apellido || ''}`.trim().toUpperCase();
+                            }
+                        }
+                    }
+
+                    // Purificación Estándar
                     const cleanItem = purificarRegistroBautismo(mappedItem);
 
-                    // INTELIGENCIA PARA CÓDIGOS NUMÉRICOS EN LA FIRMA
+                    // 🚀 INTELIGENCIA "DA FE"
                     const rawDaFe = String(mappedItem.daFe).trim();
                     let finalDaFe = parrocoActual; 
 
                     if (/^\d+$/.test(rawDaFe)) {
-                        if (diccionarioDaFe[rawDaFe]) {
-                            finalDaFe = diccionarioDaFe[rawDaFe];
-                        } 
+                        if (diccionarioDaFe[rawDaFe]) finalDaFe = diccionarioDaFe[rawDaFe];
                     } else if (rawDaFe && rawDaFe !== '---' && !rawDaFe.includes('ENCARGADO')) {
                         finalDaFe = rawDaFe;
                     }
-                    
                     cleanItem.daFe = finalDaFe;
 
                     const key = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
@@ -144,9 +157,9 @@ const BaptismJsonImporter = () => {
                     if (!cleanItem.nombres || !cleanItem.apellidos || cleanItem.Libro === '0000') {
                         errors.push(`Fila ${rowNum}: Faltan datos críticos (Nombres, Apellidos o Libro).`);
                     } else if (existingKeys.has(key)) {
-                        warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe en la Nube).`);
+                        warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe).`);
                     } else if (internalKeys.has(key)) {
-                        warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Acta duplicada dentro del mismo archivo).`);
+                        warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Acta duplicada dentro del archivo).`);
                     } else {
                         processed.push(cleanItem);
                         internalKeys.add(key);
@@ -154,12 +167,7 @@ const BaptismJsonImporter = () => {
                     }
                 });
 
-                setValidationResult({ 
-                    dataToImport: processed, 
-                    count: validCount, 
-                    errors, 
-                    warnings 
-                });
+                setValidationResult({ dataToImport: processed, count: validCount, errors, warnings });
 
             } catch (err) {
                 toast({ title: "Error Estructural", description: err.message, variant: "destructive" });
@@ -172,21 +180,48 @@ const BaptismJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
-    // --- 3. INYECCIÓN MASIVA A LA NUBE ---
+    // --- 3. INYECCIÓN MASIVA A LA NUBE (MAPEADO AL ESQUEMA EXACTO) ---
     const handleImport = async () => {
         if (!validationResult || validationResult.dataToImport.length === 0) return;
         setIsProcessing(true);
 
+        const cleanDate = (d) => (d && String(d).trim() !== '' && String(d).trim() !== '---') ? d : null;
+
         try {
+            // 🚀 ESTRUCTURA 100% FIEL A TU BASE DE DATOS
             const dbRecords = validationResult.dataToImport.map(item => ({
                 id: generateUUID(),
                 parish_id: parishId,
                 book_number: item.Libro,
-                folio: item.folio,        // 🚀 CORRECCIÓN
-                number: item.numero,      // 🚀 CORRECCIÓN
+                folio: item.folio,
+                number: item.numero,
+                numero_registro: item.numeroRegistro || null,
                 status: 'seated', 
+                celebration_date: cleanDate(item.fechaSacramento),
+                hora_sacramento: item.horaSacramento || null,
+                lugar_bautismo: item.lugarBautismo || null,
+                apellidos: item.apellidos || null,
+                nombres: item.nombres || null,
+                sexo: item.sexo || null,
+                fecha_nacimiento: cleanDate(item.fechaNacimiento),
+                lugar_nacimiento: item.lugarNacimiento || null,
+                nuip: item.nuip || null,
+                serial_registro: item.serialRegistro || null,
+                oficina_registro: item.oficinaRegistro || null,
+                fecha_expedicion_registro: cleanDate(item.fechaExpedicionRegistro),
+                tipo_union_padres: item.tipoUnionPadres || null,
+                nombre_padre: item.nombrePadre || null,
+                cedula_padre: item.cedulaPadre || null,
+                nombre_madre: item.nombreMadre || null,
+                cedula_madre: item.cedulaMadre || null,
+                abuelos_paternos: item.abuelosPaternos || null,
+                abuelos_maternos: item.abuelosMaternos || null,
+                padrinos: item.padrinos || null,
+                ministro: item.ministro || null,
+                da_fe: item.daFe || null,
+                direccion: item.direccion || null,
+                nota_marginal: item.notaMarginal || null,
                 raw_data: item, 
-                margin_note: item.notaMarginal || null,
                 created_at: new Date().toISOString()
             }));
 
@@ -221,7 +256,7 @@ const BaptismJsonImporter = () => {
         { header: 'Ubicación (L:F:N)', render: r => <span className="font-mono text-[#4B7BA7] font-black">{r.Libro}:{r.folio}:{r.numero}</span> },
         { header: 'Bautizado', render: r => <span className="font-bold uppercase text-slate-800">{r.apellidos} {r.nombres}</span> },
         { header: 'Párroco Da Fe', render: r => <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 px-2 py-1 rounded">{r.daFe}</span> },
-        { header: 'Fecha', render: r => <span className="text-[10px] font-bold text-gray-500">{r.fechaSacramento || '---'}</span> }
+        { header: 'Ministro', render: r => <span className="text-[10px] font-bold text-gray-500 uppercase">{r.ministro || '---'}</span> }
     ];
 
     const hasErrors = validationResult?.errors?.length > 0;
