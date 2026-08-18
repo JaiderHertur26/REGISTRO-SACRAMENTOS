@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAppData } from '@/context/AppDataContext';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, Edit, Trash2, FileText } from 'lucide-react';
+import { Search, Edit, Trash2, FileText, Plus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import Table from '@/components/ui/Table';
 import EditAnnulmentConceptModal from '@/components/modals/EditAnnulmentConceptModal';
 import { supabase } from '@/lib/supabaseClient'; 
@@ -14,6 +15,7 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [concepts, setConcepts] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [dioceseId, setDioceseId] = useState(null); // 🚀 Guardamos la Diócesis
     
     const [isEditOpen, setIsEditOpen] = useState(false);
     const [selectedConcept, setSelectedConcept] = useState(null);
@@ -22,14 +24,12 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
         loadData();
     }, [user]);
 
-    // 🚀 CARGA DIRECTA Y CORREGIDA DESDE SUPABASE
     const loadData = async () => {
         if (!user) return;
         setIsLoading(true);
         try {
             let targetDioceseId = user.dioceseId || user.diocese_id;
 
-            // Si el user no tiene dioceseId en su sesión actual, lo buscamos en BD
             if (!targetDioceseId) {
                 if (user.role === 'PARROQUIA' || user.parishId) {
                     const { data: parish } = await supabase
@@ -52,7 +52,8 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
                 throw new Error("No se pudo determinar a qué Diócesis pertenece el usuario.");
             }
 
-            // 🚀 SOLUCIÓN ERROR 400: Consulta directa a diocese_id sin JOIN fantasma
+            setDioceseId(targetDioceseId); // 🚀 Lo guardamos para pasárselo al Modal al crear
+
             const { data, error } = await supabase
                 .from('conceptos_anulacion')
                 .select('id, codigo, concepto, expide, tipo, created_at, diocese_id')
@@ -103,6 +104,12 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
     const handleEdit = (concept, e) => {
         e?.stopPropagation();
         setSelectedConcept(concept);
+        setIsEditOpen(true);
+    };
+
+    // 🚀 ABRIR MODAL VACÍO PARA CREAR
+    const handleCreate = () => {
+        setSelectedConcept(null);
         setIsEditOpen(true);
     };
 
@@ -173,7 +180,7 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
                  <div className="relative w-full max-w-md group">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-[#4B7BA7] w-5 h-5 transition-colors" />
                     <input 
@@ -184,6 +191,13 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
                         onChange={e => setSearchTerm(e.target.value)}
                     />
                 </div>
+                {/* 🚀 BOTÓN PARA AÑADIR NUEVO CONCEPTO */}
+                <Button 
+                    onClick={handleCreate}
+                    className="w-full md:w-auto bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-8 py-6 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-900/20 transition-all active:scale-95"
+                >
+                    <Plus className="w-4 h-4 mr-2" /> Nuevo Concepto
+                </Button>
             </div>
 
             <div className="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden">
@@ -205,6 +219,7 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
                 onClose={() => { setIsEditOpen(false); setSelectedConcept(null); }} 
                 concept={selectedConcept}
                 onSuccess={loadData} 
+                dioceseId={dioceseId} // 🚀 PASAMOS LA DIÓCESIS AL MODAL
             />
         </div>
     );
