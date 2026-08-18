@@ -4,7 +4,8 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
-import { Plus, Search, Pencil, Trash2, Upload } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación de Supabase
+import { Plus, Search, Pencil, Trash2, Upload, Loader2 } from 'lucide-react';
 
 import CreateIglesiaModal from '@/components/modals/CreateIglesiaModal';
 import EditIglesiaModal from '@/components/modals/EditIglesiaModal';
@@ -18,6 +19,7 @@ const IglesiasList = () => {
 
     const [items, setItems] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
+    const [isLoading, setIsLoading] = useState(true); // 🚀 Estado de carga
     
     const [modals, setModals] = useState({
         create: false,
@@ -43,52 +45,75 @@ const IglesiasList = () => {
 
     const parishId = getParishId();
 
+    // 🚀 Lógica de Espejo 1 a 1 con Supabase
+    const loadData = async () => {
+        if (!parishId) return;
+        setIsLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('iglesias')
+                .select('*')
+                .eq('parish_id', parishId)
+                .order('nombre', { ascending: true });
+
+            if (error) throw error;
+            setItems(data || []);
+            localStorage.setItem(`iglesias_${parishId}`, JSON.stringify(data || []));
+        } catch (error) {
+            console.error("Error cargando iglesias:", error);
+            setItems(getIglesiasList(parishId)); // Fallback a local
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     useEffect(() => {
         if (parishId) {
             loadData();
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [parishId]);
-
-    const loadData = () => {
-        const data = getIglesiasList(parishId);
-        setItems(data);
-    };
 
     const handleCreate = async (data) => {
         if (!parishId) {
              toast({ title: 'Error', description: 'No se ha identificado la parroquia actual.', variant: 'destructive' });
              return;
         }
-
+        setIsLoading(true);
         const result = await addIglesia(data, parishId);
         if (result.success) {
             toast({ title: 'Éxito', description: result.message, className: "bg-green-50 border-green-200 text-green-900" });
             setModals(prev => ({ ...prev, create: false }));
-            loadData();
+            await loadData();
         } else {
             toast({ title: 'Error', description: result.message, variant: 'destructive' });
+            setIsLoading(false);
         }
     };
 
     const handleUpdate = async (id, data) => {
+        setIsLoading(true);
         const result = await updateIglesia(id, data, parishId);
         if (result.success) {
             toast({ title: 'Éxito', description: result.message, className: "bg-green-50 border-green-200 text-green-900" });
             setModals(prev => ({ ...prev, edit: false }));
-            loadData();
+            await loadData();
         } else {
             toast({ title: 'Error', description: result.message, variant: 'destructive' });
+            setIsLoading(false);
         }
     };
 
     const handleDelete = async (id) => {
+        setIsLoading(true);
         const result = await deleteIglesia(id, parishId);
         if (result.success) {
             toast({ title: 'Eliminado', description: result.message, className: "bg-green-50 border-green-200 text-green-900" });
             setModals(prev => ({ ...prev, delete: false }));
-            loadData();
+            await loadData();
         } else {
             toast({ title: 'Error', description: result.message, variant: 'destructive' });
+            setIsLoading(false);
         }
     };
 
@@ -156,7 +181,14 @@ const IglesiasList = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {filteredItems.length === 0 ? (
+                            {isLoading ? (
+                                <tr>
+                                    <td colSpan={headers.length + 1} className="py-20 text-center">
+                                        <Loader2 className="w-8 h-8 animate-spin text-[#4B7BA7] mx-auto mb-4" />
+                                        <p className="text-xs font-bold text-gray-500 uppercase">Sincronizando con Supabase...</p>
+                                    </td>
+                                </tr>
+                            ) : filteredItems.length === 0 ? (
                                 <tr>
                                     <td colSpan={headers.length + 1} className="px-6 py-12 text-center text-gray-500 italic">
                                         No hay iglesias registradas o que coincidan con la búsqueda.

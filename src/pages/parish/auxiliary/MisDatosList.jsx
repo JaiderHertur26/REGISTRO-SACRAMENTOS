@@ -4,6 +4,7 @@ import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
+import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación de Supabase
 import { 
     Pencil, Trash2, Search, Plus, Eye, 
     Eraser, Building2, ShieldCheck, 
@@ -45,16 +46,34 @@ const MisDatosList = () => {
 
     const entityId = user?.parishId || user?.dioceseId || 'default';
 
-    // --- 1. CARGA DE DATOS CENTRALIZADA ---
+    // 🚀 Lógica de Espejo 1 a 1 con Supabase
     const loadData = async () => {
         setIsLoading(true);
         try {
-            // Obtenemos los datos directamente de la función provista por el Contexto
-            const data = await getMisDatosList(entityId);
-            setItems(data || []);
+            const { data, error } = await supabase
+                .from('mis_datos')
+                .select('*')
+                .eq('entity_id', entityId);
+
+            if (error) throw error;
+
+            // Procesamos el JSONB igual que en el backend
+            const processedData = data.map(dbItem => {
+                let rawPayload = dbItem.payload;
+                if (typeof rawPayload === 'string') {
+                    try { rawPayload = JSON.parse(rawPayload); } catch(e) { rawPayload = {}; }
+                }
+                if (Array.isArray(rawPayload)) rawPayload = rawPayload[0] || {};
+                
+                return { ...rawPayload, ...dbItem, id: dbItem.id };
+            });
+
+            setItems(processedData || []);
+            localStorage.setItem('mis_datos', JSON.stringify(processedData || []));
         } catch (error) {
             console.error("Error cargando Mis Datos:", error);
-            toast({ title: 'Error de Red', description: 'No se pudo cargar la información.', variant: 'destructive' });
+            toast({ title: 'Error de Red', description: 'Leyendo desde caché local.', variant: 'destructive' });
+            setItems(getMisDatosList(entityId) || []); // Fallback
         } finally {
             setIsLoading(false);
         }
@@ -64,6 +83,7 @@ const MisDatosList = () => {
         if (entityId) {
             loadData();
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [entityId]);
 
     // --- 2. ACCIONES DE GESTIÓN ---
@@ -80,7 +100,6 @@ const MisDatosList = () => {
             }
         } catch (e) {
             toast({ title: 'Fallo al Guardar', description: e.message, variant: 'destructive' });
-        } finally {
             setIsLoading(false);
         }
     };
@@ -98,7 +117,6 @@ const MisDatosList = () => {
             }
         } catch (e) {
             toast({ title: 'Fallo al Actualizar', description: e.message, variant: 'destructive' });
-        } finally {
             setIsLoading(false);
         }
     };
@@ -106,6 +124,7 @@ const MisDatosList = () => {
     const handleDeleteConfirm = async () => {
         if (!selectedRecord) return;
         setIsDeleting(true);
+        setIsLoading(true);
         try {
             const result = await deleteMisDatosRecord(selectedRecord.id);
             if (result.success) {
@@ -116,6 +135,7 @@ const MisDatosList = () => {
             }
         } catch (e) {
             toast({ title: 'Error al Eliminar', description: e.message, variant: 'destructive' });
+            setIsLoading(false);
         } finally {
             setIsDeleting(false);
             setSelectedRecord(null);
@@ -123,7 +143,6 @@ const MisDatosList = () => {
         }
     };
 
-    // --- 3. FILTRADO ---
     const filteredItems = useMemo(() => {
         const term = searchTerm.toLowerCase();
         return items.filter(i => 
@@ -136,7 +155,6 @@ const MisDatosList = () => {
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
             
-            {/* CABECERA DE CONTROL */}
             <div className="flex flex-col lg:flex-row justify-between items-center gap-6 bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm">
                 <div className="relative w-full max-w-md group">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300 group-focus-within:text-[#4B7BA7] transition-colors" />
@@ -149,18 +167,6 @@ const MisDatosList = () => {
                 </div>
                 
                 <div className="flex items-center gap-3 w-full lg:w-auto">
-                    <Button 
-                        variant="ghost"
-                        onClick={() => {
-                            if(window.confirm("Esta acción ha sido deshabilitada temporalmente por seguridad.")) {
-                               // Funcionalidad de borrado masivo desactivada para evitar desastres en Supabase
-                            }
-                        }}
-                        className="text-red-400 hover:text-red-600 font-black uppercase tracking-widest text-[10px] hidden"
-                    >
-                        <Eraser className="w-4 h-4 mr-2" /> Limpiar Todo
-                    </Button>
-
                     <Button 
                         onClick={() => setModals(m => ({ ...m, import: true }))} 
                         variant="outline"
@@ -178,12 +184,11 @@ const MisDatosList = () => {
                 </div>
             </div>
 
-            {/* TABLA DE MEMBRETES */}
             <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden min-h-[500px] relative">
                 {isLoading && (
                     <div className="absolute inset-0 bg-white/80 z-20 flex flex-col items-center justify-center">
                         <Loader2 className="w-10 h-10 animate-spin text-[#4B7BA7] mb-4" />
-                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Cargando...</p>
+                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Sincronizando con Supabase...</p>
                     </div>
                 )}
 

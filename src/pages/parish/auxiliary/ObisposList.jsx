@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/use-toast';
-import { Pencil, Trash2, Plus, Search, Upload } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación de Supabase
+import { Pencil, Trash2, Plus, Search, Upload, Loader2 } from 'lucide-react';
 import ImportObisposForm from '@/components/modals/ImportObisposForm';
 
 const ObisposList = () => {
@@ -20,16 +21,52 @@ const ObisposList = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isImportOpen, setIsImportOpen] = useState(false);
     const [currentItem, setCurrentItem] = useState(null);
+    const [isLoading, setIsLoading] = useState(true); // 🚀 Estado de carga
     const [formData, setFormData] = useState({ nombre: '', apellido: '', diocesis: '', fechaNombramiento: '', email: '' });
+
+    // 🚀 Lógica de Espejo 1 a 1 con Supabase
+    const loadData = async () => {
+        const parishId = user?.parishId;
+        if (!parishId) return;
+
+        setIsLoading(true);
+        try {
+            // Obtenemos obispos
+            const { data: dataObispos, error: errObispos } = await supabase
+                .from('obispos')
+                .select('*')
+                .eq('parish_id', parishId)
+                .order('nombre', { ascending: true });
+            
+            if (errObispos) throw errObispos;
+
+            // Obtenemos diócesis para el select
+            const { data: dataDiocesis, error: errDiocesis } = await supabase
+                .from('diocesis')
+                .select('*')
+                .eq('parish_id', parishId);
+
+            if (errDiocesis) throw errDiocesis;
+
+            setItems(dataObispos || []);
+            setDiocesisList(dataDiocesis || []);
+            
+            // Backup en memoria
+            localStorage.setItem(`obispos_${parishId}`, JSON.stringify(dataObispos || []));
+            localStorage.setItem(`diocesis_${parishId}`, JSON.stringify(dataDiocesis || []));
+        } catch (error) {
+            console.error("Error cargando obispos:", error);
+            setItems(getObispos(parishId)); // Fallback a local
+            setDiocesisList(getDiocesis(parishId));
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     useEffect(() => {
         loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.parishId]);
-
-    const loadData = () => {
-        setItems(getObispos(user?.parishId));
-        setDiocesisList(getDiocesis(user?.parishId));
-    };
 
     const handleOpenModal = (item = null) => {
         if (item) {
@@ -48,6 +85,7 @@ const ObisposList = () => {
             return;
         }
 
+        setIsLoading(true);
         if (currentItem) {
             await updateObispo(currentItem.id, formData, user?.parishId);
             toast({ title: 'Éxito', description: 'Obispo actualizado exitosamente.', className: "bg-green-50 border-green-200 text-green-900" });
@@ -56,14 +94,15 @@ const ObisposList = () => {
             toast({ title: 'Éxito', description: 'Obispo agregado exitosamente.', className: "bg-green-50 border-green-200 text-green-900" });
         }
         setIsModalOpen(false);
-        loadData();
+        await loadData();
     };
 
     const handleDelete = async (item) => {
         if (window.confirm('¿Está seguro de eliminar este obispo?')) {
+            setIsLoading(true);
             await deleteObispo(item.id, user?.parishId);
             toast({ title: 'Eliminado', description: 'Registro eliminado exitosamente.', className: "bg-green-50 border-green-200 text-green-900" });
-            loadData();
+            await loadData();
         }
     };
 
@@ -122,7 +161,14 @@ const ObisposList = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {filteredItems.length === 0 ? (
+                            {isLoading ? (
+                                <tr>
+                                    <td colSpan={headers.length + 1} className="py-20 text-center">
+                                        <Loader2 className="w-8 h-8 animate-spin text-[#4B7BA7] mx-auto mb-4" />
+                                        <p className="text-xs font-bold text-gray-500 uppercase">Sincronizando con Supabase...</p>
+                                    </td>
+                                </tr>
+                            ) : filteredItems.length === 0 ? (
                                 <tr>
                                     <td colSpan={headers.length + 1} className="px-6 py-12 text-center text-gray-500 italic">
                                         No hay obispos registrados o que coincidan con la búsqueda.

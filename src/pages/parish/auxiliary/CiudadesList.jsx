@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/use-toast';
+import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación de Supabase añadida
 import { 
     Pencil, Trash2, Plus, Search, MapPin, 
     Globe, Database, ShieldCheck, Clock, User as UserIcon,
@@ -15,6 +16,7 @@ import ImportCiudadesForm from '@/components/modals/ImportCiudadesForm';
 
 const CiudadesList = () => {
     const { user } = useAuth();
+    // getCiudadesList se mantiene solo como fallback (respaldo offline)
     const { getCiudadesList, addCiudad, updateCiudad, deleteCiudad } = useAppData();
     const { toast } = useToast();
 
@@ -33,21 +35,40 @@ const CiudadesList = () => {
         usuario: ''
     });
 
-    const loadData = () => {
-        // 🚀 SOLUCIÓN: Usar parishId si no hay dioceseId
+    // 🚀 NUEVA LÓGICA: Consulta directa a Supabase (Espejo 1 a 1)
+    const loadData = async () => {
         const contextId = user?.parishId || user?.dioceseId;
         if (!contextId) return;
 
         setIsLoading(true);
-        const data = getCiudadesList(contextId);
-        const sortedData = [...data].sort((a, b) => a.nombre.localeCompare(b.nombre));
-        setItems(sortedData);
-        setIsLoading(false);
+        try {
+            // Buscamos directamente en la tabla real de la nube
+            const { data, error } = await supabase
+                .from('ciudades')
+                .select('*')
+                .eq('context_id', contextId)
+                .order('nombre', { ascending: true });
+
+            if (error) throw error;
+
+            setItems(data || []);
+            
+            // Actualizamos la caché local en segundo plano (para la experiencia offline-first)
+            localStorage.setItem(`ciudades_${contextId}`, JSON.stringify(data || []));
+        } catch (error) {
+            console.error("Error cargando ciudades desde Supabase:", error);
+            // Fallback: Si no hay internet, lee de la caché local
+            const fallbackData = getCiudadesList(contextId);
+            const sortedData = [...fallbackData].sort((a, b) => a.nombre.localeCompare(b.nombre));
+            setItems(sortedData);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     useEffect(() => {
         loadData();
-    // 🚀 SOLUCIÓN: Agregar parishId a las dependencias
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.dioceseId, user?.parishId]);
 
     const handleOpenModal = (item = null) => {
@@ -73,9 +94,11 @@ const CiudadesList = () => {
             return;
         }
 
-        // 🚀 SOLUCIÓN: Usar el contexto correcto al guardar
         const contextId = user?.parishId || user?.dioceseId; 
         let result;
+
+        // Mostrar estado de carga mientras sube a BD
+        setIsLoading(true);
 
         if (currentItem) {
             result = await updateCiudad(currentItem.id, { ...formData, nombre: formData.nombre.toUpperCase() }, contextId);
@@ -86,19 +109,26 @@ const CiudadesList = () => {
         if (result.success) {
             toast({ title: '¡Éxito!', description: result.message, className: "bg-green-50 border-green-200 text-green-900" });
             setIsModalOpen(false);
-            loadData();
+            await loadData(); // Recarga la info real de la BD
         } else {
             toast({ title: 'Error', description: result.message, variant: 'destructive' });
+            setIsLoading(false);
         }
     };
 
     const handleDelete = async (item) => {
-        if (window.confirm(`¿Realmente desea eliminar "${item.nombre}"? Esta acción puede afectar registros históricos.`)) {
-            // 🚀 SOLUCIÓN: Usar el contexto correcto al eliminar
+        if (window.confirm(`¿Realmente desea eliminar "${item.nombre}"? Esta acción se reflejará inmediatamente en la base de datos.`)) {
+            setIsLoading(true);
             const contextId = user?.parishId || user?.dioceseId;
-            await deleteCiudad(item.id, contextId);
-            toast({ title: 'Registro eliminado', description: 'La ciudad ha sido removida del catálogo.' });
-            loadData();
+            const result = await deleteCiudad(item.id, contextId);
+            
+            if (result.success) {
+                toast({ title: 'Registro eliminado', description: 'La ciudad ha sido removida del catálogo de Supabase.' });
+                await loadData(); // Recarga la info real de la BD
+            } else {
+                toast({ title: 'Error', description: result.message, variant: 'destructive' });
+                setIsLoading(false);
+            }
         }
     };
 
@@ -160,7 +190,7 @@ const CiudadesList = () => {
                                 <tr>
                                     <td colSpan="6" className="py-20 text-center">
                                         <Loader2 className="w-10 h-10 animate-spin text-[#4B7BA7] mx-auto mb-4" />
-                                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Sincronizando Catálogo Diocesano...</p>
+                                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Sincronizando con Supabase...</p>
                                     </td>
                                 </tr>
                             ) : filteredItems.length === 0 ? (
@@ -216,7 +246,7 @@ const CiudadesList = () => {
                     <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3">
                         <ShieldCheck className="w-5 h-5 text-blue-500 mt-0.5" />
                         <p className="text-[10px] text-blue-700 font-bold uppercase leading-relaxed tracking-tight">
-                            Esta información será compartida con todas las parroquias de la diócesis para estandarizar los registros sacramentales.
+                            Esta información se sincronizará inmediatamente con la base de datos para todas las parroquias de la diócesis.
                         </p>
                     </div>
 
@@ -259,7 +289,7 @@ const CiudadesList = () => {
                     isOpen={isImportOpen} 
                     onClose={() => {
                         setIsImportOpen(false);
-                        loadData();
+                        loadData(); // Al cerrar el modal, se recargan los datos desde Supabase
                     }} 
                 />
             )}

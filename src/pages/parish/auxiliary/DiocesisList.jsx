@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/use-toast';
-import { Pencil, Trash2, Plus, Search, Upload } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient'; // 🚀 Importación de Supabase
+import { Pencil, Trash2, Plus, Search, Upload, Loader2 } from 'lucide-react';
 import ImportDiocesisForm from '@/components/modals/ImportDiocesisForm';
 
 const DiocesisList = () => {
@@ -18,17 +19,38 @@ const DiocesisList = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isImportOpen, setIsImportOpen] = useState(false);
     const [currentItem, setCurrentItem] = useState(null);
+    const [isLoading, setIsLoading] = useState(true); // 🚀 Estado de carga
 
     const [formData, setFormData] = useState({ nombre: '', codigo: '', region: '', descripcion: '' });
 
+    // 🚀 Lógica de Espejo 1 a 1 con Supabase
+    const loadData = async () => {
+        const contextId = user?.parishId || user?.dioceseId;
+        if (!contextId) return;
+
+        setIsLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('diocesis')
+                .select('*')
+                .eq('parish_id', contextId)
+                .order('nombre', { ascending: true });
+
+            if (error) throw error;
+            setItems(data || []);
+            localStorage.setItem(`diocesis_${contextId}`, JSON.stringify(data || []));
+        } catch (error) {
+            console.error("Error cargando diócesis:", error);
+            setItems(getDiocesis(contextId)); // Fallback a local
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     useEffect(() => {
         loadData();
-    }, [user?.parishId]);
-
-    const loadData = () => {
-        const data = getDiocesis(user?.parishId);
-        setItems(data);
-    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.parishId, user?.dioceseId]);
 
     const handleOpenModal = (item = null) => {
         if (item) {
@@ -47,22 +69,28 @@ const DiocesisList = () => {
             return;
         }
 
+        const contextId = user?.parishId || user?.dioceseId;
+        setIsLoading(true);
+
         if (currentItem) {
-            await updateDiocesis(currentItem.id, formData, user?.parishId);
+            await updateDiocesis(currentItem.id, formData, contextId);
             toast({ title: 'Éxito', description: 'Diócesis actualizada exitosamente.', className: "bg-green-50 border-green-200 text-green-900" });
         } else {
-            await addDiocesis(formData, user?.parishId);
+            await addDiocesis(formData, contextId);
             toast({ title: 'Éxito', description: 'Diócesis agregada exitosamente.', className: "bg-green-50 border-green-200 text-green-900" });
         }
+        
         setIsModalOpen(false);
-        loadData();
+        await loadData(); // 🚀 Recarga desde la Nube
     };
 
     const handleDelete = async (item) => {
         if (window.confirm('¿Está seguro de eliminar esta diócesis?')) {
-            await deleteDiocesis(item.id, user?.parishId);
+            setIsLoading(true);
+            const contextId = user?.parishId || user?.dioceseId;
+            await deleteDiocesis(item.id, contextId);
             toast({ title: 'Eliminado', description: 'Registro eliminado exitosamente.', className: "bg-green-50 border-green-200 text-green-900" });
-            loadData();
+            await loadData(); // 🚀 Recarga desde la Nube
         }
     };
 
@@ -120,7 +148,14 @@ const DiocesisList = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {filteredItems.length === 0 ? (
+                            {isLoading ? (
+                                <tr>
+                                    <td colSpan={headers.length + 1} className="py-20 text-center">
+                                        <Loader2 className="w-8 h-8 animate-spin text-[#4B7BA7] mx-auto mb-4" />
+                                        <p className="text-xs font-bold text-gray-500 uppercase">Sincronizando con Supabase...</p>
+                                    </td>
+                                </tr>
+                            ) : filteredItems.length === 0 ? (
                                 <tr>
                                     <td colSpan={headers.length + 1} className="px-6 py-12 text-center text-gray-500 italic">
                                         No hay diócesis registradas o que coincidan con la búsqueda.
