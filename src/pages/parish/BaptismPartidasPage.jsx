@@ -28,7 +28,7 @@ const InfoBox = ({ data, parishId, getParrocos }) => {
             if (parishId && getParrocos) {
                 const sacerdotes = getParrocos(parishId) || [];
                 const actual = sacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
-                if (actual) return `PBRO. ${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase();
+                if (actual) return ` ${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase();
             }
         }
         return rawDaFe || 'PÁRROCO ENCARGADO';
