@@ -8,9 +8,10 @@ import { useToast } from '@/components/ui/use-toast';
 import Table from '@/components/ui/Table';
 import { cn } from '@/lib/utils';
 
-const ImportIglesiasForm = ({ isOpen, onClose }) => {
+// 🚀 AHORA RECIBE LA LISTA REAL DE LA BASE DE DATOS COMO PROP (existingItems)
+const ImportIglesiasForm = ({ isOpen, onClose, existingItems = [] }) => {
   const { user } = useAuth();
-  const { importIglesias, getIglesiasList } = useAppData();
+  const { importIglesias } = useAppData(); // Se eliminó getIglesiasList de aquí
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   
@@ -41,13 +42,14 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
             throw new Error("El archivo no tiene la estructura requerida: { \"data\": [...] }");
         }
 
-        const contextId = user?.parishId || user?.dioceseId;
-        const existingData = getIglesiasList(contextId) || [];
-        
         const errors = [];
         const warnings = [];
         let validCount = 0;
         const validData = [];
+
+        // 🚀 DOBLE FILTRO: Memoria para no duplicar los que vengan repetidos en el propio archivo
+        const codigosEnArchivo = new Set();
+        const nombresEnArchivo = new Set();
 
         json.data.forEach((item, index) => {
             const idx = index + 1;
@@ -62,27 +64,38 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
             
             const nombre = String(nombreRaw).trim();
             const codigo = String(codigoRaw).trim();
+            const nombreLower = nombre.toLowerCase();
+            const codigoLower = codigo.toLowerCase();
 
             if (!nombre) {
                 warnings.push(`Fila ${idx}: Omitida (La iglesia no tiene nombre asignado).`);
                 return; 
             }
 
-            const isDuplicate = existingData.some(ex => {
+            // 1. Validar contra la Base de Datos real
+            const isDuplicateDB = existingItems.some(ex => {
                 if (!ex) return false;
-                const matchCodigo = (codigo && ex.codigo && String(ex.codigo) === codigo);
-                const matchNombre = (ex.nombre && String(ex.nombre).toLowerCase() === nombre.toLowerCase());
+                const matchCodigo = (codigoLower && ex.codigo && String(ex.codigo).toLowerCase() === codigoLower);
+                const matchNombre = (ex.nombre && String(ex.nombre).toLowerCase() === nombreLower);
                 return matchCodigo || matchNombre;
             });
+
+            // 2. Validar contra el mismo archivo JSON
+            const isDuplicateFile = (codigoLower && codigosEnArchivo.has(codigoLower)) || nombresEnArchivo.has(nombreLower);
             
-            if (isDuplicate) {
-                warnings.push(`Fila ${idx}: Omitida "${nombre}" (Ya existe en sistema).`);
+            if (isDuplicateDB) {
+                warnings.push(`Fila ${idx}: Omitida "${nombre}" (Ya existe en la Base de Datos).`);
+            } else if (isDuplicateFile) {
+                warnings.push(`Fila ${idx}: Omitida "${nombre}" (Repetido dentro del mismo archivo).`);
             } else {
+                if (codigoLower) codigosEnArchivo.add(codigoLower);
+                nombresEnArchivo.add(nombreLower);
                 validCount++;
                 validData.push(item);
             }
         });
 
+        // Solo guardamos la data que pasó todos los filtros
         setJsonContent({ data: validData });
         setValidationResult({ count: validCount, errors, warnings });
         setPreview(validData.slice(0, 5));
@@ -102,7 +115,6 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
       
       setLoading(true);
 
-      // 🚀 SALVAVIDAS: El bloque try/finally garantiza apagar el loader
       try {
           const contextId = user?.parishId || user?.dioceseId;
           if (!contextId) {
@@ -112,16 +124,16 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
           let result;
           if (jsonContent.data.length > 0) {
               const cleanData = jsonContent.data.map(item => ({
-                  codigo: item.codigo || item.Codigo || null,
-                  nombre: item.nombre || item.Nombre || null,
-                  nit: item.nronit || item.nit || null,
-                  direccion: item.direccion || null,
-                  ciudad: item.ciudad || null,
-                  telefono: item.telefono || null,
-                  fax: item.nrofax || item.fax || null,
-                  email: item.email || null,
-                  parroco: item.parroco || null,
-                  diocesis: item.diocesis || null
+                  codigo: item.Codigo || item.codigo || null,
+                  nombre: item.Nombre || item.nombre || null,
+                  nit: item.Nit || item.nit || item.nronit || null,
+                  direccion: item.Direccion || item.direccion || null,
+                  ciudad: item.Ciudad || item.ciudad || null,
+                  telefono: item.Telefono || item.telefono || null,
+                  fax: item.Fax || item.fax || item.nrofax || null,
+                  email: item.Email || item.email || null,
+                  parroco: item.Parroco || item.parroco || null,
+                  diocesis: item.Diocesis || item.diocesis || null
               }));
 
               result = await importIglesias({ data: cleanData }, contextId, false);
@@ -144,7 +156,6 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
           console.error("Fallo de inyección:", err);
           toast({ title: "Fallo en Guardado", description: err.message, variant: "destructive" });
       } finally {
-          // 🚀 SE APAGA EL LOADER PASE LO QUE PASE
           setLoading(false); 
       }
   };
@@ -161,7 +172,7 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
       { header: 'Código', render: r => <span className="font-mono text-gray-500">{r.codigo || r.Codigo || '-'}</span> },
       { header: 'Nombre Oficial', render: r => <span className="font-bold text-gray-900">{r.nombre || r.Nombre}</span> },
       { header: 'Ciudad', render: r => r.ciudad || r.Ciudad || '-' },
-      { header: 'Diócesis', render: r => <span className="text-[10px] bg-blue-50 px-2 py-1 rounded text-blue-700 font-bold">{r.diocesis || '-'}</span> },
+      { header: 'Diócesis', render: r => <span className="text-[10px] bg-blue-50 px-2 py-1 rounded text-blue-700 font-bold">{r.diocesis || r.Diocesis || '-'}</span> },
   ];
 
   const hasErrors = validationResult?.errors?.length > 0;
@@ -266,20 +277,6 @@ const ImportIglesiasForm = ({ isOpen, onClose }) => {
         </div>
     </Modal>
   );
-};
-
-const StatCard = ({ label, val, color }) => {
-    const colors = {
-        green: "bg-green-50 border-green-100 text-green-700",
-        red: "bg-red-50 border-red-100 text-red-700",
-        amber: "bg-amber-50 border-amber-100 text-amber-700"
-    };
-    return (
-        <div className={cn("p-5 rounded-3xl border text-center shadow-sm", colors[color])}>
-            <div className="text-3xl font-black leading-none mb-1">{val}</div>
-            <div className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70">{label}</div>
-        </div>
-    );
 };
 
 export default ImportIglesiasForm;

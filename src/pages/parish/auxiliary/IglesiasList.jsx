@@ -19,7 +19,7 @@ const IglesiasList = () => {
 
     const [items, setItems] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [isLoading, setIsLoading] = useState(true); // 🚀 Estado de carga
+    const [isLoading, setIsLoading] = useState(true);
     
     const [modals, setModals] = useState({
         create: false,
@@ -79,6 +79,18 @@ const IglesiasList = () => {
              toast({ title: 'Error', description: 'No se ha identificado la parroquia actual.', variant: 'destructive' });
              return;
         }
+
+        // 🚀 BLOQUEO DE DUPLICADOS MANUALES
+        const isDuplicate = items.some(i => 
+            (data.codigo && String(i.codigo).toLowerCase() === String(data.codigo).toLowerCase()) ||
+            (data.nombre && String(i.nombre).toLowerCase() === String(data.nombre).toLowerCase())
+        );
+
+        if (isDuplicate) {
+            toast({ title: 'Duplicado', description: 'El nombre o código de la iglesia ya existe en la base de datos.', variant: 'destructive' });
+            return;
+        }
+
         setIsLoading(true);
         const result = await addIglesia(data, parishId);
         if (result.success) {
@@ -259,6 +271,8 @@ const IglesiasList = () => {
             {modals.import && (
                 <ImportIglesiasForm 
                     isOpen={modals.import}
+                    // 🚀 PASAMOS LA LISTA REAL A LA IMPORTACIÓN
+                    existingItems={items}
                     onClose={() => {
                         setModals(prev => ({ ...prev, import: false }));
                         loadData();
