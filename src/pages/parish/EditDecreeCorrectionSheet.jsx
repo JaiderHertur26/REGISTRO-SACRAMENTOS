@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Save, ArrowLeft, FileText, UserPlus, Trash2, Loader2, AlertCircle, ShieldAlert } from 'lucide-react';
+import { Save, ArrowLeft, FileText, UserPlus, Trash2, Loader2, AlertCircle } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { Modal } from '@/components/ui/Modal';
@@ -19,7 +19,6 @@ const EditDecreeCorrectionSheet = () => {
     const { toast } = useToast();
     const { getMisDatosList } = useAppData();
 
-    // --- STATE MANAGEMENT ---
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -27,19 +26,11 @@ const EditDecreeCorrectionSheet = () => {
     const [conceptos, setConceptos] = useState([]);
     const [originalPayload, setOriginalPayload] = useState(null);
 
-    // Section 1: Decree Data
+    // 🚀 AHORA EL ESTADO RESPETA LOS NOMBRES QUE ESPERA EL MOTOR
     const [decreeData, setDecreeData] = useState({
-        parroquia: '',
-        numeroDeDecreto: '',
-        fechaEmision: '',
-        conceptoAnulacion: '',
-        nombreBautizado: '',
-        Libro: '',
-        folio: '',
-        numero: ''
+        parroquia: '', numeroDeDecreto: '', fechaEmision: '', conceptoAnulacion: '', nombreBautizado: '', Libro: '', folio: '', numero: ''
     });
 
-    // Section 2: New Partida Form
     const [newPartida, setNewPartida] = useState({
         lugarBautismo: '', fechaSacramento: '', apellidos: '', nombres: '',
         fechaNacimiento: '', lugarNacimiento: '', sexo: '', nombrePadre: '',
@@ -49,18 +40,15 @@ const EditDecreeCorrectionSheet = () => {
 
     const decreeId = searchParams.get('id');
 
-    // --- INITIALIZATION ---
     useEffect(() => {
         const loadDecreeData = async () => {
             if (!user?.parishId || !decreeId) return;
             setIsLoading(true);
 
             try {
-                // 1. Obtener nombre de parroquia
                 const misDatos = getMisDatosList(user.parishId);
                 let parishLabel = misDatos?.length > 0 ? `${misDatos[0].nombre} - ${misDatos[0].ciudad}` : `${user.parishName} - ${user.city}`;
 
-                // 2. Obtener Conceptos de la Nube
                 let targetDioceseId = user.dioceseId || user.diocese_id;
                 if (!targetDioceseId) {
                     const { data: pData } = await supabase.from('parishes').select('diocese_id').eq('id', user.parishId).single();
@@ -72,13 +60,13 @@ const EditDecreeCorrectionSheet = () => {
                     if (cData) setConceptos(cData.filter(c => c.tipo === 'porCorreccion' || (c.concepto && c.concepto.toLowerCase().includes('correcc'))));
                 }
 
-                // 3. Obtener el Decreto de Supabase
                 const { data: decree, error } = await supabase.from('decretos').select('*').eq('id', decreeId).single();
                 if (error) throw error;
 
                 const payload = typeof decree.payload === 'string' ? JSON.parse(decree.payload) : decree.payload;
                 setOriginalPayload(payload);
 
+                // 🚀 MAPEO AL ESTADO CORREGIDO
                 setDecreeData({
                     parroquia: parishLabel,
                     numeroDeDecreto: payload.decreeNumber || '',
@@ -93,8 +81,8 @@ const EditDecreeCorrectionSheet = () => {
                 setNewPartida({
                     lugarBautismo: payload.lugarBautismo || payload.lugarBautismoDetalle || '',
                     fechaSacramento: payload.fechaSacramento || '',
-                    apellidos: payload.apellidos || payload.lastName || '',
-                    nombres: payload.nombres || payload.firstName || '',
+                    apellidos: payload.apellidos || payload.lastName || payload.newPartidaSummary?.apellidos || '',
+                    nombres: payload.nombres || payload.firstName || payload.newPartidaSummary?.nombres || '',
                     fechaNacimiento: payload.fechaNacimiento || '',
                     lugarNacimiento: payload.lugarNacimiento || payload.lugarNacimientoDetalle || '',
                     sexo: payload.sexo || payload.sex || '',
@@ -110,12 +98,9 @@ const EditDecreeCorrectionSheet = () => {
                 });
 
             } catch (error) {
-                console.error("Error cargando decreto:", error);
-                toast({ title: "Error", description: "No se pudo cargar el decreto de la nube.", variant: "destructive" });
+                toast({ title: "Error", description: "No se pudo cargar el decreto.", variant: "destructive" });
                 navigate('/parroquia/decretos/ver-correcciones');
-            } finally {
-                setIsLoading(false);
-            }
+            } finally { setIsLoading(false); }
         };
 
         loadDecreeData();
@@ -125,16 +110,16 @@ const EditDecreeCorrectionSheet = () => {
     const handleNewPartidaChange = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
     const handleNewPartidaChangeRaw = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
-    // --- SAVE LOGIC ---
+    // --- GUARDAR Y RECALCULAR ---
     const handleSave = async (e) => {
         e.preventDefault();
         setIsSubmitting(true);
 
         try {
             const pad = (num) => String(num).padStart(4, '0');
-
-            // 1. Generar Notas Marginales Actualizadas
             const supSum = originalPayload.newPartidaSummary;
+
+            // 🧠 RECALCULAMOS LAS NOTAS CON LOS DATOS CORREGIDOS (Esto arregla el "___")
             const noteAnulada = marginalNotesEngine.forAnnulledCorrection(user?.parishId, {
                 numeroDecreto: decreeData.numeroDeDecreto, fechaDecreto: decreeData.fechaEmision,
                 libroNuevo: supSum.book, folioNuevo: supSum.page, numeroNuevo: supSum.entry
@@ -146,18 +131,17 @@ const EditDecreeCorrectionSheet = () => {
                 ministro: newPartida.daFe
             });
 
-            // 2. Actualizar Partida Original (Nota Marginal)
+            // Actualizar Partida Original
             const { data: origData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
                 .eq('book_number', pad(decreeData.Libro)).eq('folio', pad(decreeData.folio)).eq('number', pad(decreeData.numero)).maybeSingle();
 
             if (origData) {
                 await supabase.from('baptisms').update({ 
-                    nota_marginal: noteAnulada, 
-                    raw_data: { ...origData.raw_data, notaMarginal: noteAnulada } 
+                    nota_marginal: noteAnulada, raw_data: { ...origData.raw_data, notaMarginal: noteAnulada } 
                 }).eq('id', origData.id);
             }
 
-            // 3. Actualizar Partida Supletoria (Datos Nuevos)
+            // Actualizar Partida Supletoria
             const { data: supData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
                 .eq('book_number', pad(supSum.book)).eq('folio', pad(supSum.page)).eq('number', pad(supSum.entry)).maybeSingle();
 
@@ -169,82 +153,65 @@ const EditDecreeCorrectionSheet = () => {
                     lugarn: newPartida.lugarNacimiento, sex: newPartida.sexo,
                     padre: newPartida.nombrePadre, madre: newPartida.nombreMadre,
                     tipohijo: newPartida.tipoUnionPadres, godparents: newPartida.padrinos,
-                    minister: newPartida.ministro, dafe: newPartida.daFe,
-                    notaMarginal: notaSupletoriaFinal
+                    minister: newPartida.ministro, dafe: newPartida.daFe, notaMarginal: notaSupletoriaFinal
                 };
                 
                 await supabase.from('baptisms').update({ 
-                    celebration_date: newPartida.fechaSacramento,
-                    nombres: newPartida.nombres, apellidos: newPartida.apellidos,
-                    sexo: newPartida.sexo, fecha_nacimiento: newPartida.fechaNacimiento,
-                    lugar_nacimiento: newPartida.lugarNacimiento, lugar_bautismo: newPartida.lugarBautismo,
-                    nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre,
+                    celebration_date: newPartida.fechaSacramento, nombres: newPartida.nombres, apellidos: newPartida.apellidos,
+                    sexo: newPartida.sexo, fecha_nacimiento: newPartida.fechaNacimiento, lugar_nacimiento: newPartida.lugarNacimiento, 
+                    lugar_bautismo: newPartida.lugarBautismo, nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre,
                     padrinos: newPartida.padrinos, ministro: newPartida.ministro, da_fe: newPartida.daFe,
-                    tipo_union_padres: newPartida.tipoUnionPadres, nota_marginal: notaSupletoriaFinal,
-                    raw_data: updatedRaw
+                    tipo_union_padres: newPartida.tipoUnionPadres, nota_marginal: notaSupletoriaFinal, raw_data: updatedRaw
                 }).eq('id', supData.id);
             }
 
-            // 4. Actualizar Decreto
+            // Actualizar Decreto
             const newPayload = {
                 ...originalPayload,
                 decreeNumber: decreeData.numeroDeDecreto, decreeDate: decreeData.fechaEmision,
-                conceptoAnulacionId: decreeData.conceptoAnulacion, targetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(),
-                ...newPartida
+                conceptoAnulacionId: decreeData.conceptoAnulacion, observaciones: newPartida.observaciones,
+                targetName: decreeData.nombreBautizado, newTargetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(),
+                ...newPartida,
+                newPartidaSummary: { ...supSum, nombres: newPartida.nombres, apellidos: newPartida.apellidos }
             };
 
             await supabase.from('decretos').update({ payload: newPayload }).eq('id', decreeId);
 
-            toast({ title: "Guardado Exitoso", description: "Los cambios se aplicaron en la Nube.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Guardado Exitoso", description: "El decreto y las notas han sido regenerados.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/parroquia/decretos/ver-correcciones');
 
-        } catch (error) {
-            toast({ title: "Error", description: error.message, variant: "destructive" });
-        } finally {
-            setIsSubmitting(false);
-        }
+        } catch (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); } 
+        finally { setIsSubmitting(false); }
     };
 
-    // --- DELETE LOGIC ---
     const handleDelete = async () => {
         setIsSubmitting(true);
         try {
             const pad = (num) => String(num).padStart(4, '0');
             const supSum = originalPayload.newPartidaSummary;
 
-            // 1. Restaurar Partida Original (Quitar anulado)
             const { data: origData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
                 .eq('book_number', pad(decreeData.Libro)).eq('folio', pad(decreeData.folio)).eq('number', pad(decreeData.numero)).maybeSingle();
 
             if (origData) {
                 const cleanedRaw = { ...origData.raw_data };
-                delete cleanedRaw.notaMarginal;
-                cleanedRaw.anulado = false;
+                delete cleanedRaw.notaMarginal; cleanedRaw.anulado = false;
                 await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', origData.id);
             }
 
-            // 2. Eliminar Partida Supletoria
             if (supSum) {
-                await supabase.from('baptisms').delete().eq('parish_id', user.parishId)
-                    .eq('book_number', pad(supSum.book)).eq('folio', pad(supSum.page)).eq('number', pad(supSum.entry));
+                await supabase.from('baptisms').delete().eq('parish_id', user.parishId).eq('book_number', pad(supSum.book)).eq('folio', pad(supSum.page)).eq('number', pad(supSum.entry));
             }
 
-            // 3. Eliminar Decreto
             await supabase.from('decretos').delete().eq('id', decreeId);
 
             toast({ title: "Eliminado", description: "Decreto eliminado y partida restaurada.", className: "bg-green-50 text-green-900" });
             navigate('/parroquia/decretos/ver-correcciones');
-        } catch (error) {
-            toast({ title: "Error", description: "No se pudo eliminar de la Nube.", variant: "destructive" });
-        } finally {
-            setIsSubmitting(false);
-            setShowDeleteModal(false);
-        }
+        } catch (error) { toast({ title: "Error", description: "No se pudo eliminar de la Nube.", variant: "destructive" }); } 
+        finally { setIsSubmitting(false); setShowDeleteModal(false); }
     };
 
-    if (isLoading) {
-        return <DashboardLayout entityName={user?.parishName || "Parroquia"}><div className="flex justify-center items-center h-[60vh]"><Loader2 className="w-12 h-12 text-[#4B7BA7] animate-spin" /></div></DashboardLayout>;
-    }
+    if (isLoading) return <DashboardLayout entityName={user?.parishName || "Parroquia"}><div className="flex justify-center items-center h-[60vh]"><Loader2 className="w-12 h-12 text-[#4B7BA7] animate-spin" /></div></DashboardLayout>;
 
     return (
         <DashboardLayout entityName={user?.parishName || "Parroquia"}>
@@ -267,8 +234,6 @@ const EditDecreeCorrectionSheet = () => {
                     </TabsList>
 
                     <TabsContent value="bautizos" className="space-y-8 animate-in fade-in duration-500">
-                        
-                        {/* SECCIÓN 1: DECRETO */}
                         <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
                             <div className="bg-gray-50 px-8 py-4 border-b border-gray-200 flex items-center justify-between">
                                 <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center gap-2"><FileText className="w-4 h-4" /> 01. Información del Decreto</h3>
@@ -277,7 +242,7 @@ const EditDecreeCorrectionSheet = () => {
                             <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-8">
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black text-gray-400 uppercase">Número de Decreto</label>
-                                    <Input name="numeroDeDecreto" value={decreeData.numeroDeDecreto} onChange={handleDecreeChange} className="py-6 font-bold" />
+                                    <Input name="numeroDeDecreto" value={decreeData.numeroDeDecreto} onChange={handleDecreeChange} className="py-6 font-bold text-blue-600 bg-blue-50/50" />
                                 </div>
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black text-gray-400 uppercase">Fecha de Emisión</label>
@@ -292,10 +257,9 @@ const EditDecreeCorrectionSheet = () => {
                                 </div>
                             </div>
                             
-                            {/* Partida Anulada Readonly */}
                             <div className="mx-8 mb-8 p-6 bg-red-50/50 rounded-2xl border border-red-100">
                                 <div className="flex items-center gap-2 mb-4">
-                                    <ShieldAlert className="w-4 h-4 text-red-500" />
+                                    <AlertCircle className="w-4 h-4 text-red-500" />
                                     <h4 className="text-[10px] font-black text-red-600 uppercase tracking-widest">Partida Original Anulada (Vinculada)</h4>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -309,7 +273,6 @@ const EditDecreeCorrectionSheet = () => {
                             </div>
                         </div>
 
-                        {/* SECCIÓN 2: FORMULARIO */}
                         <div className="bg-white rounded-3xl border border-gray-200 shadow-sm transition-all duration-500">
                             <div className="bg-gray-50 px-8 py-4 border-b border-gray-200 flex items-center justify-between">
                                 <div className="flex items-center gap-2"><UserPlus className="w-4 h-4 text-green-600" /><h3 className="text-xs font-black text-green-600 uppercase tracking-widest">02. Datos Corregidos</h3></div>
@@ -369,8 +332,8 @@ const EditDecreeCorrectionSheet = () => {
                                 </div>
 
                                 <div className="space-y-2 border-t pt-10">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase">Observaciones (Opcional)</label>
-                                    <textarea name="observaciones" value={newPartida.observaciones} onChange={handleNewPartidaChange} rows={3} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-500/20 uppercase font-bold text-gray-700 bg-amber-50" />
+                                    <label className="text-[10px] font-black text-gray-400 uppercase">Observaciones del Decreto</label>
+                                    <textarea name="observaciones" value={newPartida.observaciones} onChange={handleNewPartidaChange} rows={4} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-500/20 uppercase font-bold text-gray-700 bg-amber-50" placeholder="OBSERVACIONES PARA EL DECRETO..." />
                                 </div>
                             </div>
                         </div>
@@ -380,20 +343,19 @@ const EditDecreeCorrectionSheet = () => {
                                 <Trash2 className="w-5 h-5" />
                             </Button>
                             <Button onClick={handleSave} disabled={isSubmitting} className="bg-gradient-to-r from-blue-600 to-[#4B7BA7] hover:shadow-2xl text-white px-10 py-8 rounded-full font-black uppercase tracking-widest text-[10px] shadow-xl active:scale-95 transition-all">
-                                {isSubmitting ? <Loader2 className="animate-spin w-5 h-5 mr-3" /> : <Save className="w-5 h-5 mr-3" />} Guardar Cambios en la Nube
+                                {isSubmitting ? <Loader2 className="animate-spin w-5 h-5 mr-3" /> : <Save className="w-5 h-5 mr-3" />} Guardar Cambios
                             </Button>
                         </div>
                     </TabsContent>
                 </Tabs>
             </div>
 
-            {/* MODAL DE ELIMINACIÓN */}
             <Modal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Eliminar Decreto y Restaurar Partida">
                 <div className="space-y-4 p-2">
                     <div className="bg-red-50 p-4 rounded-xl border border-red-100 flex items-start gap-3">
                         <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
                         <p className="text-xs text-red-800 font-medium leading-relaxed">
-                            Al confirmar, el decreto <strong>{decreeData.numeroDeDecreto}</strong> será eliminado permanentemente de la Nube. La partida supletoria será destruida y la partida original recuperará su validez legal (se removerá el estado de "Anulada").
+                            Al confirmar, el decreto <strong>{decreeData.numeroDeDecreto}</strong> será eliminado permanentemente de la Nube. La partida supletoria será destruida y la partida original recuperará su validez legal.
                         </p>
                     </div>
                     <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">

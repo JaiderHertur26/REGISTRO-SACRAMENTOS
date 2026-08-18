@@ -5,18 +5,17 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Save, RefreshCw, Settings, BookOpen, FileText, CheckSquare, AlertCircle, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/lib/supabaseClient'; // 🚀 IMPORTACIÓN CLAVE PARA GUARDAR EN LA NUBE
+import { supabase } from '@/lib/supabaseClient'; 
 
-const DEFAULT_PARAMS = {
-    enablePreview: true,
-    reportPrinting: false,
+// ☁️ 1. PARÁMETROS DE LA NUBE (Consecutivos y Reglas de Negocio)
+const DEFAULT_CLOUD_PARAMS = {
     ordinarioBlocked: false,
     ordinarioRestartNumber: false,
     ordinarioPartidas: 2,
     ordinarioLibro: 1,
     ordinarioFolio: 436,
     ordinarioNumero: 871,
-    numeroRegistroActual: '', // 🚀 CAMBIO CLAVE: Nombre exacto para el auto-rellenado
+    numeroRegistroActual: '', 
     suplementarioBlocked: false,
     suplementarioReiniciar: false,
     suplementarioPartidas: 2,
@@ -26,25 +25,39 @@ const DEFAULT_PARAMS = {
     registroAdultoEn: 'ordinario',
     registroDecretoEn: 'suplementario',
     generarNotaMarginal: true,
-    inscripcionNumero: '36',
-    inscripcionFecha: '2025-10-11T00:00',
-    inscripcionFormato: '1'
+    inscripcionNumero: '',
+    inscripcionFecha: '',
+    inscripcionFormato: ''
+};
+
+// 💻 2. PREFERENCIAS LOCALES DEL DISPOSITIVO (UI)
+const DEFAULT_LOCAL_PREFS = {
+    enablePreview: true,
+    reportPrinting: false,
 };
 
 const BaptismParametersPage = () => {
     const { user } = useAuth();
     const { toast } = useToast();
-    const [params, setParams] = useState(DEFAULT_PARAMS);
+    
+    const [cloudParams, setCloudParams] = useState(DEFAULT_CLOUD_PARAMS);
+    const [localPrefs, setLocalPrefs] = useState(DEFAULT_LOCAL_PREFS);
+    
     const [loading, setLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
 
-    // 🚀 Load Parameters on Mount from SUPABASE
+    // 🚀 CARGA DE DATOS AL MONTAR EL COMPONENTE
     useEffect(() => {
-        const loadParameters = async () => {
+        const loadSettings = async () => {
             if (!user?.parishId) return;
 
-            console.log("🔍 Cargando parámetros de bautizos desde Supabase...");
+            // 1. Cargar Preferencias Locales (del PC actual)
+            const savedPrefs = localStorage.getItem('bautizos_ui_prefs');
+            if (savedPrefs) {
+                setLocalPrefs(JSON.parse(savedPrefs));
+            }
 
+            // 2. Cargar Consecutivos desde Supabase (La fuente de la verdad para todas las PCs)
             try {
                 const { data, error } = await supabase
                     .from('parish_parameters')
@@ -55,17 +68,12 @@ const BaptismParametersPage = () => {
                 if (error && error.code !== 'PGRST116') throw error;
 
                 if (data && data.bautizos_params) {
-                    setParams(prev => ({ ...prev, ...data.bautizos_params }));
-                    console.log("✅ Parámetros cargados:", data.bautizos_params);
-                } else {
-                    console.log("ℹ️ No hay parámetros en Supabase, usando valores por defecto");
-                    setParams(DEFAULT_PARAMS);
+                    setCloudParams(prev => ({ ...prev, ...data.bautizos_params }));
                 }
             } catch (error) {
-                console.error("Error loading parameters:", error);
                 toast({
-                    title: "Error al cargar",
-                    description: "No se pudieron cargar los parámetros desde la nube.",
+                    title: "Error de Sincronización",
+                    description: "No se pudieron descargar los consecutivos desde la nube.",
                     variant: "destructive"
                 });
             } finally {
@@ -73,38 +81,35 @@ const BaptismParametersPage = () => {
             }
         };
 
-        loadParameters();
+        loadSettings();
     }, [user, toast]);
 
-    // Handle Parameter Changes
-    const handleParameterChange = (e) => {
+    // ⚙️ MANEJADOR DE CAMBIOS PARA LA NUBE (Consecutivos)
+    const handleCloudChange = (e) => {
         const { name, value, type, checked } = e.target;
-        
-        setParams(prev => ({
+        setCloudParams(prev => ({
             ...prev,
             [name]: type === 'checkbox' ? checked : value
         }));
     };
 
-    // 🚀 Save Parameters to SUPABASE
+    // ⚙️ MANEJADOR DE CAMBIOS LOCALES (Gustos de este PC)
+    const handleLocalPrefChange = (e) => {
+        const { name, checked } = e.target;
+        const newPrefs = { ...localPrefs, [name]: checked };
+        setLocalPrefs(newPrefs);
+        localStorage.setItem('bautizos_ui_prefs', JSON.stringify(newPrefs)); // Se guarda instantáneamente en el PC
+    };
+
+    // 🚀 GUARDADO DE CONSECUTIVOS EN SUPABASE
     const handleSaveParameters = async () => {
-        if (!user?.parishId) {
-            toast({
-                title: "Error de Sesión",
-                description: "No se ha identificado la parroquia.",
-                variant: "destructive"
-            });
-            return;
-        }
+        if (!user?.parishId) return;
 
         setIsSaving(true);
-        console.log("💾 Guardando parámetros en Supabase...");
-
         try {
-            // Se usa UPSERT para insertar si no existe, o actualizar si ya existe la fila de la parroquia
             const payload = {
                 parish_id: user.parishId,
-                bautizos_params: params // Guardamos el objeto completo en la columna JSONB
+                bautizos_params: cloudParams 
             };
 
             const { error } = await supabase
@@ -112,19 +117,16 @@ const BaptismParametersPage = () => {
                 .upsert(payload, { onConflict: 'parish_id' });
 
             if (error) throw error;
-
-            console.log("✅ Parámetros guardados correctamente en la Nube");
             
             toast({
-                title: "Sincronizado",
-                description: "La configuración de Bautizos ha sido actualizada en la nube.",
+                title: "Sincronizado con la Nube",
+                description: "Los consecutivos han sido actualizados para todas las computadoras.",
                 className: "bg-green-50 border-green-200 text-green-900"
             });
         } catch (error) {
-            console.error("Error saving parameters:", error);
             toast({
                 title: "Error al guardar",
-                description: "Ocurrió un problema al intentar sincronizar con la base de datos.",
+                description: "No se pudo sincronizar con la base de datos central.",
                 variant: "destructive"
             });
         } finally {
@@ -132,16 +134,10 @@ const BaptismParametersPage = () => {
         }
     };
 
-    // Reset Parameters
     const handleResetParameters = () => {
-        if (window.confirm('¿Está seguro de que desea reiniciar todos los parámetros a sus valores por defecto? Esta acción no se puede deshacer.')) {
-            setParams(DEFAULT_PARAMS);
-            console.log("🔄 Parámetros reiniciados a valores por defecto");
-            
-            toast({
-                title: "Parámetros Reiniciados",
-                description: "Se han restaurado los valores originales. Recuerde guardar.",
-            });
+        if (window.confirm('¿Está seguro de que desea reiniciar todos los consecutivos a sus valores de fábrica? Esta acción afectará a todos los ordenadores.')) {
+            setCloudParams(DEFAULT_CLOUD_PARAMS);
+            toast({ title: "Parámetros Reiniciados", description: "Se han restaurado los valores. Recuerde hacer clic en Guardar en la Nube." });
         }
     };
 
@@ -151,7 +147,7 @@ const BaptismParametersPage = () => {
                 <div className="flex items-center justify-center min-h-[400px]">
                     <div className="flex flex-col items-center gap-2">
                         <Loader2 className="w-8 h-8 animate-spin text-[#4B7BA7]" />
-                        <p className="text-gray-500">Descargando configuración de Bautizos...</p>
+                        <p className="text-gray-500 uppercase tracking-widest text-[10px] font-bold">Descargando Consecutivos...</p>
                     </div>
                 </div>
             </DashboardLayout>
@@ -160,7 +156,6 @@ const BaptismParametersPage = () => {
 
     return (
         <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-            {/* Header */}
             <div className="mb-6">
                 <h1 className="text-2xl font-bold text-[#111111] font-serif flex items-center gap-2">
                     <Settings className="w-6 h-6 text-[#4B7BA7]" /> 
@@ -171,68 +166,57 @@ const BaptismParametersPage = () => {
                 </p>
             </div>
 
-            {/* Tabs */}
             <div className="flex border-b border-gray-300 mb-6 space-x-1 overflow-x-auto">
                 <button className="px-6 py-2 text-sm font-bold text-[#4B7BA7] border-b-2 border-[#4B7BA7] bg-white rounded-t-md whitespace-nowrap">
                     Bautizos
                 </button>
-                <Link 
-                    to="/parroquia/matrimonio/parametros" 
-                    className="px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 whitespace-nowrap rounded-t-md"
-                >
+                <Link to="/parroquia/matrimonio/parametros" className="px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 whitespace-nowrap rounded-t-md">
                     Matrimonios
                 </Link>
-                <Link 
-                    to="/parroquia/confirmacion/parametros" 
-                    className="px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 whitespace-nowrap rounded-t-md"
-                >
+                <Link to="/parroquia/confirmacion/parametros" className="px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 whitespace-nowrap rounded-t-md">
                     Confirmaciones
                 </Link>
                 <button className="px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 whitespace-nowrap cursor-not-allowed">
                     Exequias
                 </button>
-                <button className="px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 whitespace-nowrap cursor-not-allowed">
-                    Primeras Comuniones
-                </button>
             </div>
 
-            {/* Main Content Card */}
-            <div className="bg-white rounded-lg shadow-md border border-gray-300 overflow-hidden text-sm">
+            <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden text-sm">
                 
-                {/* 1. Opciones Generales */}
-                <div className="p-4 border-b border-gray-200">
-                    <h3 className="text-base font-bold text-[#111111] mb-3 flex items-center gap-2">
-                        <CheckSquare className="w-4 h-4 text-gray-500" /> Opciones Generales
+                {/* 1. Opciones Locales (UI) */}
+                <div className="p-4 border-b border-gray-100 bg-gray-50/50">
+                    <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <CheckSquare className="w-4 h-4 text-[#4B7BA7]" /> Preferencias de este Ordenador
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <label className="flex items-center gap-2 cursor-pointer select-none">
                             <input 
                                 type="checkbox" 
                                 name="enablePreview"
-                                checked={params.enablePreview}
-                                onChange={handleParameterChange}
+                                checked={localPrefs.enablePreview}
+                                onChange={handleLocalPrefChange}
                                 className="w-4 h-4 text-[#4B7BA7] border-gray-300 rounded focus:ring-[#4B7BA7]" 
                             />
-                            <span className="text-gray-700">Activar Vista Previa al imprimir</span>
+                            <span className="text-gray-700 font-medium">Activar Vista Previa al imprimir</span>
                         </label>
                         <label className="flex items-center gap-2 cursor-pointer select-none">
                             <input 
                                 type="checkbox" 
                                 name="reportPrinting"
-                                checked={params.reportPrinting}
-                                onChange={handleParameterChange}
+                                checked={localPrefs.reportPrinting}
+                                onChange={handleLocalPrefChange}
                                 className="w-4 h-4 text-[#4B7BA7] border-gray-300 rounded focus:ring-[#4B7BA7]" 
                             />
-                            <span className="text-gray-700">Reportar Impresión de Partidas</span>
+                            <span className="text-gray-700 font-medium">Reportar Impresión de Partidas</span>
                         </label>
                     </div>
                 </div>
 
-                {/* 2. Libro Ordinario */}
-                <div className="p-4 border-b border-gray-200 bg-gray-50/20">
+                {/* 2. Libro Ordinario (Nube) */}
+                <div className="p-4 border-b border-gray-100">
                     <div className="flex flex-wrap items-center justify-between mb-3">
-                        <h3 className="text-base font-bold text-[#111111] flex items-center gap-2">
-                            <BookOpen className="w-4 h-4 text-[#4B7BA7]" /> Libro Ordinario
+                        <h3 className="text-sm font-black text-gray-800 uppercase flex items-center gap-2">
+                            <BookOpen className="w-4 h-4 text-[#4B7BA7]" /> Consecutivos Libro Ordinario
                         </h3>
                     </div>
                     
@@ -241,9 +225,9 @@ const BaptismParametersPage = () => {
                             <input 
                                 type="checkbox" 
                                 name="ordinarioBlocked"
-                                checked={params.ordinarioBlocked}
-                                onChange={handleParameterChange}
-                                className="w-4 h-4 text-[#4B7BA7] border-gray-300 rounded focus:ring-[#4B7BA7]" 
+                                checked={cloudParams.ordinarioBlocked}
+                                onChange={handleCloudChange}
+                                className="w-4 h-4 text-red-500 border-gray-300 rounded focus:ring-red-500" 
                             />
                             Bloquear
                         </label>
@@ -251,9 +235,9 @@ const BaptismParametersPage = () => {
                             <input 
                                 type="checkbox" 
                                 name="ordinarioRestartNumber"
-                                checked={params.ordinarioRestartNumber}
-                                onChange={handleParameterChange}
-                                disabled={params.ordinarioBlocked}
+                                checked={cloudParams.ordinarioRestartNumber}
+                                onChange={handleCloudChange}
+                                disabled={cloudParams.ordinarioBlocked}
                                 className="w-4 h-4 text-[#4B7BA7] border-gray-300 rounded focus:ring-[#4B7BA7] disabled:opacity-50" 
                             />
                             Número inicia en 1 en cada Folio
@@ -262,90 +246,63 @@ const BaptismParametersPage = () => {
 
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                         <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Partidas por Folio</label>
+                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Partidas/Folio</label>
                             <input 
-                                type="number" 
-                                name="ordinarioPartidas"
-                                value={params.ordinarioPartidas}
-                                onChange={handleParameterChange}
-                                disabled={params.ordinarioBlocked}
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                type="number" name="ordinarioPartidas" value={cloudParams.ordinarioPartidas} onChange={handleCloudChange} disabled={cloudParams.ordinarioBlocked}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg font-bold text-gray-800 focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-50"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Libro</label>
+                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Libro</label>
                             <input 
-                                type="number" 
-                                name="ordinarioLibro"
-                                value={params.ordinarioLibro}
-                                onChange={handleParameterChange}
-                                disabled={params.ordinarioBlocked}
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                type="number" name="ordinarioLibro" value={cloudParams.ordinarioLibro} onChange={handleCloudChange} disabled={cloudParams.ordinarioBlocked}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg font-mono font-bold text-blue-600 focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-50"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Folio</label>
+                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Folio</label>
                             <input 
-                                type="number" 
-                                name="ordinarioFolio"
-                                value={params.ordinarioFolio}
-                                onChange={handleParameterChange}
-                                disabled={params.ordinarioBlocked}
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                type="number" name="ordinarioFolio" value={cloudParams.ordinarioFolio} onChange={handleCloudChange} disabled={cloudParams.ordinarioBlocked}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg font-mono font-bold text-blue-600 focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-50"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Numero</label>
+                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Número</label>
                             <input 
-                                type="number" 
-                                name="ordinarioNumero"
-                                value={params.ordinarioNumero}
-                                onChange={handleParameterChange}
-                                disabled={params.ordinarioBlocked}
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                type="number" name="ordinarioNumero" value={cloudParams.ordinarioNumero} onChange={handleCloudChange} disabled={cloudParams.ordinarioBlocked}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg font-mono font-black text-green-600 bg-green-50 focus:ring-2 focus:ring-green-500 outline-none disabled:bg-gray-100"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Núm. Registro</label>
+                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Núm. Registro</label>
                             <input 
-                                type="text" 
-                                name="numeroRegistroActual"
-                                value={params.numeroRegistroActual || ''}
-                                onChange={handleParameterChange}
-                                disabled={params.ordinarioBlocked}
+                                type="text" name="numeroRegistroActual" value={cloudParams.numeroRegistroActual || ''} onChange={handleCloudChange} disabled={cloudParams.ordinarioBlocked}
                                 placeholder="Ej. 123"
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg font-bold text-gray-800 focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-50"
                             />
                         </div>
                     </div>
                 </div>
 
-                {/* 3. Libro Suplementario */}
-                <div className="p-4 border-b border-gray-200">
+                {/* 3. Libro Suplementario (Nube) */}
+                <div className="p-4 border-b border-gray-100">
                     <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-base font-bold text-[#111111] flex items-center gap-2">
-                            <BookOpen className="w-4 h-4 text-gray-500" /> Libro Suplementario
+                        <h3 className="text-sm font-black text-gray-800 uppercase flex items-center gap-2">
+                            <BookOpen className="w-4 h-4 text-purple-600" /> Consecutivos Supletorios
                         </h3>
                     </div>
                     
                     <div className="flex flex-wrap gap-6 mb-4">
                         <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
                             <input 
-                                type="checkbox" 
-                                name="suplementarioBlocked"
-                                checked={params.suplementarioBlocked}
-                                onChange={handleParameterChange}
-                                className="w-4 h-4 text-[#4B7BA7] border-gray-300 rounded focus:ring-[#4B7BA7]" 
+                                type="checkbox" name="suplementarioBlocked" checked={cloudParams.suplementarioBlocked} onChange={handleCloudChange}
+                                className="w-4 h-4 text-red-500 border-gray-300 rounded focus:ring-red-500" 
                             />
                             Bloquear
                         </label>
                         <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
                             <input 
-                                type="checkbox" 
-                                name="suplementarioReiniciar"
-                                checked={params.suplementarioReiniciar}
-                                onChange={handleParameterChange}
-                                disabled={params.suplementarioBlocked}
+                                type="checkbox" name="suplementarioReiniciar" checked={cloudParams.suplementarioReiniciar} onChange={handleCloudChange} disabled={cloudParams.suplementarioBlocked}
                                 className="w-4 h-4 text-[#4B7BA7] border-gray-300 rounded focus:ring-[#4B7BA7] disabled:opacity-50" 
                             />
                             Reiniciar Número desde 1 en cada folio
@@ -354,192 +311,92 @@ const BaptismParametersPage = () => {
 
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Partidas por Folio</label>
+                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Partidas/Folio</label>
                             <input 
-                                type="number" 
-                                name="suplementarioPartidas"
-                                value={params.suplementarioPartidas}
-                                onChange={handleParameterChange}
-                                disabled={params.suplementarioBlocked}
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                type="number" name="suplementarioPartidas" value={cloudParams.suplementarioPartidas} onChange={handleCloudChange} disabled={cloudParams.suplementarioBlocked}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg font-bold text-gray-800 focus:ring-2 focus:ring-purple-500 outline-none disabled:bg-gray-50"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Libro</label>
+                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Libro</label>
                             <input 
-                                type="number" 
-                                name="suplementarioLibro"
-                                value={params.suplementarioLibro}
-                                onChange={handleParameterChange}
-                                disabled={params.suplementarioBlocked}
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                type="number" name="suplementarioLibro" value={cloudParams.suplementarioLibro} onChange={handleCloudChange} disabled={cloudParams.suplementarioBlocked}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg font-mono font-bold text-purple-600 focus:ring-2 focus:ring-purple-500 outline-none disabled:bg-gray-50"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Folio</label>
+                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Folio</label>
                             <input 
-                                type="number" 
-                                name="suplementarioFolio"
-                                value={params.suplementarioFolio}
-                                onChange={handleParameterChange}
-                                disabled={params.suplementarioBlocked}
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                type="number" name="suplementarioFolio" value={cloudParams.suplementarioFolio} onChange={handleCloudChange} disabled={cloudParams.suplementarioBlocked}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg font-mono font-bold text-purple-600 focus:ring-2 focus:ring-purple-500 outline-none disabled:bg-gray-50"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Numero</label>
+                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Numero</label>
                             <input 
-                                type="number" 
-                                name="suplementarioNumero"
-                                value={params.suplementarioNumero}
-                                onChange={handleParameterChange}
-                                disabled={params.suplementarioBlocked}
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                type="number" name="suplementarioNumero" value={cloudParams.suplementarioNumero} onChange={handleCloudChange} disabled={cloudParams.suplementarioBlocked}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg font-mono font-black text-purple-700 bg-purple-50 focus:ring-2 focus:ring-purple-500 outline-none disabled:bg-gray-100"
                             />
                         </div>
                     </div>
                 </div>
 
-                {/* 4 & 5. Registros Especiales */}
-                <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-200 border-b border-gray-200 bg-gray-50/20">
-                    <div className="p-4">
-                        <h4 className="font-bold text-[#111111] mb-2 text-xs uppercase tracking-wide">Registrar Bautizos de Adulto en:</h4>
-                        <div className="flex flex-col gap-2">
+                {/* 4 & 5. Reglas de Negocio (Nube) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-100 border-b border-gray-100 bg-gray-50/30">
+                    <div className="p-6">
+                        <h4 className="font-bold text-gray-800 mb-3 text-[11px] uppercase tracking-widest">Destino Bautizos de Adulto:</h4>
+                        <div className="flex flex-col gap-3">
                             <label className="flex items-center gap-2 cursor-pointer select-none">
-                                <input 
-                                    type="radio" 
-                                    name="registroAdultoEn" 
-                                    value="ordinario"
-                                    checked={params.registroAdultoEn === 'ordinario'}
-                                    onChange={handleParameterChange}
-                                    className="w-4 h-4 text-[#4B7BA7] focus:ring-[#4B7BA7]" 
-                                />
-                                <span className="text-gray-700">Libro Ordinario</span>
+                                <input type="radio" name="registroAdultoEn" value="ordinario" checked={cloudParams.registroAdultoEn === 'ordinario'} onChange={handleCloudChange} className="w-4 h-4 text-[#4B7BA7] focus:ring-[#4B7BA7]" />
+                                <span className="text-gray-700 text-sm font-medium">Libro Ordinario</span>
                             </label>
                             <label className="flex items-center gap-2 cursor-pointer select-none">
-                                <input 
-                                    type="radio" 
-                                    name="registroAdultoEn" 
-                                    value="suplementario"
-                                    checked={params.registroAdultoEn === 'suplementario'}
-                                    onChange={handleParameterChange}
-                                    className="w-4 h-4 text-[#4B7BA7] focus:ring-[#4B7BA7]" 
-                                />
-                                <span className="text-gray-700">Libro Suplementario</span>
+                                <input type="radio" name="registroAdultoEn" value="suplementario" checked={cloudParams.registroAdultoEn === 'suplementario'} onChange={handleCloudChange} className="w-4 h-4 text-[#4B7BA7] focus:ring-[#4B7BA7]" />
+                                <span className="text-gray-700 text-sm font-medium">Libro Supletorio</span>
                             </label>
                         </div>
                     </div>
-                    <div className="p-4">
-                        <h4 className="font-bold text-[#111111] mb-2 text-xs uppercase tracking-wide">Registrar Inscri. por Decreto en:</h4>
-                        <div className="flex flex-col gap-2">
+                    <div className="p-6">
+                        <h4 className="font-bold text-gray-800 mb-3 text-[11px] uppercase tracking-widest">Destino Inscripción por Decreto:</h4>
+                        <div className="flex flex-col gap-3">
                             <label className="flex items-center gap-2 cursor-pointer select-none">
-                                <input 
-                                    type="radio" 
-                                    name="registroDecretoEn" 
-                                    value="ordinario"
-                                    checked={params.registroDecretoEn === 'ordinario'}
-                                    onChange={handleParameterChange}
-                                    className="w-4 h-4 text-[#4B7BA7] focus:ring-[#4B7BA7]" 
-                                />
-                                <span className="text-gray-700">Libro Ordinario</span>
+                                <input type="radio" name="registroDecretoEn" value="ordinario" checked={cloudParams.registroDecretoEn === 'ordinario'} onChange={handleCloudChange} className="w-4 h-4 text-[#4B7BA7] focus:ring-[#4B7BA7]" />
+                                <span className="text-gray-700 text-sm font-medium">Libro Ordinario</span>
                             </label>
                             <label className="flex items-center gap-2 cursor-pointer select-none">
-                                <input 
-                                    type="radio" 
-                                    name="registroDecretoEn" 
-                                    value="suplementario"
-                                    checked={params.registroDecretoEn === 'suplementario'}
-                                    onChange={handleParameterChange}
-                                    className="w-4 h-4 text-[#4B7BA7] focus:ring-[#4B7BA7]" 
-                                />
-                                <span className="text-gray-700">Libro Suplementario</span>
+                                <input type="radio" name="registroDecretoEn" value="suplementario" checked={cloudParams.registroDecretoEn === 'suplementario'} onChange={handleCloudChange} className="w-4 h-4 text-[#4B7BA7] focus:ring-[#4B7BA7]" />
+                                <span className="text-gray-700 text-sm font-medium">Libro Supletorio</span>
                             </label>
                         </div>
                     </div>
                 </div>
 
-                {/* 6. Nota Marginal */}
-                <div className="p-4 border-b border-gray-200">
-                    <h3 className="text-base font-bold text-[#111111] mb-2 flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 text-gray-500" /> Nota Marginal
+                {/* 6. Nota Marginal (Nube) */}
+                <div className="p-6 border-b border-gray-100">
+                    <h3 className="text-sm font-black text-gray-800 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-500" /> Notas Marginales
                     </h3>
                     <label className="flex items-center gap-2 cursor-pointer select-none">
-                        <input 
-                            type="checkbox" 
-                            name="generarNotaMarginal"
-                            checked={params.generarNotaMarginal}
-                            onChange={handleParameterChange}
-                            className="w-4 h-4 text-[#4B7BA7] border-gray-300 rounded focus:ring-[#4B7BA7]" 
-                        />
-                        <span className="text-gray-700">Generar nota marginal de Registro Civil al imprimir el libro</span>
+                        <input type="checkbox" name="generarNotaMarginal" checked={cloudParams.generarNotaMarginal} onChange={handleCloudChange} className="w-4 h-4 text-[#4B7BA7] border-gray-300 rounded focus:ring-[#4B7BA7]" />
+                        <span className="text-gray-700 font-medium text-sm">Generar nota marginal de Registro Civil al imprimir el libro</span>
                     </label>
-                </div>
-
-                {/* 7. Inscripción */}
-                <div className="p-4 bg-gray-50/20">
-                    <h3 className="text-base font-bold text-[#111111] mb-3 flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-gray-500" /> Inscripción
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Numero</label>
-                            <input 
-                                type="text" 
-                                name="inscripcionNumero"
-                                value={params.inscripcionNumero}
-                                onChange={handleParameterChange}
-                                placeholder="Ej. 12345"
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Fecha</label>
-                            <input 
-                                type="datetime-local" 
-                                name="inscripcionFecha"
-                                value={params.inscripcionFecha}
-                                onChange={handleParameterChange}
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Formato</label>
-                            <input 
-                                type="text" 
-                                name="inscripcionFormato"
-                                value={params.inscripcionFormato}
-                                onChange={handleParameterChange}
-                                placeholder="Ej. A-1"
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#4B7BA7] outline-none"
-                            />
-                        </div>
-                    </div>
                 </div>
 
                 {/* Footer / Actions */}
                 <div className="p-4 bg-gray-50 border-t border-gray-200 flex flex-col md:flex-row justify-end gap-3">
                     <Button 
-                        type="button" 
-                        variant="outline" 
-                        onClick={handleResetParameters}
-                        disabled={isSaving}
-                        className="text-gray-600 border-gray-300 hover:bg-gray-100"
+                        type="button" variant="outline" onClick={handleResetParameters} disabled={isSaving}
+                        className="text-gray-600 border-gray-300 hover:bg-gray-200 rounded-xl px-6 font-bold uppercase tracking-widest text-[10px]"
                     >
                         <RefreshCw className="w-4 h-4 mr-2" />
-                        Reiniciar
+                        Restaurar Valores
                     </Button>
                     <Button 
-                        type="button"
-                        onClick={handleSaveParameters}
-                        disabled={isSaving}
-                        className="bg-[#4B7BA7] hover:bg-[#3a5f8a] text-white px-6 font-semibold shadow-sm transition-all"
+                        type="button" onClick={handleSaveParameters} disabled={isSaving}
+                        className="bg-green-600 hover:bg-green-700 text-white rounded-xl px-8 font-black uppercase tracking-widest text-[10px] shadow-lg shadow-green-900/20 transition-all active:scale-95"
                     >
-                        {isSaving ? (
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        ) : (
-                            <Save className="w-4 h-4 mr-2" />
-                        )}
-                        {isSaving ? 'Guardando...' : 'Guardar Parámetros'}
+                        {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                        {isSaving ? 'Sincronizando...' : 'Guardar en la Nube'}
                     </Button>
                 </div>
             </div>
