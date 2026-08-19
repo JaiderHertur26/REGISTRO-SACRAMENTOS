@@ -2,73 +2,76 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
-import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import Table from '@/components/ui/Table';
-import { 
-    PlusCircle, Search, Eye, Edit, Trash2, 
-    FileText, ShieldCheck, BookOpen, 
-    ArrowRight, Loader2, FileX2, History
-} from 'lucide-react';
+import { PlusCircle, Search, Eye, Edit, Trash2, ShieldCheck, BookOpen, History, Loader2, FileX2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import ViewRepositionDecreeModal from '@/components/modals/ViewRepositionDecreeModal';
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
+import { supabase } from '@/lib/supabaseClient';
 
 const BaptismRepositionListPage = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
-    const { 
-        getDecreeReplacementsBySacrament, 
-        deleteDecreeReplacement,
-        getConceptosAnulacion,
-        getBaptisms
-    } = useAppData();
     
     const [activeTab, setActiveTab] = useState("bautismo");
     const [records, setRecords] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [concepts, setConcepts] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isDeleting, setIsDeleting] = useState(false);
 
-    // --- ESTADOS DE MODALES ---
     const [viewModalOpen, setViewModalOpen] = useState(false);
     const [selectedDecree, setSelectedDecree] = useState(null);
     const [deleteConfig, setDeleteConfig] = useState({ isOpen: false, id: null, name: '' });
 
-    // --- CARGA DE DATOS ---
+    // --- CARGA DE DATOS DE LA NUBE ---
     useEffect(() => {
-        if (user?.parishId) {
-            const loadedConcepts = getConceptosAnulacion(user.parishId);
-            setConcepts(loadedConcepts);
-            loadData();
-        }
-    }, [user, activeTab]);
+        const loadData = async () => {
+            if (!user?.parishId) return;
+            setIsLoading(true);
+            try {
+                // Conceptos
+                let targetDioceseId = user.dioceseId || user.diocese_id;
+                if (!targetDioceseId) {
+                    const { data: pData } = await supabase.from('parishes').select('diocese_id').eq('id', user.parishId).single();
+                    if (pData) targetDioceseId = pData.diocese_id;
+                }
 
-    const loadData = async () => {
-        setIsLoading(true);
-        // Simulamos un breve delay para asegurar que los hooks de AppData hayan terminado
-        setTimeout(() => {
-            const data = getDecreeReplacementsBySacrament(activeTab, user.parishId);
-            setRecords(data || []);
-            setIsLoading(false);
-        }, 400);
-    };
+                if (targetDioceseId) {
+                    const { data: cData } = await supabase.from('conceptos_anulacion').select('*').eq('diocese_id', targetDioceseId);
+                    if (cData) setConcepts(cData);
+                }
 
-    // 🧠 RESOLUTOR DE IDENTIDAD (SSOT)
-    // Busca el nombre en la Nube, si no está usa el resumen del decreto
-    const resolvePersonName = (id, summary, fallback) => {
-        if (id) {
-            const all = getBaptisms(user?.parishId) || [];
-            const found = all.find(b => b.id === id);
-            if (found) return `${found.lastName || found.apellidos}, ${found.firstName || found.nombres}`.toUpperCase();
-        }
+                // Decretos
+                const { data, error } = await supabase.from('decretos').select('*').eq('tipo', 'reposicion')
+                    .eq('parish_id', user.parishId).order('created_at', { ascending: false });
+
+                if (error) throw error;
+                const formattedData = data.map(item => ({
+                    id: item.id, parish_id: item.parish_id, created_at: item.created_at,
+                    ...(typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload)
+                }));
+                setRecords(formattedData);
+
+            } catch (error) {
+                toast({ title: "Error", description: "No se pudieron cargar los datos.", variant: "destructive" });
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        loadData();
+    }, [user, activeTab, toast]);
+
+    const resolvePersonName = (summary, fallback) => {
         if (summary) {
             const lName = summary.lastName || summary.apellidos || '';
             const fName = summary.firstName || summary.nombres || '';
-            if (lName || fName) return `${lName}, ${fName}`.toUpperCase();
+            if (lName || fName) return `${fName} ${lName}`.trim().toUpperCase();
         }
         return (fallback || '---').toUpperCase();
     };
@@ -77,29 +80,65 @@ const BaptismRepositionListPage = () => {
         const term = searchTerm.toLowerCase();
         return records.filter(r => {
             const decreeNum = (r.decreeNumber || r.numeroDecreto || '').toLowerCase();
-            const personName = resolvePersonName(r.newPartidaId, r.newPartidaSummary, r.targetName).toLowerCase();
+            const personName = resolvePersonName(r.newPartidaSummary, r.targetName).toLowerCase();
             return decreeNum.includes(term) || personName.includes(term);
         });
     }, [searchTerm, records]);
 
     const getConceptName = (row) => {
         const id = row.conceptoAnulacionId;
-        if (row.concepto) return row.concepto.toUpperCase();
         if (row.causa) return row.causa.toUpperCase();
         const c = concepts.find(i => String(i.id) === String(id) || String(i.codigo) === String(id));
         return c ? c.concepto.toUpperCase() : 'REPOSICIÓN TÉCNICA';
     };
 
+    const pad = (val) => val ? String(val).padStart(4, '0') : '----';
+
+    // 🚀 RESTAURACIÓN COMPLETA (ROLLBACK DE REPOSICIÓN)
     const confirmDelete = async () => {
+        setIsDeleting(true);
         try {
-            const result = await deleteDecreeReplacement(deleteConfig.id, user.parishId);
-            if (result.success) {
-                toast({ title: "Decreto Eliminado", description: "Se ha removido el historial de la Nube." });
-                loadData();
+            const decreeToUndo = records.find(c => c.id === deleteConfig.id);
+            if (!decreeToUndo) throw new Error("Decreto no encontrado");
+
+            const newSum = decreeToUndo.newPartidaSummary;
+
+            // 1. Eliminar la Partida Supletoria y Revertir el Parámetro
+            if (newSum) {
+                const newBook = pad(newSum.book || newSum.Libro);
+                const newPage = pad(newSum.page || newSum.folio);
+                const newEntry = pad(newSum.entry || newSum.numero);
+
+                await supabase.from('baptisms').delete()
+                    .eq('parish_id', user.parishId)
+                    .eq('book_number', newBook)
+                    .eq('folio', newPage)
+                    .eq('number', newEntry);
+
+                // REVERSO DEL LIBRO SUPLETORIO
+                const { data: pData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
+
+                if (pData && pData.bautizos_params) {
+                    const currentParams = pData.bautizos_params;
+                    const currentSupNum = Number(currentParams.suplementarioNumero);
+                    const deletedEntryNum = Number(newEntry);
+
+                    if (deletedEntryNum === currentSupNum - 1) {
+                        const newParamsObj = { ...currentParams, suplementarioNumero: currentSupNum - 1 };
+                        await supabase.from('parish_parameters').update({ bautizos_params: newParamsObj }).eq('parish_id', user.parishId);
+                    }
+                }
             }
+
+            // 2. Eliminar el Decreto
+            await supabase.from('decretos').delete().eq('id', deleteConfig.id);
+
+            toast({ title: "Decreto Eliminado", description: "El decreto y la partida han sido borrados. Consecutivo restaurado.", className: "bg-green-50 text-green-900 border-green-200" });
+            setRecords(prev => prev.filter(r => r.id !== deleteConfig.id));
         } catch (error) {
             toast({ title: "Error", description: "No se pudo procesar la solicitud.", variant: "destructive" });
         } finally {
+            setIsDeleting(false);
             setDeleteConfig({ isOpen: false, id: null, name: '' });
         }
     };
@@ -109,44 +148,29 @@ const BaptismRepositionListPage = () => {
             header: 'No. Decreto', 
             render: (row) => (
                 <div className="flex items-center gap-3">
-                    <div className="bg-amber-50 p-2 rounded-lg text-amber-600">
-                        <History className="w-4 h-4" />
-                    </div>
-                    <span className="font-mono font-black text-gray-900 tracking-tighter">
-                        {row.decreeNumber || row.numeroDecreto || 'SN-000'}
-                    </span>
+                    <div className="bg-amber-50 p-2 rounded-lg text-amber-600"><History className="w-4 h-4" /></div>
+                    <span className="font-mono font-black text-gray-900 tracking-tighter">{row.decreeNumber || row.numeroDecreto || 'SN-000'}</span>
                 </div>
             )
         },
         { 
             header: 'Bautizado(a)', 
-            render: (row) => (
-                <span className="font-bold text-gray-800 text-xs uppercase tracking-tight">
-                    {resolvePersonName(row.newPartidaId, row.newPartidaSummary, row.targetName)}
-                </span>
-            )
+            render: (row) => <span className="font-bold text-gray-800 text-xs uppercase tracking-tight">{resolvePersonName(row.newPartidaSummary, row.targetName)}</span>
         },
         { 
             header: 'Ubicación Supletoria', 
             render: (row) => {
                 const sum = row.newPartidaSummary || row.datosNuevaPartida || {};
-                const L = sum.book || sum.book_number || sum.libro || '-';
-                const F = sum.page || sum.page_number || sum.folio || '-';
-                const N = sum.entry || sum.entry_number || sum.numero || '-';
                 return (
                     <div className="flex items-center gap-2 font-mono text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md border border-blue-100 w-fit">
-                        L:{L} F:{F} N:{N}
+                        L:{pad(sum.book || sum.book_number || sum.libro)} F:{pad(sum.page || sum.page_number || sum.folio)} N:{pad(sum.entry || sum.entry_number || sum.numero)}
                     </div>
                 );
             } 
         },
         { 
             header: 'Causa', 
-            render: (row) => (
-                <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest leading-tight block max-w-[150px] truncate">
-                    {getConceptName(row)}
-                </span>
-            )
+            render: (row) => <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest leading-tight block max-w-[150px] truncate">{getConceptName(row)}</span>
         },
         { 
             header: 'Estado', 
@@ -157,19 +181,12 @@ const BaptismRepositionListPage = () => {
             )
         },
         {
-            header: 'Acciones',
-            className: "text-right",
+            header: 'Acciones', className: "text-right",
             render: (row) => (
                 <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-9 w-9 text-[#D4AF37] hover:bg-yellow-50 rounded-xl" onClick={() => { setSelectedDecree(row); setViewModalOpen(true); }}>
-                        <Eye className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-9 w-9 text-[#4B7BA7] hover:bg-blue-50 rounded-xl" onClick={() => navigate(`/parroquia/decretos/editar-reposicion?id=${row.id}`)}>
-                        <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-9 w-9 text-red-500 hover:bg-red-50 rounded-xl" onClick={() => setDeleteConfig({ isOpen: true, id: row.id, name: row.decreeNumber || row.numeroDecreto })}>
-                        <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-[#D4AF37] hover:bg-yellow-50 rounded-xl" onClick={() => { setSelectedDecree(row); setViewModalOpen(true); }}><Eye className="w-4 h-4" /></Button>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-[#4B7BA7] hover:bg-blue-50 rounded-xl" onClick={() => navigate(`/parroquia/decretos/editar-reposicion?id=${row.id}`)}><Edit className="w-4 h-4" /></Button>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-red-500 hover:bg-red-50 rounded-xl" onClick={() => setDeleteConfig({ isOpen: true, id: row.id, name: row.decreeNumber || row.numeroDecreto })}><Trash2 className="w-4 h-4" /></Button>
                 </div>
             )
         }
@@ -179,12 +196,10 @@ const BaptismRepositionListPage = () => {
         <DashboardLayout entityName={user?.parishName || "Parroquia"}>
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
                 <div className="flex items-center gap-4">
-                    <div className="bg-[#4B7BA7] p-3 rounded-2xl text-white shadow-lg shadow-blue-900/20">
-                        <BookOpen className="w-7 h-7" />
-                    </div>
+                    <div className="bg-[#4B7BA7] p-3 rounded-2xl text-white shadow-lg shadow-blue-900/20"><BookOpen className="w-7 h-7" /></div>
                     <div>
                         <h1 className="text-3xl font-black text-gray-900 font-serif tracking-tight">Decretos de Reposición</h1>
-                        <p className="text-gray-500 text-sm font-medium uppercase tracking-widest text-[10px]">Gestión de Partidas Supletorias por Pérdida o Deterioro</p>
+                        <p className="text-gray-500 text-sm font-medium uppercase tracking-widest text-[10px]">Gestión de Partidas Supletorias en la Nube</p>
                     </div>
                 </div>
                 <Button 
@@ -215,32 +230,14 @@ const BaptismRepositionListPage = () => {
 
                     <div className="flex-1">
                         {isLoading ? (
-                            <div className="py-32 text-center">
-                                <Loader2 className="w-12 h-12 animate-spin text-[#4B7BA7] mx-auto mb-4" />
-                                <p className="text-gray-400 font-bold uppercase tracking-[0.2em] text-[10px]">Sincronizando Archivo...</p>
-                            </div>
+                            <div className="py-32 text-center"><Loader2 className="w-12 h-12 animate-spin text-[#4B7BA7] mx-auto mb-4" /><p className="text-gray-400 font-bold uppercase tracking-[0.2em] text-[10px]">Sincronizando Archivo...</p></div>
                         ) : filteredRecords.length === 0 ? (
-                            <div className="py-32 text-center">
-                                <div className="bg-gray-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-                                    <FileX2 className="w-10 h-10 text-gray-300" />
-                                </div>
-                                <h3 className="text-lg font-black text-gray-400 uppercase tracking-widest">Sin Decretos</h3>
-                                <p className="text-gray-400 text-sm mt-1">No se encontraron reposiciones con los criterios ingresados.</p>
-                                {searchTerm && (
-                                    <Button variant="link" onClick={() => setSearchTerm('')} className="mt-4 text-blue-600 font-bold">
-                                        Limpiar filtros
-                                    </Button>
-                                )}
-                            </div>
+                            <div className="py-32 text-center"><div className="bg-gray-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6"><FileX2 className="w-10 h-10 text-gray-300" /></div><h3 className="text-lg font-black text-gray-400 uppercase tracking-widest">Sin Decretos</h3><p className="text-gray-400 text-sm mt-1">No se encontraron reposiciones con los criterios ingresados.</p></div>
                         ) : (
                             <TabsContent value="bautismo" className="m-0 focus:outline-none">
                                 <div className="overflow-x-auto">
                                     <Table columns={columns} data={filteredRecords} className="border-none" />
-                                    <div className="p-6 bg-gray-50/30 border-t border-gray-50 text-center">
-                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                                            Mostrando {filteredRecords.length} decretos de reposición archivados
-                                        </span>
-                                    </div>
+                                    <div className="p-6 bg-gray-50/30 border-t border-gray-50 text-center"><span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Mostrando {filteredRecords.length} decretos de reposición archivados</span></div>
                                 </div>
                             </TabsContent>
                         )}
@@ -248,23 +245,16 @@ const BaptismRepositionListPage = () => {
                 </Tabs>
             </div>
 
-            {/* MODALES AUXILIARES */}
-            {viewModalOpen && (
-                <ViewRepositionDecreeModal 
-                    isOpen={viewModalOpen}
-                    onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }}
-                    decreeData={selectedDecree}
-                />
-            )}
+            {viewModalOpen && <ViewRepositionDecreeModal isOpen={viewModalOpen} onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }} decreeData={selectedDecree} />}
 
             <ConfirmationDialog 
                 isOpen={deleteConfig.isOpen}
-                title="¿Eliminar Registro de Reposición?"
-                message={`Estás a punto de borrar el historial del decreto ${deleteConfig.name}. Esta acción no borrará automáticamente la partida supletoria generada, solo elimina el documento del decreto.`}
+                title="Restaurar y Eliminar Reposición"
+                message={`Estás a punto de borrar el decreto ${deleteConfig.name} de la Nube. La partida supletoria generada será destruida y el consecutivo regresará a su estado anterior.`}
                 onConfirm={confirmDelete}
                 onClose={() => setDeleteConfig({ isOpen: false, id: null, name: '' })}
                 variant="destructive"
-                confirmText="Sí, Eliminar de la Nube"
+                confirmText={isDeleting ? "Borrando..." : "Sí, Eliminar de la Nube"}
             />
         </DashboardLayout>
     );
