@@ -8,7 +8,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { Save, ArrowLeft, FileText, UserPlus, AlertCircle, CheckCircle2, Search, Loader2, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { generateUUID, incrementPaddedValue } from '@/utils/supabaseHelpers';
+import { generateUUID } from '@/utils/supabaseHelpers';
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -17,10 +17,7 @@ const NewDecreeCorrectionPage = () => {
     const { 
         getMisDatosList,
         createNotification,
-        obtenerNotasAlMargen,
-        createBaptismCorrection, 
-        getConfirmations,
-        getMatrimonios
+        obtenerNotasAlMargen
     } = useAppData();
     
     const { toast } = useToast();
@@ -218,7 +215,7 @@ const NewDecreeCorrectionPage = () => {
 
     const handleNewPartidaChange = (e) => {
         const { name, value } = e.target;
-        setNewPartida(prev => ({ ...prev, [name]: value }));
+        setNewPartida(prev => ({ ...prev, [name]: value.toUpperCase() }));
     };
 
     const handleSearch = async () => {
@@ -312,21 +309,21 @@ const NewDecreeCorrectionPage = () => {
                     else mappedUnion = rawUnion; 
 
                     setNewPartida({
-                        nombres: dbRecord.first_name || getSafeValue(found, 'firstName', 'nombres'),
-                        apellidos: dbRecord.last_name || getSafeValue(found, 'lastName', 'apellidos'),
+                        nombres: (dbRecord.first_name || getSafeValue(found, 'firstName', 'nombres')).toUpperCase(),
+                        apellidos: (dbRecord.last_name || getSafeValue(found, 'lastName', 'apellidos')).toUpperCase(),
                         fechaNacimiento: dbRecord.birth_date || getSafeValue(found, 'birthDate', 'fechaNacimiento', 'fecnac'),
                         fechaSacramento: dbRecord.sacrament_date || getSafeValue(found, 'sacramentDate', 'fechaSacramento', 'fecbau'),
-                        lugarNacimiento: dbRecord.birth_place || getSafeValue(found, 'lugarNacimientoDetalle', 'lugarNacimiento', 'lugarn', 'lugnac'),
-                        lugarBautismo: dbRecord.sacrament_place || getSafeValue(found, 'lugarBautismo', 'lugbau', 'lugarBautismoDetalle'),
+                        lugarNacimiento: (dbRecord.birth_place || getSafeValue(found, 'lugarNacimientoDetalle', 'lugarNacimiento', 'lugarn', 'lugnac')).toUpperCase(),
+                        lugarBautismo: (dbRecord.sacrament_place || getSafeValue(found, 'lugarBautismo', 'lugbau', 'lugarBautismoDetalle')).toUpperCase(),
                         sexo: mappedSex,
-                        nombrePadre: dbRecord.father_name || getSafeValue(found, 'fatherName', 'nombrePadre', 'padre'),
-                        nombreMadre: dbRecord.mother_name || getSafeValue(found, 'motherName', 'nombreMadre', 'madre'),
+                        nombrePadre: (dbRecord.father_name || getSafeValue(found, 'fatherName', 'nombrePadre', 'padre')).toUpperCase(),
+                        nombreMadre: (dbRecord.mother_name || getSafeValue(found, 'motherName', 'nombreMadre', 'madre')).toUpperCase(),
                         tipoUnionPadres: mappedUnion,
-                        abuelosPaternos: getSafeValue(found, 'paternalGrandparents', 'abuelosPaternos', 'abuepat'),
-                        abuelosMaternos: getSafeValue(found, 'maternalGrandparents', 'abuelosMaternos', 'abuemat'),
-                        padrinos: Array.isArray(found.godparents) ? found.godparents.map(g => g.name).join(', ') : getSafeValue(found, 'godparents', 'padrinos'),
-                        ministro: dbRecord.minister || getSafeValue(found, 'minister', 'ministro'),
-                        daFe: priestName || getSafeValue(found, 'ministerFaith', 'daFe', 'dafe'),
+                        abuelosPaternos: getSafeValue(found, 'paternalGrandparents', 'abuelosPaternos', 'abuepat').toUpperCase(),
+                        abuelosMaternos: getSafeValue(found, 'maternalGrandparents', 'abuelosMaternos', 'abuemat').toUpperCase(),
+                        padrinos: (Array.isArray(found.godparents) ? found.godparents.map(g => g.name).join(', ') : getSafeValue(found, 'godparents', 'padrinos')).toUpperCase(),
+                        ministro: (dbRecord.minister || getSafeValue(found, 'minister', 'ministro')).toUpperCase(),
+                        daFe: (priestName || getSafeValue(found, 'ministerFaith', 'daFe', 'dafe')).toUpperCase(),
                         Libro: supletorioLibro, 
                         folio: supletorioFolio, 
                         numero: supletorioNumero,
@@ -372,12 +369,12 @@ const NewDecreeCorrectionPage = () => {
         setIsLoading(true);
 
         try {
-            // 🚀 VALIDACIÓN DE DUPLICIDAD DE NÚMERO DE DECRETO
+            // 1. VALIDACIÓN DE DUPLICIDAD DE NÚMERO DE DECRETO
             const { data: existingDecree, error: checkError } = await supabase
                 .from('decretos')
                 .select('id')
                 .eq('tipo', 'correccion')
-                // Buscamos si ya existe ese numero en el payload
+                .eq('parish_id', targetParish)
                 .contains('payload', { decreeNumber: decreeData.numeroDeDecreto })
                 .maybeSingle();
 
@@ -387,25 +384,33 @@ const NewDecreeCorrectionPage = () => {
                 setIsLoading(false);
                 toast({ 
                     title: "Número de Decreto Duplicado", 
-                    description: `El decreto número ${decreeData.numeroDeDecreto} ya se encuentra registrado en el sistema. Por favor, asigne un número diferente.`, 
+                    description: `El decreto número ${decreeData.numeroDeDecreto} ya se encuentra registrado en el sistema para esta parroquia.`, 
                     variant: "destructive" 
                 });
-                return; // Detenemos la ejecución aquí
+                return;
             }
 
-            // --- FIN DE VALIDACIÓN ---
-
-            const notasConfig = typeof obtenerNotasAlMargen === 'function' ? obtenerNotasAlMargen(targetParish) : null;
-            
+            // 2. PARÁMETROS SUPLETORIOS DE LA PARROQUIA DESTINO
             let supletorioLibro = '0001', supletorioFolio = '0001', supletorioNumero = '0001';
             const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', targetParish).maybeSingle();
+            
             if (paramsData && paramsData.bautizos_params) {
                 supletorioLibro = String(paramsData.bautizos_params.suplementarioLibro || '1').padStart(4, '0');
                 supletorioFolio = String(paramsData.bautizos_params.suplementarioFolio || '1').padStart(4, '0');
                 supletorioNumero = String(paramsData.bautizos_params.suplementarioNumero || '1').padStart(4, '0');
             }
 
-            let notaSupletoriaFinal = notasConfig?.porCorreccion?.nuevaPartida || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] DE FECHA: [FECHA_DECRETO] EXPEDIDO POR: [OFICINA_DECRETO] Y ANULA LA PARTIDA DEL LIBRO: [LIBRO_ANULADA], FOLIO: [FOLIO_ANULADA], NÚMERO: [NUMERO_PARTIDA_ANULADA]. DA FE: [NOMBRE_SACERDOTE].";
+            // 3. GENERAR NOTAS MARGINALES (Tratando de extraer plantillas desde Supabase)
+            let notasConfig = null;
+            const chanceryId = user?.chanceryId || user?.chancery_id || user?.dioceseId;
+            if (chanceryId) {
+                const { data: chanceryParams } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', chanceryId).maybeSingle();
+                if (chanceryParams && chanceryParams.bautizos_params?.plantillas_notas) {
+                    notasConfig = chanceryParams.bautizos_params.plantillas_notas;
+                }
+            }
+            
+            let notaSupletoriaFinal = notasConfig?.correccion_nueva || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] DE FECHA: [FECHA_DECRETO] EXPEDIDO POR: [OFICINA_DECRETO] Y ANULA LA PARTIDA DEL LIBRO: [LIBRO_ANULADA], FOLIO: [FOLIO_ANULADA], NÚMERO: [NUMERO_PARTIDA_ANULADA]. DA FE: [MINISTRO].";
             
             notaSupletoriaFinal = notaSupletoriaFinal
                 .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
@@ -414,16 +419,18 @@ const NewDecreeCorrectionPage = () => {
                 .replace(/\[LIBRO_ANULADA\]/g, String(foundRecord.book || foundRecord.book_number || decreeData.Libro).padStart(4, '0'))
                 .replace(/\[FOLIO_ANULADA\]/g, String(foundRecord.page || foundRecord.page_number || decreeData.folio).padStart(4, '0'))
                 .replace(/\[NUMERO_PARTIDA_ANULADA\]/g, String(foundRecord.entry || foundRecord.entry_number || decreeData.numero).padStart(4, '0'))
-                .replace(/\[NOMBRE_SACERDOTE\]/g, newPartida.daFe);
+                .replace(/\[MINISTRO\]/g, newPartida.daFe);
 
-            let noteAnulada = notasConfig?.porCorreccion?.anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO]";
+            let noteAnulada = notasConfig?.correccion_anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO] DE FECHA [FECHA_DECRETO]. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-[LIBRO_NUEVA] F-[FOLIO_NUEVA] N-[NUMERO_NUEVA].";
+            
             noteAnulada = noteAnulada
                 .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
                 .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
-                .replace(/\[LIBRO_NUEVA\]/g, String(newPartida.Libro).padStart(4, '0'))
-                .replace(/\[FOLIO_NUEVA\]/g, String(newPartida.folio).padStart(4, '0'))
-                .replace(/\[NUMERO_PARTIDA_NUEVA\]/g, String(newPartida.numero).padStart(4, '0'));
+                .replace(/\[LIBRO_NUEVA\]/g, String(supletorioLibro).padStart(4, '0'))
+                .replace(/\[FOLIO_NUEVA\]/g, String(supletorioFolio).padStart(4, '0'))
+                .replace(/\[NUMERO_PARTIDA_NUEVA\]/g, String(supletorioNumero).padStart(4, '0'));
 
+            // 4. ANULAR PARTIDA ORIGINAL
             const oldRawData = { ...foundRecord };
             oldRawData.notaMarginal = oldRawData.notaMarginal ? `${oldRawData.notaMarginal} | ${noteAnulada}` : noteAnulada;
             
@@ -435,6 +442,12 @@ const NewDecreeCorrectionPage = () => {
             oldRawData.conceptoAnulacionId = decreeData.conceptoAnulacion;
             oldRawData.tipoNotaAlMargen = "porCorreccion.anulada";
 
+            await supabase.from('baptisms').update({ 
+                status: 'anulada', nota_marginal: oldRawData.notaMarginal, 
+                raw_data: oldRawData 
+            }).eq('id', foundRecord.id);
+
+            // 5. CREAR PARTIDA SUPLETORIA
             const partidaToSave = {
                 ...newPartida,
                 Libro: String(supletorioLibro).padStart(4, '0'),
@@ -468,6 +481,18 @@ const NewDecreeCorrectionPage = () => {
                 notaMarginal: notaSupletoriaFinal 
             };
 
+            const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{
+                parish_id: targetParish, book_number: supletorioLibro, folio: supletorioFolio, number: supletorioNumero,
+                celebration_date: newPartida.fechaSacramento || null, nombres: newPartida.nombres, apellidos: newPartida.apellidos,
+                sexo: newPartida.sexo, fecha_nacimiento: newPartida.fechaNacimiento || null, lugar_nacimiento: newPartida.lugarNacimiento, 
+                nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre, tipo_union_padres: newPartida.tipoUnionPadres, 
+                padrinos: newPartida.padrinos, ministro: newPartida.ministro, da_fe: newPartida.daFe, status: 'seated', 
+                nota_marginal: notaSupletoriaFinal, raw_data: partidaToSave
+            }]).select('id').single();
+
+            if (errBap) throw errBap;
+
+            // 6. CREAR DECRETO EN SUPABASE
             const payloadDecree = {
                 decreeNumber: decreeData.numeroDeDecreto,
                 decreeDate: decreeData.fechaEmision,
@@ -484,35 +509,46 @@ const NewDecreeCorrectionPage = () => {
                 tipoUnionPadres: newPartida.tipoUnionPadres,
                 abuelosPaternos: newPartida.abuelosPaternos,
                 abuelosMaternos: newPartida.abuelosMaternos,
-                padrinos: newPartida.padrinos
+                padrinos: newPartida.padrinos,
+
+                originalPartidaId: foundRecord.id,
+                newPartidaId: newBap.id,
+                originalPartidaSummary: { book: foundRecord.book_number, page: foundRecord.page_number, entry: foundRecord.entry_number },
+                newPartidaSummary: { book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero }
             };
 
-            const result = await createBaptismCorrection(
-                payloadDecree,
-                foundRecord.id,
-                partidaToSave,
-                targetParish 
-            );
+            const { error: decError } = await supabase.from('decretos').insert([{ 
+                parish_id: targetParish, 
+                tipo: 'correccion', 
+                payload: payloadDecree 
+            }]);
 
-            if (result.success) {
-                await createNotification({
-                    decree_id: result.decreeId || generateUUID(),
-                    decree_type: 'correction',
-                    parish_id: targetParish,
-                    created_by: user.id,
-                    message: `La Cancillería emitió el Decreto de Corrección #${decreeData.numeroDeDecreto} afectando la partida de ${newPartida.nombres} ${newPartida.apellidos}.`,
-                    status: 'unread'
-                });
+            if (decError) throw decError;
 
-                toast({ 
-                    title: "Decreto Ejecutado", 
-                    description: "Partida y decreto guardados mediante el motor centralizado.",
-                    className: "bg-green-50 border-green-200 text-green-900"
-                });
-                navigate('/chancery/decree-correction/view'); 
-            } else {
-                throw new Error(result.message || "Error al procesar el decreto en el motor central.");
-            }
+            // 7. AUMENTAR CONSECUTIVO PARROQUIA
+            const p = paramsData?.bautizos_params || {};
+            await supabase.from('parish_parameters').upsert({ 
+                parish_id: targetParish, 
+                bautizos_params: { ...p, suplementarioNumero: Number(supletorioNumero) + 1 } 
+            }, { onConflict: 'parish_id' });
+
+            // 8. NOTIFICACIÓN
+            await createNotification({
+                decree_id: generateUUID(),
+                decree_type: 'correction',
+                parish_id: targetParish,
+                created_by: user.id,
+                message: `La Cancillería emitió el Decreto de Corrección #${decreeData.numeroDeDecreto} afectando la partida de ${newPartida.nombres} ${newPartida.apellidos}.`,
+                status: 'unread'
+            });
+
+            toast({ 
+                title: "Decreto Ejecutado", 
+                description: "Partida y decreto guardados directamente en la Nube (Parroquia Destino).",
+                className: "bg-green-50 border-green-200 text-green-900"
+            });
+            navigate('/chancery/decree-correction/view'); 
+
         } catch (error) {
             console.error("Error completo:", error);
             toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -815,7 +851,7 @@ const NewDecreeCorrectionPage = () => {
                                 {isLoading ? 'Procesando en Nube...' : 'Emitir y Sincronizar'}
                             </Button>
                         </div>
-                    </div>
+                    </form>
                 </TabsContent>
             </Tabs>
         </DashboardLayout>

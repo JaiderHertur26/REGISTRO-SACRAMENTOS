@@ -88,13 +88,12 @@ import MatrimonioPartidasPage from '@/pages/parish/MatrimonioPartidasPage';
 
 /* --- DECREES (CORRECTION & REPLACEMENT - CHANCERY) --- */
 import NewDecreeCorrectionPage from '@/pages/chancery/decree-correction/NewDecreeCorrectionPage';
+import ViewCorrectionPage from '@/pages/chancery/decree-correction/ViewCorrectionPage';
+import EditCorrectionPage from '@/pages/chancery/decree-correction/EditCorrectionPage';
+
 import NewDecreeReplacementPage from '@/pages/chancery/decree-replacement/NewDecreeReplacementPage';
-import ChanceryCorrectionDecreeListPage from '@/pages/chancery/ChanceryCorrectionDecreeListPage';
-import ChanceryReplacementDecreeListPage from '@/pages/chancery/ChanceryReplacementDecreeListPage';
-import ChanceryDecreeCorrectionViewPage from '@/pages/chancery/ChanceryDecreeCorrectionViewPage';
-import ChanceryDecreeReplacementViewPage from '@/pages/chancery/ChanceryDecreeReplacementViewPage';
-import ChanceryDecreeCorrectionEditPage from '@/pages/chancery/ChanceryDecreeCorrectionEditPage';
-import ChanceryDecreeReplacementEditPage from '@/pages/chancery/ChanceryDecreeReplacementEditPage';
+import ViewReplacementPage from '@/pages/chancery/decree-replacement/ViewReplacementPage';
+import EditReplacementPage from '@/pages/chancery/decree-replacement/EditReplacementPage';
 
 /* --- ANNULMENT (PARISH) --- */
 import AnnulmentConceptsPage from '@/pages/parish/AnnulmentConceptsPage';
@@ -242,21 +241,22 @@ const AppContent = () => {
                 <Route path="/chancery/backups" element={<ProtectedRoute requiredRole="chancery"><BackupPage /></ProtectedRoute>} />
 
                 {/* --- DECREES (CORRECTION & REPLACEMENT - CHANCERY) --- */}
-                <Route path="/chancery/decretos/correcciones" element={<ProtectedRoute requiredRole="chancery"><ChanceryDecreeCorrectionViewPage /></ProtectedRoute>} />
-                <Route path="/chancery/decretos/reposiciones" element={<ProtectedRoute requiredRole="chancery"><ChanceryDecreeReplacementViewPage /></ProtectedRoute>} />
+                <Route path="/chancery/decretos/correcciones" element={<ProtectedRoute requiredRole="chancery"><ViewCorrectionPage /></ProtectedRoute>} />
+                <Route path="/chancery/decretos/reposiciones" element={<ProtectedRoute requiredRole="chancery"><ViewReplacementPage /></ProtectedRoute>} />
 
                 <Route path="/chancery/decree-correction/new" element={<ProtectedRoute requiredRole="chancery"><NewDecreeCorrectionPage /></ProtectedRoute>} />
-                <Route path="/chancery/decree-correction" element={<ProtectedRoute requiredRole="chancery"><ChanceryDecreeCorrectionViewPage /></ProtectedRoute>} />
-                <Route path="/chancery/decree-correction/view" element={<ProtectedRoute requiredRole="chancery"><ChanceryDecreeCorrectionViewPage /></ProtectedRoute>} />
-                <Route path="/chancery/decree-correction/edit" element={<ProtectedRoute requiredRole="chancery"><ChanceryDecreeCorrectionEditPage /></ProtectedRoute>} />
+                <Route path="/chancery/decree-correction" element={<ProtectedRoute requiredRole="chancery"><ViewCorrectionPage /></ProtectedRoute>} />
+                <Route path="/chancery/decree-correction/view" element={<ProtectedRoute requiredRole="chancery"><ViewCorrectionPage /></ProtectedRoute>} />
+                <Route path="/chancery/decree-correction/edit" element={<ProtectedRoute requiredRole="chancery"><EditCorrectionPage /></ProtectedRoute>} />
                 
                 <Route path="/chancery/decree-replacement/new" element={<ProtectedRoute requiredRole="chancery"><NewDecreeReplacementPage /></ProtectedRoute>} />
-                <Route path="/chancery/decree-replacement" element={<ProtectedRoute requiredRole="chancery"><ChanceryDecreeReplacementViewPage /></ProtectedRoute>} />
-                <Route path="/chancery/decree-replacement/view" element={<ProtectedRoute requiredRole="chancery"><ChanceryDecreeReplacementViewPage /></ProtectedRoute>} />
-                <Route path="/chancery/decree-replacement/edit" element={<ProtectedRoute requiredRole="chancery"><ChanceryDecreeReplacementEditPage /></ProtectedRoute>} />
+                <Route path="/chancery/decree-replacement" element={<ProtectedRoute requiredRole="chancery"><ViewReplacementPage /></ProtectedRoute>} />
+                <Route path="/chancery/decree-replacement/view" element={<ProtectedRoute requiredRole="chancery"><ViewReplacementPage /></ProtectedRoute>} />
+                <Route path="/chancery/decree-replacement/edit" element={<ProtectedRoute requiredRole="chancery"><EditReplacementPage /></ProtectedRoute>} />
                 
-                <Route path="/chancery/decree-correction/list" element={<ProtectedRoute requiredRole="chancery"><ChanceryCorrectionDecreeListPage /></ProtectedRoute>} />
-                <Route path="/chancery/decree-replacement/list" element={<ProtectedRoute requiredRole="chancery"><ChanceryReplacementDecreeListPage /></ProtectedRoute>} />
+                {/* Redirecciones de seguridad por las rutas purgadas */}
+                <Route path="/chancery/decree-correction/list" element={<Navigate to="/chancery/decree-correction/view" replace />} />
+                <Route path="/chancery/decree-replacement/list" element={<Navigate to="/chancery/decree-replacement/view" replace />} />
 
                 {/* --- ANNULMENT (CHANCERY) --- */}
                 <Route path="/chancery/decree-annulment" element={<ProtectedRoute requiredRole="chancery"><ChanceryAnnulmentConceptsPage /></ProtectedRoute>} />
