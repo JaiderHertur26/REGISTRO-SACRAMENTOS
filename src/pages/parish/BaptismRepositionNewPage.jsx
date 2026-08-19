@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 import { supabase } from '@/lib/supabaseClient';
+import CityAutocomplete from '@/components/CityAutocomplete'; // 🚀 IMPORTADO
 
 const BaptismRepositionNewPage = () => {
     const { user } = useAuth();
@@ -22,7 +23,7 @@ const BaptismRepositionNewPage = () => {
     const [conceptos, setConceptos] = useState([]);
     const [cloudParams, setCloudParams] = useState({});
     
-    // 🚀 ESTADO PARA TABLA DE AUXILIARES
+    // ESTADO PARA TABLA DE AUXILIARES
     const [auxiliares, setAuxiliares] = useState({ ciudades: [], ministros: [] });
     
     const [decreeData, setDecreeData] = useState({ 
@@ -67,10 +68,11 @@ const BaptismRepositionNewPage = () => {
                     });
                 }
 
+                // PÁRROCO ACTUAL
                 const priest = getParrocoActual(user.parishId);
                 if (priest) {
                     const name = `${priest.nombre} ${priest.apellido || ''}`.trim().toUpperCase();
-                    setFormData(prev => ({ ...prev, ministerFaith: name, minister: name }));
+                    setFormData(prev => ({ ...prev, ministerFaith: name, minister: name })); // Aplica a ambos
                 }
             } catch (error) {
                 console.error("Error inicializando datos:", error);
@@ -81,9 +83,15 @@ const BaptismRepositionNewPage = () => {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        const uppercaseFields = ['firstName', 'lastName', 'placeOfBirth', 'fatherName', 'motherName', 'paternalGrandparents', 'maternalGrandparents', 'godparents', 'minister', 'ministerFaith', 'oficinaRegistro'];
+        const uppercaseFields = ['firstName', 'lastName', 'fatherName', 'motherName', 'paternalGrandparents', 'maternalGrandparents', 'godparents', 'minister', 'ministerFaith', 'oficinaRegistro'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
+    };
+
+    // 🚀 MANEJADOR EXCLUSIVO PARA CITYAUTOCOMPLETE
+    const handleCityChange = (data) => {
+        let value = data?.target?.value || data?.nombre || data || "";
+        setFormData(prev => ({ ...prev, placeOfBirth: String(value).toUpperCase() }));
     };
 
     const handleDecreeChange = (e) => {
@@ -179,7 +187,6 @@ const BaptismRepositionNewPage = () => {
 
     return (
         <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-            <datalist id="ciudades-list">{auxiliares.ciudades.map((c, i) => <option key={i} value={c} />)}</datalist>
             <datalist id="ministros-list">{auxiliares.ministros.map((m, i) => <option key={i} value={m} />)}</datalist>
 
             <div className="max-w-5xl mx-auto pb-20 pt-6">
@@ -259,7 +266,10 @@ const BaptismRepositionNewPage = () => {
                                             </select>
                                         </div>
                                         <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="birthDate" value={formData.birthDate} onChange={handleChange} className={inputClass} /></div>
-                                        <div><label className={labelClass}>Lugar de Nacimiento</label><input name="placeOfBirth" list="ciudades-list" value={formData.placeOfBirth} onChange={handleChange} className={inputClass} /></div>
+                                        <div>
+                                            <label className={labelClass}>Lugar de Nacimiento</label>
+                                            <CityAutocomplete name="placeOfBirth" value={formData.placeOfBirth} onChange={handleCityChange} cities={auxiliares.ciudades} className={inputClass} />
+                                        </div>
                                     </div>
                                 </section>
 
