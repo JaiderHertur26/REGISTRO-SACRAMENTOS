@@ -8,11 +8,11 @@ import Table from '@/components/ui/Table';
 import { Edit, Trash2, PlusCircle, Search, FileX2, Eye, Network, LayoutGrid, Church, FileSignature, ChevronDown, ChevronUp, Loader2, ShieldAlert, Cloud } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
-import ViewCorrectionDecreeModal from '@/components/modals/ViewCorrectionDecreeModal';
+import ViewRepositionDecreeModal from '@/components/modals/ViewRepositionDecreeModal';
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import { supabase } from '@/lib/supabaseClient';
 
-const ChanceryDecreeCorrectionViewPage = () => {
+const ChanceryDecreeReplacementViewPage = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
@@ -85,7 +85,7 @@ const ChanceryDecreeCorrectionViewPage = () => {
             const { data, error } = await supabase
                 .from('decretos')
                 .select('id, tipo, payload, parish_id')
-                .eq('tipo', 'correccion')
+                .eq('tipo', 'reposicion')
                 .in('parish_id', parishIds)
                 .order('created_at', { ascending: false });
 
@@ -126,7 +126,6 @@ const ChanceryDecreeCorrectionViewPage = () => {
 
             return (
                 (r.targetName || r.nombres || '').toLowerCase().includes(term) ||
-                (r.newTargetName || '').toLowerCase().includes(term) ||
                 (r.decreeNumber || r.numeroDecreto || '').toLowerCase().includes(term) ||
                 (r.targetParishName || '').toLowerCase().includes(term)
             );
@@ -134,7 +133,7 @@ const ChanceryDecreeCorrectionViewPage = () => {
         setFilteredRecords(filtered);
     }, [searchTerm, records, activeTab]);
 
-    // 🚀 LÓGICA MAESTRA DE ROLLBACK DESDE CANCILLERÍA
+    // LÓGICA MAESTRA DE ROLLBACK PARA REPOSICIONES (SIN PARTIDA ORIGINAL)
     const confirmDelete = async () => {
         setIsDeleting(true);
         try {
@@ -142,25 +141,10 @@ const ChanceryDecreeCorrectionViewPage = () => {
             if (!decreeToUndo) throw new Error("Decreto no encontrado");
 
             const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
-            const origSum = decreeToUndo.originalPartidaSummary;
-            const newSum = decreeToUndo.newPartidaSummary;
+            const newSum = decreeToUndo.newPartidaSummary || decreeToUndo.datosNuevaPartida;
             const targetParishId = decreeToUndo.targetParishId;
 
-            // 1. Restaurar Original
-            if (origSum) {
-                const { data: origData } = await supabase.from('baptisms').select('id, raw_data')
-                    .eq('parish_id', targetParishId).eq('book_number', pad(origSum.book || origSum.Libro))
-                    .eq('folio', pad(origSum.page || origSum.folio)).eq('number', pad(origSum.entry || origSum.numero)).maybeSingle();
-
-                if (origData) {
-                    const cleanedRaw = { ...origData.raw_data };
-                    delete cleanedRaw.notaMarginal; 
-                    cleanedRaw.anulado = false; cleanedRaw.status = 'seated';
-                    await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', origData.id);
-                }
-            }
-
-            // 2. Eliminar Supletoria
+            // 1. Eliminar Supletoria
             if (newSum) {
                 const newBook = pad(newSum.book || newSum.Libro);
                 const newPage = pad(newSum.page || newSum.folio);
@@ -178,10 +162,10 @@ const ChanceryDecreeCorrectionViewPage = () => {
                 }
             }
 
-            // 3. Eliminar Decreto
+            // 2. Eliminar Decreto
             await supabase.from('decretos').delete().eq('id', deleteConfig.id);
 
-            toast({ title: "Restauración Completada", description: "Decreto borrado remotamente de la parroquia y partida original restaurada.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Restauración Completada", description: "Decreto borrado remotamente y partida supletoria destruida.", className: "bg-green-50 text-green-900 border-green-200" });
             fetchAllDecrees();
         } catch (error) { 
             toast({ title: "Error", description: "No se pudo restaurar la partida.", variant: "destructive" }); 
@@ -200,20 +184,28 @@ const ChanceryDecreeCorrectionViewPage = () => {
     const getDirectParishesWithDecrees = (vicaryId) => parishes.filter(p => (String(p.vicary_id) === String(vicaryId) || String(p.vicaryId) === String(vicaryId)) && (!p.decanate_id && !p.decanateId)).filter(p => getParishDecrees(p.id).length > 0);
     const getUnassignedDecrees = () => { const parishIds = parishes.map(p => String(p.id)); return filteredRecords.filter(r => !r.targetParishId || !parishIds.includes(String(r.targetParishId))); };
 
+    const getConceptName = (row) => {
+        const id = row.conceptoAnulacionId;
+        if (row.causa) return row.causa.toUpperCase();
+        const conceptos = getConceptosAnulacion(user?.dioceseId || user?.id) || [];
+        const c = conceptos.find(i => String(i.id) === String(id) || String(i.codigo) === String(id));
+        return c ? c.concepto.toUpperCase() : 'REPOSICIÓN DE PARTIDA';
+    };
+
     const DecreeTable = ({ decrees }) => {
         if (decrees.length === 0) return null;
 
         const columns = [
-            { header: 'No. Decreto', render: (row) => <span className="font-mono font-black text-purple-600 text-xs">#{row.decreeNumber || row.numeroDecreto}</span> },
+            { header: 'No. Decreto', render: (row) => <span className="font-mono font-black text-amber-600 text-xs">#{row.decreeNumber || row.numeroDecreto}</span> },
             { header: 'Fecha', render: (row) => <span className="text-[11px] font-bold text-gray-500 uppercase">{row.decreeDate || row.fechaDecreto}</span> },
-            { header: 'Partida Anulada', render: (row) => <span className="font-black uppercase text-xs text-red-600">{row.targetName || row.nombres}</span> },
-            { header: 'Partida Nueva', render: (row) => <span className="font-black uppercase text-xs text-green-600">{row.newTargetName || row.targetName || row.nombres}</span> },
+            { header: 'Titular de Reposición', render: (row) => <span className="font-black uppercase text-xs text-green-600">{row.targetName || row.nombres}</span> },
             {
-                header: 'Ubicación Nueva', render: (row) => {
+                header: 'Ubicación Supletoria', render: (row) => {
                     const sum = row.newPartidaSummary || row.datosNuevaPartida || {};
                     return <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest font-mono">L:{sum.book || sum.book_number || ''} F:{sum.page || sum.page_number || ''} N:{sum.entry || sum.entry_number || ''}</span>;
                 }
-            }
+            },
+            { header: 'Causa', render: (row) => <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-tight block max-w-[150px] truncate">{getConceptName(row)}</span> }
         ];
 
         return (
@@ -223,7 +215,7 @@ const ChanceryDecreeCorrectionViewPage = () => {
                     data={decrees}
                     actions={[
                         { label: <Eye className="w-4 h-4" />, type: 'view', onClick: (row) => { setSelectedDecree(row); setViewModalOpen(true); }, className: "text-[#D4AF37] hover:bg-yellow-50 p-2 rounded-xl transition-all" },
-                        { label: <Edit className="w-4 h-4" />, type: 'edit', onClick: (row) => navigate(`/chancery/decree-correction/edit?id=${row.id}`), className: "text-purple-600 hover:bg-purple-50 p-2 rounded-xl transition-all" },
+                        { label: <Edit className="w-4 h-4" />, type: 'edit', onClick: (row) => navigate(`/chancery/decree-replacement/edit?id=${row.id}`), className: "text-amber-600 hover:bg-amber-50 p-2 rounded-xl transition-all" },
                         { label: <Trash2 className="w-4 h-4" />, type: 'delete', onClick: (row) => setDeleteConfig({ isOpen: true, id: row.id, name: row.decreeNumber }), className: "text-red-500 hover:bg-red-50 p-2 rounded-xl transition-all" }
                     ]}
                 />
@@ -232,7 +224,7 @@ const ChanceryDecreeCorrectionViewPage = () => {
     };
 
     const renderHierarchicalContent = () => {
-        if (isLoadingStructure || isLoadingDecrees) return <div className="py-20 text-center text-gray-400 uppercase font-black text-xs animate-pulse flex flex-col items-center"><Loader2 className="w-8 h-8 animate-spin mb-3 text-purple-500" /> Sincronizando Archivo Diocesano...</div>;
+        if (isLoadingStructure || isLoadingDecrees) return <div className="py-20 text-center text-gray-400 uppercase font-black text-xs animate-pulse flex flex-col items-center"><Loader2 className="w-8 h-8 animate-spin mb-3 text-amber-500" /> Sincronizando Archivo Diocesano...</div>;
         if (filteredRecords.length === 0) return <EmptyState />;
 
         const unassignedDecrees = getUnassignedDecrees();
@@ -249,11 +241,11 @@ const ChanceryDecreeCorrectionViewPage = () => {
                     const isVicaryOpen = openVicaries.includes(vicary.id);
 
                     return (
-                        <div key={vicary.id} className="bg-white rounded-[2.5rem] shadow-xl shadow-purple-900/5 border border-slate-100 overflow-hidden transition-all duration-300">
+                        <div key={vicary.id} className="bg-white rounded-[2.5rem] shadow-xl shadow-amber-900/5 border border-slate-100 overflow-hidden transition-all duration-300">
                             <div className="bg-slate-50 hover:bg-slate-100 p-6 flex items-center justify-between cursor-pointer border-b border-slate-200 transition-colors" onClick={() => toggleVicary(vicary.id)}>
                                 <div className="flex items-center gap-4">
                                     <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-100">
-                                        <Network className="w-6 h-6 text-purple-600" />
+                                        <Network className="w-6 h-6 text-amber-600" />
                                     </div>
                                     <div>
                                         <h3 className="font-black text-xl text-[#111111] uppercase tracking-tighter">{vicary.name}</h3>
@@ -286,9 +278,9 @@ const ChanceryDecreeCorrectionViewPage = () => {
                                                             return (
                                                                 <div key={parish.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm ml-6 overflow-hidden">
                                                                     <div className="flex items-center gap-2 p-4 cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => toggleParish(parish.id)}>
-                                                                        <Church className="w-4 h-4 text-purple-500" />
+                                                                        <Church className="w-4 h-4 text-amber-500" />
                                                                         <h5 className="font-black text-gray-900 uppercase text-sm">{parish.name}</h5>
-                                                                        <span className="ml-auto bg-purple-50 text-purple-700 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest border border-purple-100">{getParishDecrees(parish.id).length} Decretos</span>
+                                                                        <span className="ml-auto bg-amber-50 text-amber-700 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest border border-amber-100">{getParishDecrees(parish.id).length} Decretos</span>
                                                                         <div className="text-gray-400 ml-2">{isParishOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
                                                                     </div>
                                                                     {isParishOpen && (<div className="px-4 pb-4 animate-in fade-in duration-300"><DecreeTable decrees={getParishDecrees(parish.id)} /></div>)}
@@ -306,9 +298,9 @@ const ChanceryDecreeCorrectionViewPage = () => {
                                         return (
                                             <div key={parish.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm ml-4 overflow-hidden">
                                                 <div className="flex items-center gap-2 p-4 cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => toggleParish(parish.id)}>
-                                                    <Church className="w-4 h-4 text-purple-500" />
+                                                    <Church className="w-4 h-4 text-amber-500" />
                                                     <h5 className="font-black text-gray-900 uppercase text-sm">{parish.name} <span className="text-[10px] text-gray-400 ml-2 font-bold">(Sin Decanato)</span></h5>
-                                                    <span className="ml-auto bg-purple-50 text-purple-700 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest border border-purple-100">{getParishDecrees(parish.id).length} Decretos</span>
+                                                    <span className="ml-auto bg-amber-50 text-amber-700 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest border border-amber-100">{getParishDecrees(parish.id).length} Decretos</span>
                                                     <div className="text-gray-400 ml-2">{isParishOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
                                                 </div>
                                                 {isParishOpen && (<div className="px-4 pb-4 animate-in fade-in duration-300"><DecreeTable decrees={getParishDecrees(parish.id)} /></div>)}
@@ -322,14 +314,14 @@ const ChanceryDecreeCorrectionViewPage = () => {
                 })}
 
                 {unassignedDecrees.length > 0 && (
-                    <div className="bg-purple-50/30 rounded-[2.5rem] shadow-sm border border-dashed border-purple-200 overflow-hidden">
-                        <div className="p-6 flex items-center gap-4 border-b border-purple-100/50">
-                            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-purple-100">
-                                <FileSignature className="w-6 h-6 text-purple-600" />
+                    <div className="bg-amber-50/30 rounded-[2.5rem] shadow-sm border border-dashed border-amber-200 overflow-hidden">
+                        <div className="p-6 flex items-center gap-4 border-b border-amber-100/50">
+                            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-amber-100">
+                                <FileSignature className="w-6 h-6 text-amber-600" />
                             </div>
                             <div>
-                                <h3 className="font-black text-xl text-purple-900 uppercase tracking-tighter">Sede Central / Otros</h3>
-                                <p className="text-[10px] font-bold text-purple-700/60 uppercase tracking-[0.2em] mt-1">Decretos sin clasificar por parroquia</p>
+                                <h3 className="font-black text-xl text-amber-900 uppercase tracking-tighter">Sede Central / Otros</h3>
+                                <p className="text-[10px] font-bold text-amber-700/60 uppercase tracking-[0.2em] mt-1">Decretos sin clasificar por parroquia</p>
                             </div>
                         </div>
                         <div className="p-6 lg:p-8"><DecreeTable decrees={unassignedDecrees} /></div>
@@ -347,18 +339,18 @@ const ChanceryDecreeCorrectionViewPage = () => {
 
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-6">
                     <div className="flex items-center gap-4">
-                        <div className="bg-purple-100 p-3 rounded-2xl text-purple-600 relative">
+                        <div className="bg-amber-100 p-3 rounded-2xl text-amber-600 relative">
                             <ShieldAlert className="w-7 h-7" />
                             <div className="absolute -top-1 -right-1 bg-blue-500 rounded-full p-0.5"><Cloud className="w-3 h-3 text-white" /></div>
                         </div>
                         <div>
-                            <h1 className="text-3xl font-black text-gray-900 font-serif tracking-tight">Decretos de Corrección</h1>
+                            <h1 className="text-3xl font-black text-gray-900 font-serif tracking-tight">Decretos de Reposición</h1>
                             <p className="text-gray-500 font-medium uppercase text-[10px] tracking-widest mt-1">Archivo Global de la Diócesis</p>
                         </div>
                     </div>
                     <Button
-                        onClick={() => navigate('/chancery/decree-correction/new')}
-                        className="bg-gradient-to-r from-purple-600 to-purple-800 hover:scale-[1.02] text-white px-8 py-6 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-purple-900/20 transition-all active:scale-95"
+                        onClick={() => navigate('/chancery/decree-replacement/new')}
+                        className="bg-gradient-to-r from-amber-500 to-amber-700 hover:scale-[1.02] text-white px-8 py-6 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-amber-900/20 transition-all active:scale-95"
                     >
                         <PlusCircle className="w-4 h-4 mr-2" /> Emitir Nuevo Decreto
                     </Button>
@@ -367,9 +359,9 @@ const ChanceryDecreeCorrectionViewPage = () => {
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                     <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-[2rem] border border-gray-100 shadow-sm mb-6">
                         <TabsList className="grid w-full md:w-auto grid-cols-1 sm:grid-cols-3 gap-2 bg-transparent p-0">
-                            <TabsTrigger value="bautismo" className="px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest data-[state=active]:bg-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md transition-all bg-gray-50 text-gray-400">Bautizos</TabsTrigger>
-                            <TabsTrigger value="confirmacion" className="px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest data-[state=active]:bg-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md transition-all bg-gray-50 text-gray-400" disabled>Confirmaciones</TabsTrigger>
-                            <TabsTrigger value="matrimonio" className="px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest data-[state=active]:bg-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md transition-all bg-gray-50 text-gray-400" disabled>Matrimonios</TabsTrigger>
+                            <TabsTrigger value="bautismo" className="px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest data-[state=active]:bg-amber-600 data-[state=active]:text-white data-[state=active]:shadow-md transition-all bg-gray-50 text-gray-400">Bautizos</TabsTrigger>
+                            <TabsTrigger value="confirmacion" className="px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest data-[state=active]:bg-amber-600 data-[state=active]:text-white data-[state=active]:shadow-md transition-all bg-gray-50 text-gray-400" disabled>Confirmaciones</TabsTrigger>
+                            <TabsTrigger value="matrimonio" className="px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest data-[state=active]:bg-amber-600 data-[state=active]:text-white data-[state=active]:shadow-md transition-all bg-gray-50 text-gray-400" disabled>Matrimonios</TabsTrigger>
                         </TabsList>
 
                         <div className="relative w-full md:w-80">
@@ -379,7 +371,7 @@ const ChanceryDecreeCorrectionViewPage = () => {
                                 placeholder="Buscar decreto o titular..."
                                 value={searchTerm}
                                 onChange={e => setSearchTerm(e.target.value)}
-                                className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-purple-500/20 focus:bg-white outline-none text-[11px] font-bold text-gray-700 uppercase transition-all"
+                                className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-amber-500/20 focus:bg-white outline-none text-[11px] font-bold text-gray-700 uppercase transition-all"
                             />
                         </div>
                     </div>
@@ -390,16 +382,16 @@ const ChanceryDecreeCorrectionViewPage = () => {
                 </Tabs>
             </div>
 
-            <ViewCorrectionDecreeModal isOpen={viewModalOpen} onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }} decreeData={selectedDecree} isMasterCopy={true} />
+            <ViewRepositionDecreeModal isOpen={viewModalOpen} onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }} decreeData={selectedDecree} isMasterCopy={true} />
 
             <ConfirmationDialog 
                 isOpen={deleteConfig.isOpen} 
                 title="Restaurar Partida y Eliminar Decreto" 
-                message="Al confirmar, el decreto será eliminado de la Nube. La partida supletoria será destruida y la partida original recuperará su validez legal remotamente." 
+                message="Al confirmar, el decreto será eliminado de la Nube y la partida supletoria será destruida permanentemente." 
                 onConfirm={confirmDelete} 
                 onClose={() => setDeleteConfig({ isOpen: false, id: null, name: '' })} 
                 variant="destructive"
-                confirmText={isDeleting ? "Restaurando..." : "Confirmar Restauración"}
+                confirmText={isDeleting ? "Eliminando..." : "Confirmar Eliminación"}
             />
         </DashboardLayout>
     );
@@ -413,4 +405,4 @@ const EmptyState = () => (
     </div>
 );
 
-export default ChanceryDecreeCorrectionViewPage;
+export default ChanceryDecreeReplacementViewPage;
