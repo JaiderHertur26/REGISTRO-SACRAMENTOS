@@ -23,7 +23,11 @@ const EditDecreeRepositionSheet = () => {
     const [activeTab, setActiveTab] = useState("bautismo");
     const [decrees, setDecrees] = useState([]);
     const [selectedDecreeId, setSelectedDecreeId] = useState("");
+    
+    // 🚀 AQUÍ FALTABA DECLARAR ISSUBMITTING
     const [isLoading, setIsLoading] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false); 
+    
     const [searchTerm, setSearchTerm] = useState("");
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [conceptos, setConceptos] = useState([]);
@@ -80,7 +84,7 @@ const EditDecreeRepositionSheet = () => {
                     parroquia: parishLabel,
                     numeroDeDecreto: payload.decreeNumber || payload.numeroDecreto || '',
                     fechaEmision: payload.decreeDate || payload.fechaDecreto || '',
-                    conceptoAnulacion: payload.conceptoAnulacionId || ''
+                    conceptoAnulacionId: payload.conceptoAnulacionId || ''
                 });
 
                 const bd = payload.datosNuevaPartida || payload.newPartidaSummary || {};
@@ -127,7 +131,7 @@ const EditDecreeRepositionSheet = () => {
 
         try {
             const pad = (num) => String(num).padStart(4, '0');
-            const conceptoMatch = conceptos.find(c => String(c.id) === String(decreeData.conceptoAnulacion));
+            const conceptoMatch = conceptos.find(c => String(c.id) === String(decreeData.conceptoAnulacionId));
             const causaText = conceptoMatch ? conceptoMatch.concepto.toUpperCase() : 'REPOSICIÓN';
             const fechaTexto = convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, '').toUpperCase();
             
@@ -162,7 +166,7 @@ const EditDecreeRepositionSheet = () => {
                 ...originalPayload,
                 decreeNumber: decreeData.numeroDeDecreto, numeroDecreto: decreeData.numeroDecreto,
                 decreeDate: decreeData.fechaEmision, fechaDecreto: decreeData.fechaEmision,
-                conceptoAnulacionId: decreeData.conceptoAnulacion, causa: causaText,
+                conceptoAnulacionId: decreeData.conceptoAnulacionId, causa: causaText,
                 targetName: `${newPartida.apellidos} ${newPartida.nombres}`.trim(),
                 ...newPartida,
                 datosNuevaPartida: { ...newPartida, book: newPartida.book_number, page: newPartida.page_number, entry: newPartida.entry_number },
@@ -265,7 +269,7 @@ const EditDecreeRepositionSheet = () => {
                                                     </div>
                                                     <div className="space-y-2">
                                                         <label className="text-[10px] font-black text-gray-400 uppercase">Causa de Reposición</label>
-                                                        <select name="conceptoAnulacion" value={decreeData.conceptoAnulacion} onChange={handleDecreeChange} className="w-full h-[50px] px-4 border border-gray-200 rounded-xl text-sm font-bold uppercase outline-none focus:ring-2 focus:ring-amber-500/20 bg-white text-gray-700">
+                                                        <select name="conceptoAnulacionId" value={decreeData.conceptoAnulacionId} onChange={handleDecreeChange} className="w-full h-[50px] px-4 border border-gray-200 rounded-xl text-sm font-bold uppercase outline-none focus:ring-2 focus:ring-amber-500/20 bg-white text-gray-700">
                                                             <option value="">SELECCIONE...</option>
                                                             {conceptos.map(c => <option key={c.id} value={c.id}>{c.codigo} - {c.concepto}</option>)}
                                                         </select>
@@ -329,7 +333,7 @@ const EditDecreeRepositionSheet = () => {
                                                     <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-2"><Users className="w-3 h-3"/> Padrinos</label><Input name="padrinos" value={newPartida.padrinos} onChange={handleNewPartidaChange} className="py-6 font-bold shadow-sm" /></div>
 
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t pt-10">
-                                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Sacerdote Celebrante</label><Input name="ministro" value={newPartida.ministro} onChange={handleNewPartidaChange} className="py-6 font-black text-blue-900" /></div>
+                                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Sacerdote Celebrante</label><Input name="ministro" value={newPartida.ministro} onChange={handleNewPartidaChange} className="py-6 font-black text-blue-900 shadow-sm" /></div>
                                                         <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Firma (Da Fe)</label><Input name="daFe" value={newPartida.daFe} onChange={handleNewPartidaChange} className="py-6 font-bold text-gray-500 bg-gray-50" /></div>
                                                     </div>
 
@@ -344,7 +348,7 @@ const EditDecreeRepositionSheet = () => {
                                                 <Button type="button" onClick={() => setShowDeleteModal(true)} disabled={isSubmitting} className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-6 py-8 rounded-full font-black uppercase tracking-widest text-[10px] shadow-lg transition-all active:scale-95">
                                                     <Trash2 className="w-5 h-5" />
                                                 </Button>
-                                                <Button type="submit" disabled={isLoading} className="bg-gradient-to-r from-amber-500 to-amber-700 text-white px-10 py-8 rounded-full font-black uppercase tracking-widest text-[10px] shadow-xl active:scale-95 transition-all">
+                                                <Button type="submit" disabled={isLoading || isSubmitting} className="bg-gradient-to-r from-amber-500 to-amber-700 text-white px-10 py-8 rounded-full font-black uppercase tracking-widest text-[10px] shadow-xl active:scale-95 transition-all">
                                                     {isSubmitting ? <Loader2 className="animate-spin w-5 h-5 mr-3" /> : <Save className="w-5 h-5 mr-3" />} Guardar Cambios
                                                 </Button>
                                             </div>
