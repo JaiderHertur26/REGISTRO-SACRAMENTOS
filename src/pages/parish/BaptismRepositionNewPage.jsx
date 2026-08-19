@@ -17,7 +17,6 @@ const BaptismRepositionNewPage = () => {
     const navigate = useNavigate();
     const { toast } = useToast();
     
-    // 🚀 AHORA TRAEMOS TODO DESDE EL CEREBRO GLOBAL (useAppData)
     const { getParrocoActual, getMisDatosList, getCiudadesList, getParrocos } = useAppData();
     
     const [activeTab, setActiveTab] = useState("bautismo");
@@ -25,9 +24,7 @@ const BaptismRepositionNewPage = () => {
     const [conceptos, setConceptos] = useState([]);
     const [cloudParams, setCloudParams] = useState({});
     
-    // 🚀 ESTADOS PARA LISTAS AUXILIARES
-    const [ciudades, setCiudades] = useState([]);
-    const [listaSacerdotes, setListaSacerdotes] = useState([]);
+    const [auxiliares, setAuxiliares] = useState({ ciudades: [], ministros: [] });
     
     const [decreeData, setDecreeData] = useState({ 
         numeroDecreto: '', 
@@ -43,16 +40,13 @@ const BaptismRepositionNewPage = () => {
         serialRegCivil: '', nuipNuit: '', oficinaRegistro: '', fechaExpedicion: ''
     });
 
-    // --- CARGA INICIAL DESDE LA NUBE Y CONTEXTO ---
     useEffect(() => {
         const loadInitialData = async () => {
             if (!user?.parishId) return;
             try {
-                // 1. Parámetros Supletorios
                 const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
                 if (paramsData && paramsData.bautizos_params) setCloudParams(paramsData.bautizos_params);
 
-                // 2. Conceptos de Anulación/Reposición
                 let targetDioceseId = user.dioceseId || user.diocese_id;
                 if (!targetDioceseId) {
                     const { data: pData } = await supabase.from('parishes').select('diocese_id').eq('id', user.parishId).single();
@@ -64,22 +58,19 @@ const BaptismRepositionNewPage = () => {
                     if (data) setConceptos(data.filter(c => c.tipo === 'porReposicion' || c.concepto?.toLowerCase().includes('reposici')));
                 }
 
-                // 🚀 3. CIUDADES DESDE EL CEREBRO
                 const listaCiudadesCruda = getCiudadesList(user.parishId) || [];
                 setCiudades(listaCiudadesCruda.map(c => (c.nombre || '').toUpperCase()));
 
-                // 🚀 4. SACERDOTES DESDE EL CEREBRO
                 const parrocosList = getParrocos(user.parishId) || [];
                 setListaSacerdotes(parrocosList);
 
-                // 🚀 5. PÁRROCO ACTUAL AUTO-RELLENADO (Da Fe y Celebrante)
                 const priest = getParrocoActual(user.parishId);
                 if (priest) {
                     const name = `${priest.nombre} ${priest.apellido || ''}`.trim().toUpperCase();
                     setFormData(prev => ({ 
                         ...prev, 
                         ministerFaith: name, 
-                        minister: name // También lo inyectamos como celebrante
+                        minister: name 
                     })); 
                 }
 
@@ -90,7 +81,6 @@ const BaptismRepositionNewPage = () => {
         loadInitialData();
     }, [user, getParrocoActual, getCiudadesList, getParrocos]);
 
-    // MANEJADORES DE CAMPOS
     const handleChange = (e) => {
         const { name, value } = e.target;
         const uppercaseFields = ['firstName', 'lastName', 'fatherName', 'motherName', 'paternalGrandparents', 'maternalGrandparents', 'godparents', 'minister', 'ministerFaith', 'oficinaRegistro'];
@@ -98,7 +88,6 @@ const BaptismRepositionNewPage = () => {
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
 
-    // 🚀 MANEJADOR EXCLUSIVO PARA CITYAUTOCOMPLETE
     const handleCityChange = (data) => {
         let value = data?.target?.value || data?.nombre || data || "";
         setFormData(prev => ({ ...prev, placeOfBirth: String(value).toUpperCase() }));
@@ -109,7 +98,6 @@ const BaptismRepositionNewPage = () => {
         setDecreeData(prev => ({ ...prev, [name]: name === 'numeroDecreto' ? value.toUpperCase() : value }));
     };
 
-    // PROCESAMIENTO
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!decreeData.numeroDecreto || !formData.firstName || !formData.lastName || !decreeData.conceptoAnulacionId) {
@@ -185,7 +173,6 @@ const BaptismRepositionNewPage = () => {
         finally { setIsSubmitting(false); }
     };
 
-    // --- ESTILOS VISUALES PREMIUM ---
     const inputClass = "h-11 w-full px-4 py-2 text-sm text-gray-900 font-bold border border-gray-200 rounded-xl focus:ring-4 focus:ring-[#4B7BA7]/5 focus:border-[#4B7BA7] outline-none transition-all bg-gray-50/50 focus:bg-white uppercase shadow-sm";
     const labelClass = "block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1";
 
@@ -198,10 +185,8 @@ const BaptismRepositionNewPage = () => {
 
     return (
         <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-            {/* 🚀 LISTA DE SACERDOTES CONECTADA AL DATALIST */}
-            <datalist id="lista-parrocos">
-                {listaSacerdotes.map((s, idx) => <option key={idx} value={`${s.nombre} ${s.apellido || ''}`.trim().toUpperCase()} />)}
-            </datalist>
+            <datalist id="ciudades-list">{auxiliares.ciudades?.map((c, i) => <option key={i} value={c} />)}</datalist>
+            <datalist id="ministros-list">{auxiliares.ministros?.map((m, i) => <option key={i} value={m} />)}</datalist>
 
             <div className="max-w-5xl mx-auto pb-20 pt-6">
                 <div className="mb-10 flex flex-col md:flex-row justify-between items-end gap-6">
@@ -261,7 +246,6 @@ const BaptismRepositionNewPage = () => {
                                     <SectionHeader number="03" title="Asiento del Sacramento" icon={Calendar} />
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                         <div><label className={labelClass}>Fecha Sacramento</label><input type="date" name="sacramentDate" value={formData.sacramentDate} onChange={handleChange} className={inputClass} /></div>
-                                        <div><label className={labelClass}>Lugar Bautismo</label><input name="lugarBautismo" value={formData.lugarBautismo} onChange={handleChange} className={inputClass} /></div>
                                     </div>
                                 </section>
 
@@ -282,8 +266,7 @@ const BaptismRepositionNewPage = () => {
                                         <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="birthDate" value={formData.birthDate} onChange={handleChange} className={inputClass} /></div>
                                         <div>
                                             <label className={labelClass}>Lugar de Nacimiento</label>
-                                            {/* 🚀 AUTOCOMPLETADO DE CIUDADES ENCHUFADO */}
-                                            <CityAutocomplete name="placeOfBirth" value={formData.placeOfBirth} onChange={handleCityChange} cities={ciudades} className={inputClass} />
+                                            <CityAutocomplete name="placeOfBirth" value={formData.placeOfBirth} onChange={handleCityChange} cities={auxiliares.ciudades} className={inputClass} />
                                         </div>
                                     </div>
                                 </section>
@@ -315,9 +298,8 @@ const BaptismRepositionNewPage = () => {
                                 <section>
                                     <SectionHeader number="06" title="Ministro y Autoridad" icon={PenTool} />
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                        {/* 🚀 AUTOCOMPLETADO DE SACERDOTES CON DATALIST ENCHUFADO */}
-                                        <div><label className={labelClass}>Sacerdote Celebrante</label><input name="minister" list="lista-parrocos" value={formData.minister} onChange={handleChange} className={`${inputClass} border-l-8 border-l-[#4B7BA7]`} /></div>
-                                        <div><label className={labelClass}>Firma (Da Fe) *</label><input name="ministerFaith" required list="lista-parrocos" value={formData.ministerFaith} onChange={handleChange} className={inputClass} /></div>
+                                        <div><label className={labelClass}>Sacerdote Celebrante</label><input name="minister" list="ministros-list" value={formData.minister} onChange={handleChange} className={`${inputClass} border-l-8 border-l-[#4B7BA7]`} /></div>
+                                        <div><label className={labelClass}>Firma (Da Fe) *</label><input name="ministerFaith" required list="ministros-list" value={formData.ministerFaith} onChange={handleChange} className={inputClass} /></div>
                                     </div>
                                     <div><label className={labelClass}>Padrinos</label><input name="godparents" value={formData.godparents} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
                                 </section>
