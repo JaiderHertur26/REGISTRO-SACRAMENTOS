@@ -10,14 +10,14 @@ import { Save, ArrowLeft, FileText, UserPlus, Trash2, Loader2, AlertCircle } fro
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { Modal } from '@/components/ui/Modal';
-import { marginalNotesEngine } from '@/utils/marginalNotesEngine';
+import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 
 const EditDecreeCorrectionSheet = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const { toast } = useToast();
-    const { getMisDatosList } = useAppData();
+    const { getMisDatosList, obtenerNotasAlMargen } = useAppData();
 
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -25,6 +25,7 @@ const EditDecreeCorrectionSheet = () => {
     
     const [conceptos, setConceptos] = useState([]);
     const [originalPayload, setOriginalPayload] = useState(null);
+    const [foundRecord, setFoundRecord] = useState(null);
 
     const [decreeData, setDecreeData] = useState({
         parroquia: '', numeroDeDecreto: '', fechaEmision: '', conceptoAnulacion: '', nombreBautizado: '', Libro: '', folio: '', numero: ''
@@ -65,7 +66,6 @@ const EditDecreeCorrectionSheet = () => {
                 const payload = typeof decree.payload === 'string' ? JSON.parse(decree.payload) : decree.payload;
                 setOriginalPayload(payload);
 
-                // 🧠 MAGIA: Búsqueda Inteligente de la Partida Original para rescatar datos vacíos
                 const pad = (num) => String(num).padStart(4, '0');
                 let origDataRaw = {};
                 
@@ -74,10 +74,12 @@ const EditDecreeCorrectionSheet = () => {
                     const p = payload.originalPartidaSummary.page || payload.originalPartidaSummary.folio;
                     const e = payload.originalPartidaSummary.entry || payload.originalPartidaSummary.numero;
                     
-                    const { data: origData } = await supabase.from('baptisms').select('raw_data')
-                        .eq('parish_id', user.parishId).eq('book_number', pad(b)).eq('folio', pad(p)).eq('number', pad(e)).maybeSingle();
+                    const { data: origData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId).eq('book_number', pad(b)).eq('folio', pad(p)).eq('number', pad(e)).maybeSingle();
                         
-                    if (origData) origDataRaw = origData.raw_data || {};
+                    if (origData) {
+                        origDataRaw = origData.raw_data || {};
+                        setFoundRecord({ ...origData.raw_data, id: origData.id });
+                    }
                 }
 
                 setDecreeData({
@@ -91,23 +93,24 @@ const EditDecreeCorrectionSheet = () => {
                     numero: payload.originalPartidaSummary?.entry || payload.originalPartidaSummary?.numero || ''
                 });
 
-                // 🚀 POBLACIÓN INTELIGENTE: Mezcla lo editado con los datos de la original
+                const bd = payload.datosNuevaPartida || payload.newPartidaSummary || {};
+
                 setNewPartida({
-                    lugarBautismo: payload.lugarBautismo || origDataRaw.lugarBautismo || origDataRaw.lugar_bautismo || '',
-                    fechaSacramento: payload.fechaSacramento || origDataRaw.fechaSacramento || origDataRaw.celebration_date || '',
-                    apellidos: payload.apellidos || payload.newPartidaSummary?.apellidos || origDataRaw.apellidos || origDataRaw.lastName || '',
-                    nombres: payload.nombres || payload.newPartidaSummary?.nombres || origDataRaw.nombres || origDataRaw.firstName || '',
-                    fechaNacimiento: payload.fechaNacimiento || origDataRaw.fechaNacimiento || origDataRaw.birthDate || '',
-                    lugarNacimiento: payload.lugarNacimiento || origDataRaw.lugarNacimiento || origDataRaw.lugarNacimientoDetalle || '',
-                    sexo: payload.sexo || origDataRaw.sexo || origDataRaw.sex || '',
-                    nombrePadre: payload.nombrePadre || origDataRaw.nombrePadre || origDataRaw.fatherName || '',
-                    nombreMadre: payload.nombreMadre || origDataRaw.nombreMadre || origDataRaw.motherName || '',
-                    tipoUnionPadres: payload.tipoUnionPadres || origDataRaw.tipoUnionPadres || origDataRaw.tipohijo || '',
-                    abuelosPaternos: payload.abuelosPaternos || origDataRaw.abuelosPaternos || origDataRaw.paternalGrandparents || '',
-                    abuelosMaternos: payload.abuelosMaternos || origDataRaw.abuelosMaternos || origDataRaw.maternalGrandparents || '',
-                    padrinos: payload.padrinos || origDataRaw.padrinos || origDataRaw.godparents || '',
-                    ministro: payload.ministro || origDataRaw.ministro || origDataRaw.minister || '',
-                    daFe: payload.daFe || origDataRaw.daFe || origDataRaw.ministerFaith || '',
+                    lugarBautismo: payload.lugarBautismo || bd.lugarBautismo || origDataRaw.lugarBautismo || '',
+                    fechaSacramento: payload.fechaSacramento || bd.fechaSacramento || origDataRaw.fechaSacramento || '',
+                    apellidos: payload.apellidos || bd.apellidos || origDataRaw.apellidos || '',
+                    nombres: payload.nombres || bd.nombres || origDataRaw.nombres || '',
+                    fechaNacimiento: payload.fechaNacimiento || bd.fechaNacimiento || origDataRaw.fechaNacimiento || '',
+                    lugarNacimiento: payload.lugarNacimiento || bd.lugarNacimiento || origDataRaw.lugarNacimiento || '',
+                    sexo: payload.sexo || bd.sexo || bd.sex || origDataRaw.sexo || 'MASCULINO',
+                    nombrePadre: payload.nombrePadre || bd.nombrePadre || origDataRaw.nombrePadre || '',
+                    nombreMadre: payload.nombreMadre || bd.nombreMadre || origDataRaw.nombreMadre || '',
+                    tipoUnionPadres: payload.tipoUnionPadres || bd.tipoUnionPadres || origDataRaw.tipoUnionPadres || 'MATRIMONIO CATÓLICO',
+                    abuelosPaternos: payload.abuelosPaternos || bd.abuelosPaternos || origDataRaw.abuelosPaternos || '',
+                    abuelosMaternos: payload.abuelosMaternos || bd.abuelosMaternos || origDataRaw.abuelosMaternos || '',
+                    padrinos: payload.padrinos || bd.padrinos || origDataRaw.padrinos || '',
+                    ministro: payload.ministro || bd.ministro || origDataRaw.ministro || '',
+                    daFe: payload.daFe || bd.daFe || bd.ministerFaith || origDataRaw.daFe || '',
                     observaciones: payload.observaciones || ''
                 });
 
@@ -121,35 +124,47 @@ const EditDecreeCorrectionSheet = () => {
     }, [user, decreeId]);
 
     const handleDecreeChange = (e) => setDecreeData(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
-    const handleNewPartidaChange = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
+    const handleNewPartidaChangeUpper = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
     const handleNewPartidaChangeRaw = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
-    const handleSave = async (e) => {
-        e.preventDefault();
+    const handleSave = async () => {
         setIsSubmitting(true);
 
         try {
             const pad = (num) => String(num).padStart(4, '0');
             const supSum = originalPayload.newPartidaSummary;
+            const notasConfig = typeof obtenerNotasAlMargen === 'function' ? obtenerNotasAlMargen(user.parishId) : null;
 
-            const noteAnulada = marginalNotesEngine.forAnnulledCorrection(user?.parishId, {
-                numeroDecreto: decreeData.numeroDeDecreto, fechaDecreto: decreeData.fechaEmision,
-                libroNuevo: supSum.book || supSum.Libro, folioNuevo: supSum.page || supSum.folio, numeroNuevo: supSum.entry || supSum.numero
-            });
+            let noteAnulada = notasConfig?.porCorreccion?.anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO]";
+            noteAnulada = noteAnulada
+                .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
+                .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
+                .replace(/\[LIBRO_NUEVA\]/g, pad(supSum.book || supSum.Libro))
+                .replace(/\[FOLIO_NUEVA\]/g, pad(supSum.page || supSum.folio))
+                .replace(/\[NUMERO_PARTIDA_NUEVA\]/g, pad(supSum.entry || supSum.numero));
 
-            const notaSupletoriaFinal = marginalNotesEngine.forNewCorrection(user?.parishId, {
-                numeroDecreto: decreeData.numeroDeDecreto, fechaDecreto: decreeData.fechaEmision,
-                libroAnulada: decreeData.Libro, folioAnulada: decreeData.folio, numeroAnulada: decreeData.numero,
-                ministro: newPartida.daFe
-            });
+            let notaSupletoriaFinal = notasConfig?.porCorreccion?.nuevaPartida || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] Y ANULA LA ORIGINAL.";
+            notaSupletoriaFinal = notaSupletoriaFinal
+                .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
+                .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
+                .replace(/\[OFICINA_DECRETO\]/g, 'CANCILLERÍA')
+                .replace(/\[LIBRO_ANULADA\]/g, pad(decreeData.Libro))
+                .replace(/\[FOLIO_ANULADA\]/g, pad(decreeData.folio))
+                .replace(/\[NUMERO_PARTIDA_ANULADA\]/g, pad(decreeData.numero))
+                .replace(/\[NOMBRE_SACERDOTE\]/g, newPartida.daFe);
 
-            const { data: origData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
-                .eq('book_number', pad(decreeData.Libro)).eq('folio', pad(decreeData.folio)).eq('number', pad(decreeData.numero)).maybeSingle();
+            if (foundRecord) {
+                const oldRawData = { ...foundRecord };
+                oldRawData.notaMarginal = noteAnulada;
+                oldRawData.estado = "anulada";
+                oldRawData.status = "anulada";
+                oldRawData.isAnnulled = true;
+                oldRawData.annulmentDate = decreeData.fechaEmision;
+                oldRawData.annulmentDecree = decreeData.numeroDeDecreto;
+                oldRawData.conceptoAnulacionId = decreeData.conceptoAnulacion;
+                oldRawData.tipoNotaAlMargen = "porCorreccion.anulada";
 
-            if (origData) {
-                await supabase.from('baptisms').update({ 
-                    nota_marginal: noteAnulada, raw_data: { ...origData.raw_data, notaMarginal: noteAnulada } 
-                }).eq('id', origData.id);
+                await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada, raw_data: oldRawData }).eq('id', foundRecord.id);
             }
 
             const { data: supData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
@@ -158,20 +173,11 @@ const EditDecreeCorrectionSheet = () => {
             if (supData) {
                 const updatedRaw = {
                     ...supData.raw_data, ...newPartida,
-                    firstName: newPartida.nombres, lastName: newPartida.apellidos,
-                    fecbau: newPartida.fechaSacramento, fecnac: newPartida.fechaNacimiento,
-                    lugarn: newPartida.lugarNacimiento, sex: newPartida.sexo,
-                    padre: newPartida.nombrePadre, madre: newPartida.nombreMadre,
-                    tipohijo: newPartida.tipoUnionPadres, godparents: newPartida.padrinos,
-                    minister: newPartida.ministro, dafe: newPartida.daFe, notaMarginal: notaSupletoriaFinal
+                    nombres: newPartida.nombres, apellidos: newPartida.apellidos, fecbau: newPartida.fechaSacramento, fecnac: newPartida.fechaNacimiento, lugarn: newPartida.lugarNacimiento, sex: newPartida.sexo, padre: newPartida.nombrePadre, madre: newPartida.nombreMadre, tipohijo: newPartida.tipoUnionPadres, godparents: newPartida.padrinos, ministro: newPartida.ministro, dafe: newPartida.daFe, notaMarginal: notaSupletoriaFinal
                 };
                 
                 await supabase.from('baptisms').update({ 
-                    celebration_date: newPartida.fechaSacramento, nombres: newPartida.nombres, apellidos: newPartida.apellidos,
-                    sexo: newPartida.sexo, fecha_nacimiento: newPartida.fechaNacimiento, lugar_nacimiento: newPartida.lugarNacimiento, 
-                    lugar_bautismo: newPartida.lugarBautismo, nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre,
-                    padrinos: newPartida.padrinos, ministro: newPartida.ministro, da_fe: newPartida.daFe,
-                    tipo_union_padres: newPartida.tipoUnionPadres, nota_marginal: notaSupletoriaFinal, raw_data: updatedRaw
+                    celebration_date: newPartida.fechaSacramento || null, nombres: newPartida.nombres, apellidos: newPartida.apellidos, sexo: newPartida.sexo, fecha_nacimiento: newPartida.fechaNacimiento || null, lugar_nacimiento: newPartida.lugarNacimiento, lugar_bautismo: newPartida.lugarBautismo, nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre, padrinos: newPartida.padrinos, ministro: newPartida.ministro, da_fe: newPartida.daFe, tipo_union_padres: newPartida.tipoUnionPadres, nota_marginal: notaSupletoriaFinal, raw_data: updatedRaw
                 }).eq('id', supData.id);
             }
 
@@ -179,9 +185,10 @@ const EditDecreeCorrectionSheet = () => {
                 ...originalPayload,
                 decreeNumber: decreeData.numeroDeDecreto, decreeDate: decreeData.fechaEmision,
                 conceptoAnulacionId: decreeData.conceptoAnulacion, observaciones: newPartida.observaciones,
-                targetName: decreeData.nombreBautizado, newTargetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(),
+                targetName: `${newPartida.apellidos} ${newPartida.nombres}`.trim(),
                 ...newPartida,
-                newPartidaSummary: { ...supSum, nombres: newPartida.nombres, apellidos: newPartida.apellidos }
+                datosNuevaPartida: { ...newPartida, book: supSum.book || supSum.Libro, page: supSum.page || supSum.folio, entry: supSum.entry || supSum.numero },
+                newPartidaSummary: { book: supSum.book || supSum.Libro, page: supSum.page || supSum.folio, entry: supSum.entry || supSum.numero, nombres: newPartida.nombres, apellidos: newPartida.apellidos }
             };
 
             await supabase.from('decretos').update({ payload: newPayload }).eq('id', decreeId);
@@ -199,13 +206,11 @@ const EditDecreeCorrectionSheet = () => {
             const pad = (num) => String(num).padStart(4, '0');
             const supSum = originalPayload.newPartidaSummary;
 
-            const { data: origData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
-                .eq('book_number', pad(decreeData.Libro)).eq('folio', pad(decreeData.folio)).eq('number', pad(decreeData.numero)).maybeSingle();
-
-            if (origData) {
-                const cleanedRaw = { ...origData.raw_data };
-                delete cleanedRaw.notaMarginal; cleanedRaw.anulado = false;
-                await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', origData.id);
+            if (foundRecord) {
+                const cleanedRaw = { ...foundRecord };
+                delete cleanedRaw.notaMarginal; delete cleanedRaw.anulado; delete cleanedRaw.isAnnulled;
+                cleanedRaw.status = 'seated'; cleanedRaw.estado = 'permanente';
+                await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', foundRecord.id);
             }
 
             if (supSum) {
@@ -214,7 +219,7 @@ const EditDecreeCorrectionSheet = () => {
 
             await supabase.from('decretos').delete().eq('id', decreeId);
 
-            toast({ title: "Eliminado", description: "Decreto eliminado y partida restaurada.", className: "bg-green-50 text-green-900" });
+            toast({ title: "Eliminado", description: "Decreto eliminado y partida original restaurada.", className: "bg-green-50 text-green-900" });
             navigate('/parroquia/decretos/ver-correcciones');
         } catch (error) { toast({ title: "Error", description: "No se pudo eliminar de la Nube.", variant: "destructive" }); } 
         finally { setIsSubmitting(false); setShowDeleteModal(false); }
@@ -227,7 +232,7 @@ const EditDecreeCorrectionSheet = () => {
             <div className="max-w-6xl mx-auto pb-24 pt-6">
                 <div className="flex items-center justify-between mb-8">
                     <div className="flex items-center gap-4">
-                        <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-full"><ArrowLeft /></Button>
+                        <Button variant="ghost" onClick={() => navigate('/parroquia/decretos/ver-correcciones')} className="rounded-full"><ArrowLeft /></Button>
                         <div>
                             <h1 className="text-3xl font-black text-gray-900 font-serif">Editar Decreto de Corrección</h1>
                             <p className="text-gray-500 font-medium uppercase text-[10px] tracking-widest">{decreeData.parroquia}</p>
@@ -293,11 +298,11 @@ const EditDecreeCorrectionSheet = () => {
                             </div>
                             <div className="p-10 space-y-10">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Apellidos</label><Input name="apellidos" value={newPartida.apellidos} onChange={handleNewPartidaChange} className="py-6 font-bold" /></div>
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Nombres</label><Input name="nombres" value={newPartida.nombres} onChange={handleNewPartidaChange} className="py-6 font-bold" /></div>
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Apellidos</label><Input name="apellidos" value={newPartida.apellidos} onChange={handleNewPartidaChangeUpper} className="py-6 font-bold" /></div>
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Nombres</label><Input name="nombres" value={newPartida.nombres} onChange={handleNewPartidaChangeUpper} className="py-6 font-bold" /></div>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Lugar Bautismo</label><Input name="lugarBautismo" value={newPartida.lugarBautismo} onChange={handleNewPartidaChange} /></div>
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Lugar Bautismo</label><Input name="lugarBautismo" value={newPartida.lugarBautismo} onChange={handleNewPartidaChangeUpper} /></div>
                                     <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">F. Bautismo</label><Input type="date" name="fechaSacramento" value={newPartida.fechaSacramento} onChange={handleNewPartidaChangeRaw} className="py-6" /></div>
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-black text-gray-400 uppercase">Sexo</label>
@@ -308,23 +313,23 @@ const EditDecreeCorrectionSheet = () => {
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                     <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">F. Nacimiento</label><Input type="date" name="fechaNacimiento" value={newPartida.fechaNacimiento} onChange={handleNewPartidaChangeRaw} /></div>
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Lugar Nacimiento</label><Input name="lugarNacimiento" value={newPartida.lugarNacimiento} onChange={handleNewPartidaChange} /></div>
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Lugar Nacimiento</label><Input name="lugarNacimiento" value={newPartida.lugarNacimiento} onChange={handleNewPartidaChangeUpper} /></div>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t pt-10">
                                     <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100 space-y-4">
                                         <p className="text-[10px] font-black text-blue-700 uppercase tracking-widest">Información del Padre</p>
-                                        <Input name="nombrePadre" value={newPartida.nombrePadre} onChange={handleNewPartidaChange} className="bg-white font-bold" />
+                                        <Input name="nombrePadre" value={newPartida.nombrePadre} onChange={handleNewPartidaChangeUpper} className="bg-white font-bold" />
                                     </div>
                                     <div className="bg-pink-50/50 p-6 rounded-3xl border border-pink-100 space-y-4">
                                         <p className="text-[10px] font-black text-pink-700 uppercase tracking-widest">Información de la Madre</p>
-                                        <Input name="nombreMadre" value={newPartida.nombreMadre} onChange={handleNewPartidaChange} className="bg-white font-bold" />
+                                        <Input name="nombreMadre" value={newPartida.nombreMadre} onChange={handleNewPartidaChangeUpper} className="bg-white font-bold" />
                                     </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Abuelos Paternos</label><Input name="abuelosPaternos" value={newPartida.abuelosPaternos} onChange={handleNewPartidaChange} /></div>
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Abuelos Maternos</label><Input name="abuelosMaternos" value={newPartida.abuelosMaternos} onChange={handleNewPartidaChange} /></div>
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Abuelos Paternos</label><Input name="abuelosPaternos" value={newPartida.abuelosPaternos} onChange={handleNewPartidaChangeUpper} /></div>
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Abuelos Maternos</label><Input name="abuelosMaternos" value={newPartida.abuelosMaternos} onChange={handleNewPartidaChangeUpper} /></div>
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-black text-gray-400 uppercase">Tipo de Unión</label>
                                         <select name="tipoUnionPadres" value={newPartida.tipoUnionPadres} onChange={handleNewPartidaChangeRaw} className="w-full h-[45px] px-4 border border-gray-200 rounded-xl font-bold bg-gray-50 uppercase">
@@ -333,16 +338,16 @@ const EditDecreeCorrectionSheet = () => {
                                     </div>
                                 </div>
 
-                                <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Padrinos</label><Input name="padrinos" value={newPartida.padrinos} onChange={handleNewPartidaChange} className="py-6 font-bold" /></div>
+                                <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Padrinos</label><Input name="padrinos" value={newPartida.padrinos} onChange={handleNewPartidaChangeUpper} className="py-6 font-bold" /></div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t pt-10">
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Sacerdote Celebrante</label><Input name="ministro" value={newPartida.ministro} onChange={handleNewPartidaChange} className="py-6 font-black text-blue-900" /></div>
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Da Fe (Firma)</label><Input name="daFe" value={newPartida.daFe} onChange={handleNewPartidaChange} className="py-6 font-bold text-gray-500 bg-gray-50" /></div>
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Sacerdote Celebrante</label><Input name="ministro" value={newPartida.ministro} onChange={handleNewPartidaChangeUpper} className="py-6 font-black text-blue-900" /></div>
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Da Fe (Firma)</label><Input name="daFe" value={newPartida.daFe} onChange={handleNewPartidaChangeUpper} className="py-6 font-bold text-gray-500 bg-gray-50" /></div>
                                 </div>
 
                                 <div className="space-y-2 border-t pt-10">
                                     <label className="text-[10px] font-black text-gray-400 uppercase">Observaciones del Decreto (Opcional)</label>
-                                    <textarea name="observaciones" value={newPartida.observaciones} onChange={handleNewPartidaChange} rows={4} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-500/20 uppercase font-bold text-gray-700 bg-amber-50" />
+                                    <textarea name="observaciones" value={newPartida.observaciones} onChange={handleNewPartidaChangeUpper} rows={4} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-500/20 uppercase font-bold text-gray-700 bg-amber-50" />
                                 </div>
                             </div>
                         </div>
