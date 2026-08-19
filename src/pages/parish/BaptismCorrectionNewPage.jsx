@@ -52,12 +52,10 @@ const BaptismCorrectionNewPage = () => {
           const priest = getParrocoActual(user.parishId);
           if (priest) setNewPartida(prev => ({ ...prev, daFe: `${priest.nombre} ${priest.apellido || ''}`.trim() }));
 
-          // 🚀 Traer parámetros de libros supletorios
           const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
           if (paramsData && paramsData.bautizos_params) setCloudParams(paramsData.bautizos_params);
         }
 
-        // 🚀 Traer Conceptos de Anulación desde Supabase
         let targetDioceseId = user.dioceseId || user.diocese_id;
         if (!targetDioceseId && user.parishId) {
           const { data: pData } = await supabase.from('parishes').select('diocese_id').eq('id', user.parishId).single();
@@ -103,6 +101,8 @@ const BaptismCorrectionNewPage = () => {
     setShowSuggestions(false);
   };
 
+  // 🚀 AQUÍ ESTÁ LA LÍNEA QUE FALTABA
+  const handleNewPartidaChangeRaw = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
   const handleNewPartidaChange = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
   const handleNewPartidaChangeUpper = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
 
@@ -189,16 +189,15 @@ const BaptismCorrectionNewPage = () => {
           anulado: false, estado: 'permanente', status: 'seated', notaMarginal: notaSupletoriaFinal
         };
 
-        // 🚀 EMPAQUE DEL PAYLOAD BLINDADO (Aquí estaba el fallo de los campos vacíos)
+        // 🚀 EMPAQUE DEL PAYLOAD BLINDADO 
         const payloadDecree = {
           decreeNumber: decreeData.numeroDeDecreto, 
           decreeDate: decreeData.fechaEmision,
           conceptoAnulacionId: decreeData.conceptoAnulacion, 
           observaciones: newPartida.observaciones,
-          targetName: decreeData.nombreBautizado, // <-- Nombre viejo
-          newTargetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(), // <-- Nombre nuevo
+          targetName: decreeData.nombreBautizado, 
+          newTargetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(), 
           
-          // 🚀 INYECCIÓN EXPLÍCITA DE DATOS PARA EL PDF:
           fechaSacramento: newPartida.fechaSacramento,
           sexo: newPartida.sexo,
           fechaNacimiento: newPartida.fechaNacimiento,
@@ -229,7 +228,7 @@ const BaptismCorrectionNewPage = () => {
             raw_data: { ...foundRecord, notaMarginal: noteAnulada, anulado: true, status: 'anulada' } 
         }).eq('id', foundRecord.id);
 
-        // 🚀 4. Incrementar consecutivos usando UPSERT
+        // 4. Incrementar consecutivos usando UPSERT
         const newParams = { ...cloudParams, suplementarioNumero: Number(supletorioNumero) + 1 };
         await supabase.from('parish_parameters').upsert({ parish_id: user.parishId, bautizos_params: newParams }, { onConflict: 'parish_id' });
 
