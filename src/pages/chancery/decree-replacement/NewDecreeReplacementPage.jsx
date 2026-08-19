@@ -5,273 +5,388 @@ import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Save, X, Loader2, ArrowLeft, FileText, UserPlus } from 'lucide-react';
+import { Save, ArrowLeft, FileText, UserPlus, Loader2, ShieldCheck, BookOpen, Calendar, User, Fingerprint, PenTool } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/supabaseClient';
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
+import { supabase } from '@/lib/supabaseClient';
 import CityAutocomplete from '@/components/CityAutocomplete'; 
 
 const NewDecreeReplacementPage = () => {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const { toast } = useToast();
-  const { data, getConceptosAnulacion, getMisDatosList, getCiudadesList } = useAppData();
-  
-  const [activeTab, setActiveTab] = useState("bautismo");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [conceptos, setConceptos] = useState([]);
-  const [ciudades, setCiudades] = useState([]);
-  
-  // Contadores en vivo desde Supabase
-  const [nextParams, setNextParams] = useState({ libro: '', folio: '', numero: '' });
+    const { user } = useAuth();
+    const navigate = useNavigate();
+    const { toast } = useToast();
+    
+    // 🚀 CEREBRO GLOBAL
+    const { getMisDatosList, getCiudadesList, getParrocos } = useAppData();
+    
+    const [activeTab, setActiveTab] = useState("bautismo");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    
+    // --- ESTADOS EXCLUSIVOS CANCILLERÍA ---
+    const [parishesList, setParishesList] = useState([]);
+    const [conceptos, setConceptos] = useState([]);
+    const [cloudParams, setCloudParams] = useState({});
+    
+    // --- ESTADOS PARA LAS LISTAS DEPENDIENTES DE LA PARROQUIA ---
+    const [ciudades, setCiudades] = useState([]);
+    const [listaSacerdotes, setListaSacerdotes] = useState([]);
+    
+    // --- ESTADOS DE FORMULARIO (Homologados con Parroquia) ---
+    const [decreeData, setDecreeData] = useState({ 
+        targetParishId: '', // Exclusivo Cancillería
+        numeroDecreto: '', 
+        fechaDecreto: new Date().toISOString().split('T')[0], 
+        conceptoAnulacionId: '' 
+    });
+    
+    const [formData, setFormData] = useState({
+        sacramentDate: '', firstName: '', lastName: '', sex: 'MASCULINO',
+        birthDate: '', placeOfBirth: '', fatherName: '', motherName: '', 
+        tipoUnionPadres: 'MATRIMONIO CATÓLICO', paternalGrandparents: '', 
+        maternalGrandparents: '', godparents: '', minister: '', ministerFaith: '',
+        serialRegCivil: '', nuipNuit: '', oficinaRegistro: '', fechaExpedicion: ''
+    });
 
-  const [bautismoDecree, setBautismoDecree] = useState({ 
-      parroquia: '', targetParishId: '', numeroDecreto: '', 
-      fechaDecreto: new Date().toISOString().split('T')[0], conceptoAnulacionId: ''
-  });
-  
-  const [bautismoNewPartida, setBautismoNewPartida] = useState({
-      sacramentDate: '', firstName: '', lastName: '', birthDate: '', 
-      lugarNacimientoDetalle: '', lugarBautismo: '', fatherName: '', ceduPadre: '', 
-      motherName: '', ceduMadre: '', tipoUnionPadres: 'MATRIMONIO CATÓLICO', sex: 'MASCULINO', 
-      paternalGrandparents: '', maternalGrandparents: '', godparents: '', 
-      minister: '', ministerFaith: '', serialRegCivil: '', nuipNuit: '', 
-      oficinaRegistro: '', fechaExpedicion: ''
-  });
+    // 1. CARGA INICIAL: Obtener Parroquias y Conceptos de la Diócesis
+    useEffect(() => {
+        const loadInitialData = async () => {
+            if (!user) return;
 
-  // 1. Carga inicial de Cancillería
-  useEffect(() => {
-    if (user) {
-        let currentDioceseId = user.dioceseId || user.diocese_id;
-        const allConcepts = getConceptosAnulacion(currentDioceseId);
-        setConceptos(allConcepts.filter(c => c.tipo === 'porReposicion' || c.tipo === 'porCorreccion'));
+            try {
+                let targetDioceseId = user.dioceseId || user.diocese_id;
+                if (!targetDioceseId && (user.chanceryId || user.chancery_id)) {
+                    const { data: chanData } = await supabase.from('chancelleries').select('diocese_id').eq('id', user.chanceryId || user.chancery_id).single();
+                    if (chanData) targetDioceseId = chanData.diocese_id;
+                }
+
+                if (targetDioceseId) {
+                    // Cargar Conceptos
+                    const { data: cData } = await supabase.from('conceptos_anulacion').select('*').eq('diocese_id', targetDioceseId).order('codigo', { ascending: true });
+                    if (cData) setConceptos(cData.filter(c => c.tipo === 'porReposicion' || c.concepto?.toLowerCase().includes('reposici')));
+
+                    // Cargar Parroquias
+                    const { data: pData } = await supabase.from('parishes').select('id, name, city').eq('diocese_id', targetDioceseId).order('name', { ascending: true });
+                    if (pData) setParishesList(pData);
+                }
+
+            } catch (error) {
+                console.error("Error inicializando datos:", error);
+            }
+        };
+
+        loadInitialData();
+    }, [user]);
+
+    // 2. EFECTO REACTIVO: Cuando la Cancillería elige la Parroquia Destino, traemos sus parámetros
+    useEffect(() => {
+        const loadParishDependencies = async () => {
+            const pid = decreeData.targetParishId;
+            if (!pid) {
+                setCloudParams({});
+                setCiudades([]);
+                setListaSacerdotes([]);
+                setFormData(prev => ({ ...prev, ministerFaith: '', minister: '' }));
+                return;
+            }
+
+            try {
+                // Parámetros supletorios
+                const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', pid).maybeSingle();
+                if (paramsData && paramsData.bautizos_params) setCloudParams(paramsData.bautizos_params);
+
+                // Listas auxiliares (Ciudades y Párrocos)
+                const listaCruda = getCiudadesList(pid) || [];
+                setCiudades(listaCruda.map(c => (c.nombre || '').toUpperCase()));
+
+                const parrocos = getParrocos(pid) || [];
+                setListaSacerdotes(parrocos);
+
+                // Párroco Activo
+                const activePriest = parrocos.find(p => String(p.estado || p.Estado) === '1');
+                if (activePriest) {
+                    let name = `${activePriest.nombre} ${activePriest.apellido || ''}`.trim().toUpperCase();
+                    if (!name.startsWith('PBRO')) name = `PBRO. ${name}`;
+                    setFormData(prev => ({ ...prev, ministerFaith: name, minister: name }));
+                } else {
+                    setFormData(prev => ({ ...prev, ministerFaith: 'PÁRROCO ENCARGADO', minister: 'PÁRROCO ENCARGADO' }));
+                }
+
+            } catch (error) {
+                console.error("Error cargando dependencias de la parroquia:", error);
+            }
+        };
+
+        loadParishDependencies();
+    }, [decreeData.targetParishId, getCiudadesList, getParrocos]);
+
+    // --- MANEJADORES DE ESTADO (Idénticos a Parroquia) ---
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        const uppercaseFields = ['firstName', 'lastName', 'fatherName', 'motherName', 'paternalGrandparents', 'maternalGrandparents', 'godparents', 'minister', 'ministerFaith', 'oficinaRegistro'];
+        const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
+        setFormData(prev => ({ ...prev, [name]: finalValue }));
+    };
+
+    const handleCityChange = (data) => {
+        let value = data?.target?.value || data?.nombre || data || "";
+        setFormData(prev => ({ ...prev, placeOfBirth: String(value).toUpperCase() }));
+    };
+
+    const handleDecreeChange = (e) => {
+        const { name, value } = e.target;
+        setDecreeData(prev => ({ ...prev, [name]: name === 'numeroDecreto' ? value.toUpperCase() : value }));
+    };
+
+    // --- SUBMIT 100% SUPABASE ---
+    const handleSubmit = async (e) => {
+        e.preventDefault();
         
-        const misDatos = getMisDatosList(user.chanceryId || user.id);
-        let parishLabel = `${user.dioceseName || 'Cancillería'} - ${user.city || 'Sede'}`;
-        if (misDatos && misDatos.length > 0) parishLabel = `${misDatos[0].nombre} - ${misDatos[0].ciudad}`;
-        setBautismoDecree(prev => ({ ...prev, parroquia: parishLabel.toUpperCase() }));
-    }
-  }, [user, getConceptosAnulacion, getMisDatosList]);
+        if (!decreeData.targetParishId) {
+            return toast({ title: "Faltan Datos", description: "Debe seleccionar la Parroquia Destino.", variant: "destructive" });
+        }
 
-  // 2. EFECTO REACTIVO 100% NUBE: Cargar datos de la Parroquia Destino
-  useEffect(() => {
-      const fetchParishLiveParams = async () => {
-          if (!bautismoDecree.targetParishId) {
-              setNextParams({ libro: '', folio: '', numero: '' });
-              setBautismoNewPartida(prev => ({ ...prev, ministerFaith: '' }));
-              setCiudades([]);
-              return;
-          }
+        if (!decreeData.numeroDecreto || !formData.firstName || !formData.lastName || !decreeData.conceptoAnulacionId) {
+            toast({ title: "Faltan Datos", description: "Complete los campos obligatorios (*).", variant: "destructive" });
+            return;
+        }
 
-          try {
-              // A. Traer Consecutivos Supletorios
-              const { data: pData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', bautismoDecree.targetParishId).maybeSingle();
-              if (pData && pData.bautizos_params) {
-                  setNextParams({
-                      libro: String(pData.bautizos_params.suplementarioLibro || '1').padStart(4, '0'),
-                      folio: String(pData.bautizos_params.suplementarioFolio || '1').padStart(4, '0'),
-                      numero: String(pData.bautizos_params.suplementarioNumero || '1').padStart(4, '0')
-                  });
-              } else {
-                  setNextParams({ libro: '0001', folio: '0001', numero: '0001' });
-              }
+        setIsSubmitting(true);
 
-              // B. Traer Párroco Activo
-              const { data: priestData } = await supabase.from('parrocos').select('payload').eq('parish_id', bautismoDecree.targetParishId);
-              if (priestData && priestData.length > 0) {
-                  const active = priestData.find(r => String(r.payload.estado || r.payload.Estado) === '1');
-                  if (active) {
-                      let name = `${active.payload.nombre || ''} ${active.payload.apellido || ''}`.trim().toUpperCase();
-                      if (!name.startsWith('PBRO')) name = `PBRO. ${name}`;
-                      setBautismoNewPartida(prev => ({ ...prev, ministerFaith: name }));
-                  }
-              }
+        try {
+            // 1. Validar Duplicidad en esa Parroquia
+            const { data: existingDecree } = await supabase.from('decretos').select('id').eq('tipo', 'reposicion')
+                .eq('parish_id', decreeData.targetParishId).contains('payload', { decreeNumber: decreeData.numeroDecreto }).maybeSingle();
 
-              // C. Traer Ciudades de esa Parroquia
-              const listaCruda = getCiudadesList(bautismoDecree.targetParishId) || [];
-              setCiudades(listaCruda.map(c => (c.nombre || '').toUpperCase()));
+            if (existingDecree) {
+                setIsSubmitting(false);
+                toast({ title: "Decreto Duplicado", description: `El decreto ${decreeData.numeroDecreto} ya existe en esa Parroquia.`, variant: "destructive" }); 
+                return;
+            }
 
-          } catch (error) {
-              console.error("Error conectando con la parroquia destino:", error);
-          }
-      };
+            // 2. Extraer Consecutivos Supletorios
+            const supletorioLibro = String(cloudParams.suplementarioLibro || '1').padStart(4, '0');
+            const supletorioFolio = String(cloudParams.suplementarioFolio || '1').padStart(4, '0');
+            const supletorioNumero = String(cloudParams.suplementarioNumero || '1').padStart(4, '0');
 
-      fetchParishLiveParams();
-  }, [bautismoDecree.targetParishId, getCiudadesList]);
+            // 3. Generar Nota Marginal
+            const conceptoMatch = conceptos.find(c => String(c.id) === String(decreeData.conceptoAnulacionId));
+            const conceptoText = conceptoMatch?.concepto || 'REPOSICIÓN POR DETERIORO O PÉRDIDA';
+            const fechaTexto = convertDateToSpanishText(decreeData.fechaDecreto).replace(/^EL\s+/i, '').toUpperCase();
+            
+            const notaMarginalTecnica = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${decreeData.numeroDecreto.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText.toUpperCase()}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
 
-  const handleChange = (e) => setBautismoNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
-  const handleCityChange = (data) => setNewPartida(prev => ({ ...prev, lugarNacimientoDetalle: String(data?.target?.value || data?.nombre || data || "").toUpperCase() }));
+            // 4. Mapeo idéntico al de Parroquia
+            const partidaToSave = {
+                ...formData,
+                Libro: supletorioLibro, folio: supletorioFolio, numero: supletorioNumero,
+                book_number: supletorioLibro, page_number: supletorioFolio, entry_number: supletorioNumero,
+                nombres: formData.firstName, apellidos: formData.lastName,
+                fecbau: formData.sacramentDate, fecnac: formData.birthDate,
+                lugarn: formData.placeOfBirth, sex: formData.sex,
+                padre: formData.fatherName, madre: formData.motherName, tipohijo: formData.tipoUnionPadres,
+                abuepat: formData.paternalGrandparents, abuemat: formData.maternalGrandparents,
+                padrinos: formData.godparents, ministro: formData.minister, dafe: formData.ministerFaith,
+                anulado: false, status: 'seated', notaMarginal: notaMarginalTecnica
+            };
 
-  const handleSubmit = async (e) => {
-      e.preventDefault();
-      
-      if (!bautismoDecree.targetParishId || !bautismoDecree.numeroDecreto || !bautismoNewPartida.firstName || !bautismoNewPartida.lastName) {
-          return toast({ title: "Datos Incompletos", description: "Llene todos los campos requeridos.", variant: "destructive" });
-      }
+            const payloadDecree = {
+                decreeNumber: decreeData.numeroDecreto, numeroDecreto: decreeData.numeroDecreto,
+                decreeDate: decreeData.fechaDecreto, conceptoAnulacionId: decreeData.conceptoAnulacionId,
+                causa: conceptoText, targetName: `${formData.lastName} ${formData.firstName}`.trim(),
+                ...formData,
+                datosNuevaPartida: { ...formData, book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, book_number: supletorioLibro, page_number: supletorioFolio, entry_number: supletorioNumero },
+                newPartidaSummary: { book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, nombres: formData.firstName, apellidos: formData.lastName }
+            };
 
-      setIsSubmitting(true);
-      
-      try {
-          // 1. Validar Duplicidad de Decreto
-          const { data: existing } = await supabase.from('decretos').select('id').eq('tipo', 'reposicion').eq('parish_id', bautismoDecree.targetParishId).contains('payload', { decreeNumber: bautismoDecree.numeroDecreto }).maybeSingle();
-          if (existing) {
-              setIsSubmitting(false);
-              return toast({ title: "Duplicado", description: `El decreto ${bautismoDecree.numeroDecreto} ya existe.`, variant: "destructive" });
-          }
+            // 5. Inserción Directa a Supabase
+            const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{
+                parish_id: decreeData.targetParishId, book_number: supletorioLibro, folio: supletorioFolio, number: supletorioNumero,
+                celebration_date: formData.sacramentDate || null, nombres: formData.firstName, apellidos: formData.lastName, sexo: formData.sex,
+                fecha_nacimiento: formData.birthDate || null, lugar_nacimiento: formData.placeOfBirth,
+                nombre_padre: formData.fatherName, nombre_madre: formData.motherName, tipo_union_padres: formData.tipoUnionPadres,
+                abuelos_paternos: formData.paternalGrandparents, abuelos_maternos: formData.maternalGrandparents, padrinos: formData.godparents,
+                ministro: formData.minister, da_fe: formData.ministerFaith, status: 'seated', nota_marginal: notaMarginalTecnica,
+                raw_data: partidaToSave
+            }]).select('id').single();
 
-          // 2. Generar Nota Marginal
-          const conceptoMatch = conceptos.find(c => String(c.id) === String(bautismoDecree.conceptoAnulacionId));
-          const causaText = conceptoMatch ? conceptoMatch.concepto.toUpperCase() : 'PÉRDIDA / DETERIORO';
-          const fechaTexto = convertDateToSpanishText(bautismoDecree.fechaDecreto).replace(/^EL\s+/i, '').toUpperCase();
-          const notaMarginal = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${bautismoDecree.numeroDecreto.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${causaText}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
+            if (errBap) throw errBap;
 
-          // 3. Crear Partida en Supabase (Parroquia Destino)
-          const partidaToSave = {
-              ...bautismoNewPartida,
-              book_number: nextParams.libro, page_number: nextParams.folio, entry_number: nextParams.numero,
-              Libro: nextParams.libro, folio: nextParams.folio, numero: nextParams.numero,
-              nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName,
-              fecbau: bautismoNewPartida.sacramentDate, fecnac: bautismoNewPartida.birthDate,
-              lugarn: bautismoNewPartida.lugarNacimientoDetalle, sex: bautismoNewPartida.sex,
-              padre: bautismoNewPartida.fatherName, madre: bautismoNewPartida.motherName, 
-              tipohijo: bautismoNewPartida.tipoUnionPadres, abuepat: bautismoNewPartida.paternalGrandparents, 
-              abuemat: bautismoNewPartida.maternalGrandparents, padrinos: bautismoNewPartida.godparents, 
-              ministro: bautismoNewPartida.minister, dafe: bautismoNewPartida.ministerFaith, 
-              anulado: false, status: 'seated', notaMarginal: notaMarginal
-          };
+            payloadDecree.newPartidaId = newBap.id;
+            await supabase.from('decretos').insert([{ parish_id: decreeData.targetParishId, tipo: 'reposicion', payload: payloadDecree }]);
 
-          const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{
-              parish_id: bautismoDecree.targetParishId, book_number: nextParams.libro, folio: nextParams.folio, number: nextParams.numero,
-              celebration_date: bautismoNewPartida.sacramentDate || null, nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName,
-              fecha_nacimiento: bautismoNewPartida.birthDate || null, lugar_nacimiento: bautismoNewPartida.lugarNacimientoDetalle, 
-              sexo: bautismoNewPartida.sex, nombre_padre: bautismoNewPartida.fatherName, nombre_madre: bautismoNewPartida.motherName, 
-              tipo_union_padres: bautismoNewPartida.tipoUnionPadres, padrinos: bautismoNewPartida.godparents, ministro: bautismoNewPartida.minister, 
-              da_fe: bautismoNewPartida.ministerFaith, status: 'seated', nota_marginal: notaMarginal, raw_data: partidaToSave
-          }]).select('id').single();
-          if (errBap) throw errBap;
+            const newParams = { ...cloudParams, suplementarioNumero: Number(supletorioNumero) + 1 };
+            await supabase.from('parish_parameters').upsert({ parish_id: decreeData.targetParishId, bautizos_params: newParams }, { onConflict: 'parish_id' });
 
-          // 4. Crear Decreto en Supabase
-          const payloadDecree = {
-              decreeNumber: bautismoDecree.numeroDecreto, decreeDate: bautismoDecree.fechaDecreto,
-              conceptoAnulacionId: bautismoDecree.conceptoAnulacionId, causa: causaText,
-              targetName: `${bautismoNewPartida.lastName} ${bautismoNewPartida.firstName}`.trim(),
-              ...bautismoNewPartida, newPartidaId: newBap.id,
-              datosNuevaPartida: { ...bautismoNewPartida, book: nextParams.libro, page: nextParams.folio, entry: nextParams.numero },
-              newPartidaSummary: { book: nextParams.libro, page: nextParams.folio, entry: nextParams.numero, nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName }
-          };
+            toast({ title: "Reposición Exitosa", description: "Partida y Decreto sincronizados remotamente.", className: "bg-green-50 text-green-900 border-green-200" });
+            navigate('/chancery/decree-replacement/view');
 
-          await supabase.from('decretos').insert([{ parish_id: bautismoDecree.targetParishId, tipo: 'reposicion', payload: payloadDecree }]);
+        } catch (error) { 
+            toast({ title: "Error en Proceso", description: error.message, variant: "destructive" }); 
+        } finally { 
+            setIsSubmitting(false); 
+        }
+    };
 
-          // 5. Actualizar Consecutivos (Sumar +1)
-          const { data: currentParams } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', bautismoDecree.targetParishId).single();
-          const p = currentParams?.bautizos_params || {};
-          await supabase.from('parish_parameters').upsert({ parish_id: bautismoDecree.targetParishId, bautizos_params: { ...p, suplementarioNumero: Number(nextParams.numero) + 1 } }, { onConflict: 'parish_id' });
+    // --- ESTILOS VISUALES ---
+    const inputClass = "h-11 w-full px-4 py-2 text-sm text-gray-900 font-bold border border-gray-200 rounded-xl focus:ring-4 focus:ring-amber-500/10 focus:border-amber-500 outline-none transition-all bg-gray-50/50 focus:bg-white uppercase shadow-sm";
+    const labelClass = "block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1";
 
-          toast({ title: "Decreto Emitido", description: "Guardado sincronizado con la Parroquia Destino.", className: "bg-green-50 text-green-900 border-green-200" });
-          navigate('/chancery/decree-replacement/view');
+    const SectionHeader = ({ icon: Icon, title, number }) => (
+        <div className="flex items-center gap-3 mb-8 pb-3 border-b border-gray-100 mt-10 first:mt-2">
+            <div className="w-8 h-8 rounded-2xl bg-amber-600 text-white flex items-center justify-center text-xs font-black shadow-lg shadow-amber-900/20">{number}</div>
+            <h3 className="text-sm font-black text-gray-800 uppercase tracking-[0.2em] flex items-center gap-2">{Icon && <Icon className="w-4 h-4 text-amber-500" />} {title}</h3>
+        </div>
+    );
 
-      } catch (error) {
-          toast({ title: "Error", description: error.message, variant: "destructive" });
-      } finally {
-          setIsSubmitting(false);
-      }
-  };
+    const formatParishOption = (parish) => {
+        const todosMisDatos = getMisDatosList(parish.id) || [];
+        const nombre = todosMisDatos[0]?.nombre || parish.name || 'Parroquia';
+        const ciudad = todosMisDatos[0]?.ciudad || parish.city || 'Ciudad';
+        return `${nombre.toUpperCase()} - ${ciudad.toUpperCase()}`;
+    };
 
-  const formatParishOption = (parish) => {
-      const todosMisDatos = data.misDatos || [];
-      const parishDatos = todosMisDatos.find(md => md.parishId === parish.id) || {};
-      return `${(parishDatos.nombre || parish.name || 'Parroquia').toUpperCase()} - ${(parishDatos.ciudad || parish.city || '').toUpperCase()}`;
-  };
+    return (
+        <DashboardLayout entityName={user?.dioceseName || "Cancillería"}>
+            <datalist id="lista-parrocos">
+                {listaSacerdotes.map((s, idx) => <option key={idx} value={`${s.nombre} ${s.apellido || ''}`.trim().toUpperCase()} />)}
+            </datalist>
 
-  return (
-    <DashboardLayout entityName={user?.dioceseName || "Cancillería"}>
-        <div className="flex items-center gap-4 mb-6">
-            <Button variant="ghost" onClick={() => navigate('/chancery/decree-replacement/view')} className="p-0 hover:bg-transparent">
-                <ArrowLeft className="w-6 h-6 text-gray-500" />
-            </Button>
-            <div>
-                <h1 className="text-3xl font-black text-gray-900 font-serif">Nuevo Decreto de Reposición</h1>
-                <p className="text-gray-500 text-sm font-bold uppercase tracking-widest mt-1">Sincronización Directa a Libros Parroquiales</p>
+            <div className="max-w-5xl mx-auto pb-20 pt-6">
+                <div className="mb-10 flex flex-col md:flex-row justify-between items-end gap-6">
+                    <div className="flex items-center gap-4">
+                        <Button variant="ghost" onClick={() => navigate('/chancery/decree-replacement/view')} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><ArrowLeft className="w-6 h-6 text-gray-400" /></Button>
+                        <div>
+                            <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif uppercase">Decreto de Reposición</h1>
+                            <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest flex items-center gap-2">
+                                <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-xs font-bold border border-amber-200">ACCESO CANCILLERÍA</span>
+                                Inyección Remota en Libros Parroquiales
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                    <TabsList className="grid w-full grid-cols-3 mb-6 bg-gray-100 p-1 rounded-2xl h-14">
+                        <TabsTrigger value="bautismo" className="rounded-xl font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-amber-600 data-[state=active]:shadow-sm">Bautizos</TabsTrigger>
+                        <TabsTrigger value="confirmacion" className="rounded-xl font-bold uppercase text-[10px] tracking-widest opacity-30" disabled>Confirmaciones</TabsTrigger>
+                        <TabsTrigger value="matrimonio" className="rounded-xl font-bold uppercase text-[10px] tracking-widest opacity-30" disabled>Matrimonios</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="bautismo" className="focus:outline-none">
+                        <form onSubmit={handleSubmit} className="bg-white rounded-[2.5rem] shadow-2xl border border-gray-100 overflow-hidden relative animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-amber-500 via-[#D4AF37] to-amber-500"></div>
+
+                            <div className="p-12 space-y-10">
+                                {/* 01. DECRETO MAESTRO */}
+                                <section>
+                                    <SectionHeader number="01" title="Información del Decreto" icon={FileText} />
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                                        <div className="md:col-span-3">
+                                            <label className={labelClass}>Parroquia Destino (Dónde se asentará) *</label>
+                                            <select required name="targetParishId" value={decreeData.targetParishId} onChange={handleDecreeChange} className={`${inputClass} border-amber-200 bg-amber-50/30 text-amber-700`}>
+                                                <option value="">-- SELECCIONE LA PARROQUIA --</option>
+                                                {parishesList.map(p => <option key={p.id} value={p.id}>{formatParishOption(p)}</option>)}
+                                            </select>
+                                        </div>
+                                        <div><label className={labelClass}>Número de Decreto *</label><input required name="numeroDecreto" value={decreeData.numeroDecreto} onChange={handleDecreeChange} className={inputClass} placeholder="EJ: 005-2025" /></div>
+                                        <div><label className={labelClass}>Fecha de Emisión *</label><input type="date" required name="fechaDecreto" value={decreeData.fechaDecreto} onChange={handleDecreeChange} className={inputClass} /></div>
+                                        <div>
+                                            <label className={labelClass}>Causa de la Reposición *</label>
+                                            <select required name="conceptoAnulacionId" value={decreeData.conceptoAnulacionId} onChange={handleDecreeChange} className={inputClass}>
+                                                <option value="">SELECCIONE CONCEPTO...</option>
+                                                {conceptos.map(c => <option key={c.id} value={c.id}>{c.codigo} - {c.concepto}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* 02. UBICACIÓN SUPLETORIA */}
+                                <section className={`transition-opacity duration-300 ${!decreeData.targetParishId ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+                                    <SectionHeader number="02" title="Protocolo de Archivo Supletorio Remoto" icon={BookOpen} />
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8 bg-slate-50 p-8 rounded-[2rem] border border-slate-100 shadow-inner">
+                                        <div><label className={labelClass}>Libro (Nuevo)</label><input readOnly value={String(cloudParams.suplementarioLibro || '1').padStart(4, '0')} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-amber-600 shadow-sm outline-none text-center" /></div>
+                                        <div><label className={labelClass}>Folio (Nuevo)</label><input readOnly value={String(cloudParams.suplementarioFolio || '1').padStart(4, '0')} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-gray-800 shadow-sm outline-none text-center" /></div>
+                                        <div><label className={labelClass}>Número / Acta (Nuevo)</label><input readOnly value={String(cloudParams.suplementarioNumero || '1').padStart(4, '0')} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-gray-800 shadow-sm outline-none text-center" /></div>
+                                    </div>
+                                </section>
+
+                                {/* 03. ASIGNACIÓN DEL SACRAMENTO */}
+                                <section className={`transition-opacity duration-300 ${!decreeData.targetParishId ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+                                    <SectionHeader number="03" title="Asiento del Sacramento" icon={Calendar} />
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                        <div><label className={labelClass}>Fecha Sacramento</label><input type="date" name="sacramentDate" value={formData.sacramentDate} onChange={handleChange} className={inputClass} /></div>
+                                    </div>
+                                </section>
+
+                                {/* 04. IDENTIDAD DEL SUJETO */}
+                                <section className={`transition-opacity duration-300 ${!decreeData.targetParishId ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+                                    <SectionHeader number="04" title="Identidad del Bautizado" icon={User} />
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
+                                        <div><label className={labelClass}>Apellidos Completos *</label><input name="lastName" required value={formData.lastName} onChange={handleChange} className={inputClass} /></div>
+                                        <div><label className={labelClass}>Nombres Completos *</label><input name="firstName" required value={formData.firstName} onChange={handleChange} className={inputClass} /></div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                                        <div>
+                                            <label className={labelClass}>Sexo</label>
+                                            <select name="sex" value={formData.sex} onChange={handleChange} className={inputClass}>
+                                                <option value="MASCULINO">MASCULINO</option><option value="FEMENINO">FEMENINO</option>
+                                            </select>
+                                        </div>
+                                        <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="birthDate" value={formData.birthDate} onChange={handleChange} className={inputClass} /></div>
+                                        <div>
+                                            <label className={labelClass}>Lugar de Nacimiento</label>
+                                            <CityAutocomplete name="placeOfBirth" value={formData.placeOfBirth} onChange={handleCityChange} cities={ciudades} className={inputClass} />
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* 05. FILIACIÓN */}
+                                <section className={`transition-opacity duration-300 ${!decreeData.targetParishId ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+                                    <SectionHeader number="05" title="Filiación y Rama Genealógica" icon={Fingerprint} />
+                                    <div className="mb-8">
+                                        <label className={labelClass}>Tipo de Unión de Padres</label>
+                                        <select name="tipoUnionPadres" value={formData.tipoUnionPadres} onChange={handleChange} className="w-full md:w-1/2 px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl font-black text-gray-600 uppercase outline-none shadow-sm focus:bg-white transition-all">
+                                            <option value="MATRIMONIO CATÓLICO">MATRIMONIO CATÓLICO</option><option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option><option value="UNIÓN LIBRE">UNIÓN LIBRE</option><option value="MADRE SOLTERA">MADRE SOLTERA</option><option value="OTRO CASO">OTRO CASO</option>
+                                        </select>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-8">
+                                        <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-5 shadow-sm">
+                                            <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Línea Paterna</p>
+                                            <input name="fatherName" placeholder="NOMBRE DEL PADRE" value={formData.fatherName} onChange={handleChange} className={inputClass} />
+                                            <textarea name="paternalGrandparents" placeholder="ABUELOS PATERNOS" value={formData.paternalGrandparents} onChange={handleChange} className={`${inputClass} h-20 py-3 resize-none`} />
+                                        </div>
+                                        <div className="bg-pink-50/30 p-8 rounded-[2rem] border border-pink-100/50 space-y-5 shadow-sm">
+                                            <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Línea Materna</p>
+                                            <input name="motherName" placeholder="NOMBRE DE LA MADRE" value={formData.motherName} onChange={handleChange} className={inputClass} />
+                                            <textarea name="maternalGrandparents" placeholder="ABUELOS MATERNOS" value={formData.maternalGrandparents} onChange={handleChange} className={`${inputClass} h-20 py-3 resize-none`} />
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* 06. AUTORIDAD */}
+                                <section className={`transition-opacity duration-300 ${!decreeData.targetParishId ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+                                    <SectionHeader number="06" title="Ministro y Autoridad" icon={PenTool} />
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
+                                        <div><label className={labelClass}>Sacerdote Celebrante</label><input name="minister" list="lista-parrocos" value={formData.minister} onChange={handleChange} className={`${inputClass} border-l-8 border-l-amber-500`} /></div>
+                                        <div><label className={labelClass}>Firma (Da Fe) *</label><input name="ministerFaith" required list="lista-parrocos" value={formData.ministerFaith} onChange={handleChange} className={inputClass} /></div>
+                                    </div>
+                                    <div><label className={labelClass}>Padrinos</label><input name="godparents" value={formData.godparents} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
+                                </section>
+
+                                <div className="flex justify-end gap-4 border-t border-gray-100 pt-12">
+                                    <Button type="button" variant="ghost" onClick={() => navigate('/chancery/decree-replacement/view')} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] hover:bg-gray-50 transition-all">Descartar</Button>
+                                    <Button type="submit" disabled={isSubmitting || !decreeData.targetParishId} className="bg-gradient-to-r from-amber-600 to-[#2C3E50] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                                        {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Save className="w-5 h-5 mr-3" />} Emitir Decreto Remoto
+                                    </Button>
+                                </div>
+                            </div>
+                        </form>
+                    </TabsContent>
+                </Tabs>
             </div>
-        </div>
-
-        <div className="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden max-w-6xl mx-auto p-4">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-3 mb-6 bg-gray-50 p-1 rounded-xl">
-                    <TabsTrigger value="bautismo" className="py-3 font-bold uppercase tracking-widest text-[10px] data-[state=active]:bg-amber-600 data-[state=active]:text-white">Bautizos</TabsTrigger>
-                    <TabsTrigger value="confirmacion" disabled className="py-3 font-bold uppercase tracking-widest text-[10px]">Confirmaciones</TabsTrigger>
-                    <TabsTrigger value="matrimonio" disabled className="py-3 font-bold uppercase tracking-widest text-[10px]">Matrimonios</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="bautismo" className="p-4">
-                    <form onSubmit={handleSubmit} className="animate-in fade-in duration-500">
-                        {/* SECCIÓN 1: DATOS DEL DECRETO */}
-                        <div className="bg-amber-50/50 p-8 rounded-2xl border border-amber-100 shadow-sm mb-8">
-                            <h3 className="font-black text-amber-800 text-sm uppercase mb-6 border-b border-amber-200 pb-3 flex items-center gap-2">
-                                <FileText className="w-5 h-5"/> 1. DATOS DEL DECRETO MAESTRO
-                            </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-2">
-                                <div className="md:col-span-3">
-                                    <label className="block text-[10px] font-black text-amber-900 uppercase mb-2">Parroquia Destino (Dónde se asentará) <span className="text-red-500">*</span></label>
-                                    <select value={bautismoDecree.targetParishId} onChange={(e) => setBautismoDecree({...bautismoDecree, targetParishId: e.target.value})} className="w-full rounded-xl border border-amber-200 px-4 py-3 text-sm bg-white font-bold uppercase text-gray-700 outline-none focus:ring-2 focus:ring-amber-500 shadow-sm" required>
-                                        <option value="">-- SELECCIONAR PARROQUIA JURISDICCIONAL --</option>
-                                        {(data.parishes || []).filter(p => p.dioceseId === user?.dioceseId).map(p => <option key={p.id} value={p.id}>{formatParishOption(p)}</option>)}
-                                    </select>
-                                </div>
-                                <div><label className="block text-[10px] font-black text-amber-900 uppercase mb-2">No. de Decreto *</label><Input value={bautismoDecree.numeroDecreto} onChange={(e) => setBautismoDecree({...bautismoDecree, numeroDecreto: e.target.value.toUpperCase()})} placeholder="Ej: 001-2026" className="bg-white font-bold" required /></div>
-                                <div><label className="block text-[10px] font-black text-amber-900 uppercase mb-2">Fecha Decreto *</label><Input type="date" value={bautismoDecree.fechaDecreto} onChange={(e) => setBautismoDecree({...bautismoDecree, fechaDecreto: e.target.value})} className="bg-white font-bold" required /></div>
-                                <div><label className="block text-[10px] font-black text-amber-900 uppercase mb-2">Causa de Reposición *</label>
-                                    <select value={bautismoDecree.conceptoAnulacionId} onChange={(e) => setBautismoDecree({...bautismoDecree, conceptoAnulacionId: e.target.value})} className="w-full rounded-xl border border-amber-200 px-4 py-3 text-sm bg-white font-bold uppercase text-gray-700 outline-none focus:ring-2 focus:ring-amber-500" required>
-                                        <option value="">SELECCIONAR...</option>
-                                        {conceptos.map(c => <option key={c.id} value={c.id}>{c.codigo} - {c.concepto}</option>)}
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        {/* SECCIÓN 2: FORMULARIO DE NUEVA PARTIDA */}
-                        <div className={`bg-white rounded-2xl shadow-sm border-l-4 border-blue-600 p-8 transition-opacity duration-300 ${!bautismoDecree.targetParishId ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
-                            <h3 className="text-lg font-black text-gray-900 mb-8 flex items-center gap-3 border-b pb-3 uppercase tracking-tight">
-                                <UserPlus className="w-6 h-6 text-blue-600" /> 2. ASIENTO SUPLETORIO REMOTO
-                            </h3>
-
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 p-6 bg-slate-50 border border-slate-200 rounded-2xl shadow-inner">
-                                <div><label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 text-center">Libro (Supletorio) *</label><Input value={nextParams.libro} readOnly className="bg-white text-blue-700 font-mono text-xl text-center font-black" /></div>
-                                <div><label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 text-center">Folio (Supletorio) *</label><Input value={nextParams.folio} readOnly className="bg-white text-gray-800 font-mono text-xl text-center font-black" /></div>
-                                <div><label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 text-center">Número (Supletorio) *</label><Input value={nextParams.numero} readOnly className="bg-white text-gray-800 font-mono text-xl text-center font-black" /></div>
-                            </div>
-
-                            {/* [El resto de inputs: Nombres, Apellidos, Fechas, Padres, Abuelos, Da Fe - usando handleChange y handleCityChange] */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                                <div><label className="block text-[10px] font-black text-gray-500 uppercase mb-2">Nombres *</label><Input name="firstName" value={bautismoNewPartida.firstName} onChange={handleChange} className="font-bold py-6 text-gray-800" required /></div>
-                                <div><label className="block text-[10px] font-black text-gray-500 uppercase mb-2">Apellidos *</label><Input name="lastName" value={bautismoNewPartida.lastName} onChange={handleChange} className="font-bold py-6 text-gray-800" required /></div>
-                                <div><label className="block text-[10px] font-black text-gray-500 uppercase mb-2">Fecha Bautismo *</label><Input type="date" name="sacramentDate" value={bautismoNewPartida.sacramentDate} onChange={(e)=>setBautismoNewPartida(prev=>({...prev, sacramentDate: e.target.value}))} className="font-bold py-6" required /></div>
-                                <div><label className="block text-[10px] font-black text-gray-500 uppercase mb-2">Lugar Bautismo</label><Input name="lugarBautismo" value={bautismoNewPartida.lugarBautismo} onChange={handleChange} className="font-bold py-6" /></div>
-                            </div>
-                            
-                            {/* Omitido en este bloque corto el resto del form (Padres, Abuelos) para simplificar lectura, pero tú incluyelos idéntico a EditDecreeReplacement */}
-                            <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100 mb-6">
-                                <h4 className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-4">Firmas y Autoridad Local</h4>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div><label className="block text-[10px] font-black text-gray-500 uppercase mb-2">Ministro Celebrante</label><Input name="minister" value={bautismoNewPartida.minister} onChange={handleChange} className="font-bold" /></div>
-                                    <div><label className="block text-[10px] font-black text-gray-500 uppercase mb-2">Da Fe (Párroco) *</label><Input name="ministerFaith" value={bautismoNewPartida.ministerFaith} onChange={handleChange} className="font-bold text-gray-600 bg-gray-100" required /></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="mt-8 flex justify-end gap-4 bg-white p-4 border-t sticky bottom-0 z-10 rounded-b-2xl shadow-[0_-4px_10px_-2px_rgba(0,0,0,0.05)]">
-                            <Button type="button" variant="outline" onClick={() => navigate('/chancery/decree-replacement/view')} className="px-8 font-black uppercase text-[10px]">Cancelar</Button>
-                            <Button type="submit" disabled={isSubmitting || !bautismoDecree.targetParishId} className="bg-amber-600 hover:bg-amber-700 text-white font-black px-10 shadow-lg shadow-amber-900/20 uppercase tracking-widest text-[10px]">
-                                {isSubmitting ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : <Save className="w-4 h-4 mr-2" />} Sincronizar Decreto en Nube
-                            </Button>
-                        </div>
-                    </form>
-                </TabsContent>
-            </Tabs>
-        </div>
-    </DashboardLayout>
-  );
+        </DashboardLayout>
+    );
 };
 
 export default NewDecreeReplacementPage;
