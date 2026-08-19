@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/Input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { Save, Loader2, Search, Trash2, ArrowLeft, History, BookOpen, Calendar, User, Fingerprint, PenTool, FileText, AlertCircle } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
@@ -30,7 +31,9 @@ const EditCorrectionPage = () => {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [conceptos, setConceptos] = useState([]);
     const [originalPayload, setOriginalPayload] = useState(null);
+    const [foundRecord, setFoundRecord] = useState(null);
     const [auxiliares, setAuxiliares] = useState({ ciudades: [], ministros: [] });
+    const [chanceryNotesConfig, setChanceryNotesConfig] = useState(null);
 
     const [decreeData, setDecreeData] = useState({ parroquia: '', decreeNumber: '', decreeDate: '', targetName: '', conceptoAnulacionId: '' });
     const [newPartida, setNewPartida] = useState({
@@ -52,6 +55,13 @@ const EditCorrectionPage = () => {
                 if (!targetDioceseId && (user.chanceryId || user.chancery_id)) {
                     const { data: chanData } = await supabase.from('chancelleries').select('diocese_id').eq('id', user.chanceryId || user.chancery_id).single();
                     if (chanData) targetDioceseId = chanData.diocese_id;
+                }
+
+                // Cargar Plantillas de Notas de Cancillería
+                const entityId = user.chanceryId || user.id;
+                const { data: chanceryParams } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', entityId).maybeSingle();
+                if (chanceryParams && chanceryParams.bautizos_params?.plantillas_notas) {
+                    setChanceryNotesConfig(chanceryParams.bautizos_params.plantillas_notas);
                 }
 
                 if (targetDioceseId) {
@@ -82,6 +92,17 @@ const EditCorrectionPage = () => {
                     const parishId = decree.parish_id;
                     setOriginalPayload(payload);
                     setSelectedDecreeId(decreeId);
+
+                    // Buscar el registro original
+                    const pad = (num) => String(num).padStart(4, '0');
+                    if (payload.originalPartidaSummary?.book || payload.originalPartidaSummary?.Libro) {
+                        const b = payload.originalPartidaSummary.book || payload.originalPartidaSummary.Libro;
+                        const p = payload.originalPartidaSummary.page || payload.originalPartidaSummary.folio;
+                        const e = payload.originalPartidaSummary.entry || payload.originalPartidaSummary.numero;
+                        
+                        const { data: origData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', parishId).eq('book_number', pad(b)).eq('folio', pad(p)).eq('number', pad(e)).maybeSingle();
+                        if (origData) setFoundRecord({ ...origData.raw_data, id: origData.id });
+                    }
 
                     const parishObj = parishesData?.find(p => p.id === parishId);
                     setDecreeData({
@@ -117,6 +138,7 @@ const EditCorrectionPage = () => {
                         padrinos: payload.godparents || bd.padrinos || '',
                         ministro: payload.minister || bd.ministro || '',
                         daFe: payload.daFe || payload.ministerFaith || bd.daFe || bd.ministerFaith || '',
+                        observaciones: payload.observaciones || '',
                         book_number: bd.book || bd.book_number || '',
                         page_number: bd.page || bd.page_number || '',
                         entry_number: bd.entry || bd.entry_number || ''
@@ -139,24 +161,54 @@ const EditCorrectionPage = () => {
         setNewPartida(prev => ({ ...prev, lugarNacimiento: String(value).toUpperCase() }));
     };
 
-    const handleUpdate = async (e) => {
-        e.preventDefault();
+    const handleSave = async () => {
         if (!selectedDecreeId) return;
         setIsSubmitting(true);
 
         try {
             const pad = (num) => String(num).padStart(4, '0');
             const targetParish = newPartida.parishId;
-            const conceptoMatch = conceptos.find(c => String(c.id) === String(decreeData.conceptoAnulacionId));
-            const causaText = conceptoMatch ? conceptoMatch.concepto.toUpperCase() : 'CORRECCIÓN';
-            
-            // 1. Actualizar Partida Supletoria
+
+            let templateAnulada = chanceryNotesConfig?.correccion_anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO] DE FECHA [FECHA_DECRETO]. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-[LIBRO_NUEVA] F-[FOLIO_NUEVA] N-[NUMERO_NUEVA].";
+            let noteAnulada = templateAnulada
+                .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.decreeDate).replace(/^EL\s+/i, ''))
+                .replace(/\[NUMERO_DECRETO\]/g, decreeData.decreeNumber)
+                .replace(/\[LIBRO_NUEVA\]/g, pad(newPartida.book_number))
+                .replace(/\[FOLIO_NUEVA\]/g, pad(newPartida.page_number))
+                .replace(/\[NUMERO_PARTIDA_NUEVA\]/g, pad(newPartida.entry_number));
+
+            let templateNueva = chanceryNotesConfig?.correccion_nueva || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] DE FECHA: [FECHA_DECRETO] EXPEDIDO POR: [OFICINA_DECRETO] Y ANULA LA PARTIDA DEL LIBRO: [LIBRO_ANULADA], FOLIO: [FOLIO_ANULADA], NÚMERO: [NUMERO_PARTIDA_ANULADA]. DA FE: [MINISTRO].";
+            let notaSupletoriaFinal = templateNueva
+                .replace(/\[NUMERO_DECRETO\]/g, decreeData.decreeNumber)
+                .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.decreeDate).replace(/^EL\s+/i, ''))
+                .replace(/\[OFICINA_DECRETO\]/g, 'CANCILLERÍA')
+                .replace(/\[LIBRO_ANULADA\]/g, pad(originalPayload?.originalPartidaSummary?.book || originalPayload?.originalPartidaSummary?.Libro))
+                .replace(/\[FOLIO_ANULADA\]/g, pad(originalPayload?.originalPartidaSummary?.page || originalPayload?.originalPartidaSummary?.folio))
+                .replace(/\[NUMERO_PARTIDA_ANULADA\]/g, pad(originalPayload?.originalPartidaSummary?.entry || originalPayload?.originalPartidaSummary?.numero))
+                .replace(/\[MINISTRO\]/g, newPartida.daFe);
+
+            // 1. Actualizar Partida Original
+            if (foundRecord) {
+                const oldRawData = { ...foundRecord };
+                oldRawData.notaMarginal = noteAnulada;
+                oldRawData.estado = "anulada";
+                oldRawData.status = "anulada";
+                oldRawData.isAnnulled = true;
+                oldRawData.annulmentDate = decreeData.decreeDate;
+                oldRawData.annulmentDecree = decreeData.decreeNumber;
+                oldRawData.conceptoAnulacionId = decreeData.conceptoAnulacionId;
+                oldRawData.tipoNotaAlMargen = "porCorreccion.anulada";
+
+                await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada, raw_data: oldRawData }).eq('id', foundRecord.id);
+            }
+
+            // 2. Actualizar Partida Supletoria
             const { data: supData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', targetParish).eq('book_number', pad(newPartida.book_number)).eq('folio', pad(newPartida.page_number)).eq('number', pad(newPartida.entry_number)).maybeSingle();
 
             if (supData) {
                 const updatedRaw = {
                     ...supData.raw_data, ...newPartida,
-                    nombres: newPartida.nombres, apellidos: newPartida.apellidos, fecbau: newPartida.fechaSacramento, fecnac: newPartida.fechaNacimiento, lugarn: newPartida.lugarNacimiento, sex: newPartida.sexo, padre: newPartida.nombrePadre, madre: newPartida.nombreMadre, tipohijo: newPartida.tipoUnionPadres, godparents: newPartida.padrinos, ministro: newPartida.ministro, dafe: newPartida.daFe
+                    nombres: newPartida.nombres, apellidos: newPartida.apellidos, fecbau: newPartida.fechaSacramento, fecnac: newPartida.fechaNacimiento, lugarn: newPartida.lugarNacimiento, sex: newPartida.sexo, padre: newPartida.nombrePadre, madre: newPartida.nombreMadre, tipohijo: newPartida.tipoUnionPadres, godparents: newPartida.padrinos, ministro: newPartida.ministro, dafe: newPartida.daFe, notaMarginal: notaSupletoriaFinal
                 };
                 
                 await supabase.from('baptisms').update({ 
@@ -164,11 +216,11 @@ const EditCorrectionPage = () => {
                     sexo: newPartida.sexo, fecha_nacimiento: newPartida.fechaNacimiento || null, lugar_nacimiento: newPartida.lugarNacimiento, 
                     lugar_bautismo: newPartida.lugarBautismo, nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre, 
                     padrinos: newPartida.padrinos, ministro: newPartida.ministro, da_fe: newPartida.daFe, tipo_union_padres: newPartida.tipoUnionPadres, 
-                    raw_data: updatedRaw
+                    nota_marginal: notaSupletoriaFinal, raw_data: updatedRaw
                 }).eq('id', supData.id);
             }
 
-            // 2. Actualizar Decreto
+            // 3. Actualizar Decreto
             const newPayload = {
                 ...originalPayload,
                 decreeNumber: decreeData.decreeNumber, decreeDate: decreeData.decreeDate,
@@ -181,7 +233,7 @@ const EditCorrectionPage = () => {
 
             await supabase.from('decretos').update({ payload: newPayload }).eq('id', selectedDecreeId);
 
-            toast({ title: "Guardado Exitoso", description: "La corrección se actualizó en la Parroquia.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Guardado Exitoso", description: "La corrección se actualizó en la Parroquia Destino.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/chancery/decree-correction/view');
 
         } catch (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); } 
@@ -194,23 +246,17 @@ const EditCorrectionPage = () => {
             const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
             const targetParishId = newPartida.parishId;
 
-            // Restaurar Original
-            if (originalPayload.originalPartidaSummary) {
-                const origSum = originalPayload.originalPartidaSummary;
-                const { data: origData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', targetParishId).eq('book_number', pad(origSum.book)).eq('folio', pad(origSum.page)).eq('number', pad(origSum.entry)).maybeSingle();
-                if (origData) {
-                    const cleanedRaw = { ...origData.raw_data };
-                    delete cleanedRaw.anulado; delete cleanedRaw.isAnnulled;
-                    cleanedRaw.status = 'seated'; cleanedRaw.estado = 'permanente';
-                    await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', origData.id);
-                }
+            if (foundRecord) {
+                const cleanedRaw = { ...foundRecord };
+                delete cleanedRaw.notaMarginal; delete cleanedRaw.anulado; delete cleanedRaw.isAnnulled;
+                cleanedRaw.status = 'seated'; cleanedRaw.estado = 'permanente';
+                await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', foundRecord.id);
             }
 
-            // Eliminar Supletoria y Decreto
             await supabase.from('baptisms').delete().eq('parish_id', targetParishId).eq('book_number', pad(newPartida.book_number)).eq('folio', pad(newPartida.page_number)).eq('number', pad(newPartida.entry_number));
             await supabase.from('decretos').delete().eq('id', selectedDecreeId);
 
-            toast({ title: "Eliminado", description: "El decreto y la supletoria fueron removidos. Original restaurada.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Eliminado", description: "Decreto removido. Partida original restaurada remotamente.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/chancery/decree-correction/view');
         } catch (e) { toast({ title: "Error", description: "Fallo al restaurar y eliminar.", variant: "destructive" }); } 
         finally { setIsSubmitting(false); setShowDeleteModal(false); }
@@ -238,7 +284,7 @@ const EditCorrectionPage = () => {
                         <Button variant="ghost" onClick={() => navigate('/chancery/decree-correction/view')} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><ArrowLeft className="w-6 h-6 text-gray-400" /></Button>
                         <div>
                             <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif uppercase">Editor de Corrección</h1>
-                            <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest">Modificación del Asiento Supletorio en Nube</p>
+                            <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest">Modificación del Asiento Supletorio Remoto en Nube</p>
                         </div>
                     </div>
                 </div>
@@ -257,6 +303,7 @@ const EditCorrectionPage = () => {
                                     <button key={decree.id} onClick={() => navigate(`/chancery/decree-correction/edit?id=${decree.id}`)} className={cn("w-full text-left p-4 rounded-2xl transition-all border group", selectedDecreeId === decree.id ? "bg-blue-50 border-blue-200 ring-1 ring-blue-300 shadow-sm" : "bg-white border-transparent hover:border-gray-200 text-gray-600")}>
                                         <div className="font-black text-gray-800 flex justify-between items-center"><span className={cn("font-mono text-sm tracking-tighter", selectedDecreeId === decree.id ? "text-blue-700" : "")}>{decree.decreeNumber || decree.numeroDecreto}</span></div>
                                         <div className={cn("text-[10px] font-bold uppercase mt-1 truncate", selectedDecreeId === decree.id ? "text-blue-900" : "text-gray-400")}>{decree.targetName || decree.nombres}</div>
+                                        <div className={cn("text-[9px] mt-1 uppercase truncate", selectedDecreeId === decree.id ? "text-blue-500" : "text-gray-300")}>{decree.targetParishName}</div>
                                     </button>
                                 ))
                             )}
@@ -273,7 +320,7 @@ const EditCorrectionPage = () => {
                                     <p className="font-black uppercase tracking-widest text-[10px]">Seleccione un decreto de la lista</p>
                                 </div>
                             ) : (
-                                <form onSubmit={handleUpdate} className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500 pb-10">
+                                <div className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500 pb-10">
                                     <section>
                                         <SectionHeader number="01" title="Decreto Maestro (Corrección)" icon={FileText} />
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -293,7 +340,7 @@ const EditCorrectionPage = () => {
                                     <div className="mx-8 mb-8 p-6 bg-red-50/50 rounded-2xl border border-red-100">
                                         <div className="flex items-center gap-2 mb-4">
                                             <AlertCircle className="w-4 h-4 text-red-500" />
-                                            <h4 className="text-[10px] font-black text-red-600 uppercase tracking-widest">Partida Original Anulada (Lectura)</h4>
+                                            <h4 className="text-[10px] font-black text-red-600 uppercase tracking-widest">Partida Original Anulada (Lectura Remota)</h4>
                                         </div>
                                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                             <div className="md:col-span-2 space-y-1"><label className="text-[9px] font-bold text-gray-400 uppercase">Titular</label><Input value={originalPayload?.targetName || '---'} readOnly className="bg-white/50 border-red-100 text-gray-500 font-bold uppercase" /></div>
@@ -370,15 +417,15 @@ const EditCorrectionPage = () => {
                                     </section>
 
                                     <div className="flex justify-between gap-4 border-t border-gray-100 pt-12">
-                                        <Button type="button" onClick={() => setShowDeleteModal(true)} disabled={isSubmitting} className="px-10 py-8 rounded-2xl bg-red-50 text-red-600 hover:bg-red-100 font-black uppercase text-[10px] transition-all"><Trash2 className="w-5 h-5 mr-3"/> Revertir Corrección</Button>
+                                        <Button type="button" onClick={() => setShowDeleteModal(true)} disabled={isSubmitting} className="px-10 py-8 rounded-2xl bg-red-50 text-red-600 hover:bg-red-100 font-black uppercase text-[10px] transition-all"><Trash2 className="w-5 h-5 mr-3"/> Revertir Corrección Remota</Button>
                                         <div className="flex gap-3">
                                             <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] hover:bg-gray-50 transition-all">Cancelar</Button>
-                                            <Button type="submit" disabled={isSubmitting || isLoading} className="bg-gradient-to-r from-blue-600 to-[#2C3E50] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                                            <Button type="button" onClick={handleSave} disabled={isSubmitting || isLoading} className="bg-gradient-to-r from-blue-600 to-[#2C3E50] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
                                                 {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Save className="w-5 h-5 mr-3" />} Sincronizar Cambios
                                             </Button>
                                         </div>
                                     </div>
-                                </form>
+                                </div>
                             )}
                         </div>
                     </div>
@@ -387,7 +434,7 @@ const EditCorrectionPage = () => {
                 <ConfirmationDialog 
                     isOpen={showDeleteModal}
                     title="Restaurar Partida Original y Eliminar"
-                    message="La partida original recuperará su validez canónica (se borrará su anulación). El decreto será eliminado de la nube y la partida supletoria será destruida."
+                    message="La partida original recuperará su validez canónica remotamente (se borrará su anulación). El decreto será eliminado de la nube y la partida supletoria será destruida."
                     onConfirm={handleDelete}
                     onClose={() => setShowDeleteModal(false)}
                     variant="destructive"
