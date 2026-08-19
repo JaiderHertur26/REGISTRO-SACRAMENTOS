@@ -19,7 +19,7 @@ const EditCorrectionPage = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const { toast } = useToast();
-    const { getCiudadesList, getParrocos } = useAppData();
+    const { getMisDatosList, getCiudadesList, getParrocos } = useAppData();
 
     const [activeTab, setActiveTab] = useState("bautismo");
     const [decrees, setDecrees] = useState([]);
@@ -35,12 +35,7 @@ const EditCorrectionPage = () => {
     const [auxiliares, setAuxiliares] = useState({ ciudades: [], ministros: [] });
     const [chanceryNotesConfig, setChanceryNotesConfig] = useState(null);
 
-    // 🚀 ESTADO HOMOLOGADO CON LA PARROQUIA
-    const [decreeData, setDecreeData] = useState({ 
-        parroquia: '', numeroDeDecreto: '', fechaEmision: '', 
-        conceptoAnulacion: '', nombreBautizado: '', Libro: '', folio: '', numero: '' 
-    });
-
+    const [decreeData, setDecreeData] = useState({ parroquia: '', decreeNumber: '', decreeDate: '', targetName: '', conceptoAnulacionId: '' });
     const [newPartida, setNewPartida] = useState({
         lugarBautismo: '', fechaSacramento: '', apellidos: '', nombres: '',
         fechaNacimiento: '', lugarNacimiento: '', sexo: 'MASCULINO', nombrePadre: '',
@@ -116,10 +111,10 @@ const EditCorrectionPage = () => {
                     const parishObj = parishesData?.find(p => p.id === parishId);
                     setDecreeData({
                         parroquia: parishObj ? `${parishObj.name} - ${parishObj.city}` : 'Parroquia',
-                        numeroDeDecreto: payload.decreeNumber || payload.numeroDecreto || '',
-                        fechaEmision: payload.decreeDate || payload.fechaEmision || '',
-                        conceptoAnulacion: payload.conceptoAnulacionId || payload.conceptoAnulacion || '',
-                        nombreBautizado: payload.targetName || payload.nombreBautizado || '',
+                        decreeNumber: payload.decreeNumber || payload.numeroDecreto || '',
+                        decreeDate: payload.decreeDate || payload.fechaEmision || '',
+                        conceptoAnulacionId: payload.conceptoAnulacionId || payload.conceptoAnulacion || '',
+                        targetName: payload.targetName || payload.nombreBautizado || '',
                         Libro: payload.originalPartidaSummary?.book || payload.originalPartidaSummary?.Libro || '',
                         folio: payload.originalPartidaSummary?.page || payload.originalPartidaSummary?.folio || '',
                         numero: payload.originalPartidaSummary?.entry || payload.originalPartidaSummary?.numero || ''
@@ -167,9 +162,11 @@ const EditCorrectionPage = () => {
         loadDecreeData();
     }, [user, decreeId, getCiudadesList, getParrocos]);
 
+    // 🚀 AHORA ESTÁN CORRECTAMENTE DECLARADAS
     const handleDecreeChange = (e) => setDecreeData(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
-    const handleNewPartidaChange = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
+    const handleNewPartidaChangeUpper = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
     const handleNewPartidaChangeRaw = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const handleNewPartidaChange = handleNewPartidaChangeUpper; // Alias de seguridad
     const handleCityChange = (data) => {
         let value = data?.target?.value || data?.nombre || data || "";
         setNewPartida(prev => ({ ...prev, lugarNacimiento: String(value).toUpperCase() }));
@@ -239,8 +236,8 @@ const EditCorrectionPage = () => {
             const newPayload = {
                 ...originalPayload,
                 decreeNumber: decreeData.numeroDeDecreto, decreeDate: decreeData.fechaEmision,
-                conceptoAnulacionId: decreeData.conceptoAnulacion,
-                targetName: `${newPartida.apellidos} ${newPartida.nombres}`.trim(),
+                conceptoAnulacionId: decreeData.conceptoAnulacionId || decreeData.conceptoAnulacion,
+                targetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(),
                 ...newPartida,
                 datosNuevaPartida: { ...newPartida, book: newPartida.book_number, page: newPartida.page_number, entry: newPartida.entry_number },
                 newPartidaSummary: { book: newPartida.book_number, page: newPartida.page_number, entry: newPartida.entry_number, nombres: newPartida.nombres, apellidos: newPartida.apellidos }
@@ -335,16 +332,16 @@ const EditCorrectionPage = () => {
                                     <p className="font-black uppercase tracking-widest text-[10px]">Seleccione un decreto de la lista</p>
                                 </div>
                             ) : (
-                                <div className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500 pb-10">
+                                <form onSubmit={handleSave} className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500 pb-10">
                                     <section>
                                         <SectionHeader number="01" title="Decreto Maestro (Corrección)" icon={FileText} />
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                                             <div className="col-span-3"><label className={labelClass}>Parroquia Destino</label><input readOnly value={decreeData.parroquia} className={`${inputClass} bg-blue-50 border-blue-200 text-blue-700`} /></div>
                                             <div><label className={labelClass}>Número de Decreto</label><input name="decreeNumber" value={decreeData.decreeNumber} onChange={handleDecreeChange} className={inputClass} /></div>
-                                            <div><label className={labelClass}>Fecha Emisión</label><input type="date" name="fechaEmision" value={decreeData.fechaEmision} onChange={handleDecreeChange} className={inputClass} /></div>
+                                            <div><label className={labelClass}>Fecha Emisión</label><input type="date" name="decreeDate" value={decreeData.decreeDate} onChange={handleDecreeChange} className={inputClass} /></div>
                                             <div>
                                                 <label className={labelClass}>Concepto Anulación</label>
-                                                <select name="conceptoAnulacion" value={decreeData.conceptoAnulacion} onChange={handleDecreeChange} className={inputClass}>
+                                                <select name="conceptoAnulacionId" value={decreeData.conceptoAnulacionId} onChange={handleDecreeChange} className={inputClass}>
                                                     <option value="">SELECCIONE CONCEPTO...</option>
                                                     {conceptos.map(c => <option key={c.id} value={c.id}>{c.codigo} - {c.concepto}</option>)}
                                                 </select>
@@ -441,7 +438,7 @@ const EditCorrectionPage = () => {
                                             </Button>
                                         </div>
                                     </div>
-                                </div>
+                                </form>
                             )}
                         </div>
                     </div>
