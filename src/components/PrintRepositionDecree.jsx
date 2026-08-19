@@ -82,14 +82,14 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
   const misDatosParroquia = misDatosList[0] || {}; 
 
   const orgData = {
-    name: chanceryData.nombreCancilleria || chanceryData.nombre || 'CURIA ARZOBISPAL - CANCILLERÍA',
+    name: chanceryData.nombreCancilleria || chanceryData.nombre || 'OFICINA DE DOCUMENTOS DE CANCILLERÍA',
     address: chanceryData.direccion || '[Dirección no configurada]',
     phone: chanceryData.telefono || '[Teléfono no configurado]',
     city: chanceryData.ciudad || 'BARRANQUILLA',
-    email: chanceryData.email || '[Email no configurado]'
+    email: chanceryData.email || 'cancilleria@arquidiocesisbaq.org'
   };
 
-  const diocesisName = (chanceryData.diocesis || authUser?.dioceseName || 'DIÓCESIS').toUpperCase();
+  const diocesisName = (chanceryData.diocesis || authUser?.dioceseName || 'ARQUIDIÓCESIS DE BARRANQUILLA').toUpperCase();
   const cancillerName = (chanceryData.canciller || chanceryData.nombreSacerdote || 'CANCILLER DIOCESANO').toUpperCase();
   const cargoName = (chanceryData.cargo || 'Canciller').toUpperCase();
 
@@ -115,7 +115,7 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
       return u || 'OTRO CASO';
   };
 
-  // 🚀 EVITA EL ERROR DE "0---" Rellenando solo si el valor es válido
+  // EVITA EL ERROR DE "0---" Rellenando solo si el valor es válido
   const pad = (val) => val && String(val).trim() !== '' && val !== '---' ? String(val).padStart(4, '0') : '----';
 
   const baptismRecord = {
@@ -145,139 +145,138 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
   const emissionDateText = finalDecreeDate ? convertDateToSpanishTextNatural(finalDecreeDate) : '---';
 
   const DataRow = ({ label, value, bold }) => (
-    <div className="flex items-end mb-1.5">
-      <span className="font-bold text-black uppercase text-[8pt] w-36 shrink-0 tracking-tighter">{label}:</span>
-      <span className={`font-mono flex-1 border-b border-gray-300 pl-2 uppercase text-[9pt] leading-none text-gray-800 ${bold ? 'font-black' : ''}`}>
+    <div className="flex items-end mb-[2px]">
+      <span className="font-semibold text-black uppercase tracking-wider text-[8pt] w-36 shrink-0">{label}:</span>
+      <span className={`font-mono flex-1 border-b border-dotted border-gray-500 pl-2 uppercase text-[8.5pt] leading-tight text-black ${bold ? 'font-bold' : ''}`}>
         {value || '\u00A0'}
       </span>
     </div>
   );
 
   return (
-    <div id="reposition-print-area" ref={ref} className="bg-white text-black font-serif p-12 max-w-[216mm] mx-auto min-h-[279mm] flex flex-col justify-between shadow-none print:p-4 box-border">
+    <div id="printable-content" ref={ref} className="bg-white text-black font-serif mx-auto box-border flex flex-col justify-between p-8 min-h-[279.4mm] w-[215.9mm] shadow-xl print:shadow-none print:p-0 print:m-0 print:w-[215.9mm] print:h-[279.4mm] print:overflow-hidden">
       <style>{`
         @media print {
-          @page { margin: 10mm; size: letter; }
-          body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          #reposition-print-area { width: 100% !important; height: auto !important; position: static !important; padding: 0 !important; margin: 0 !important; }
+          @page { margin: 0; size: letter; }
+          body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0; padding: 0; }
+          body * { visibility: hidden; }
+          #printable-content, #printable-content * { visibility: visible; }
+          #printable-content { position: absolute; left: 0; top: 0; width: 215.9mm; height: 279.4mm; padding: 10mm 15mm !important; box-sizing: border-box; display: flex !important; flex-direction: column !important; justify-content: space-between !important; }
         }
       `}</style>
 
-      {/* --- ENCABEZADO CANÓNICO --- */}
-      <div className="w-full">
-          <div className="text-center mb-8 border-b-4 border-double border-black pb-4 relative">
-            <h1 className="text-[15pt] font-black uppercase tracking-[0.2em] mb-1">{diocesisName}</h1>
-            <h2 className="text-[11pt] font-bold uppercase tracking-widest text-gray-600">Oficina de Cancillería</h2>
-            
-            <div className="mt-4 inline-block border-2 border-black px-6 py-2 bg-gray-50 print:bg-gray-100">
-               <span className="font-black uppercase tracking-[0.1em] text-[12pt]">Decreto de Reposición de Partida</span>
+      {/* --- BLOQUE SUPERIOR --- */}
+      <div className="w-full flex-1 flex flex-col">
+          
+          <div className="text-center mb-3 relative border-b border-black pb-2 shrink-0">
+            <h1 className="text-[12pt] font-extrabold uppercase tracking-widest mb-0.5 text-black">{diocesisName}</h1>
+            <h2 className="text-[9pt] font-semibold uppercase tracking-widest text-black">Oficina de Cancillería</h2>
+            <div className="mt-2 inline-block border-2 border-black px-3 py-1 bg-gray-50 print:bg-gray-100">
+               <span className="font-bold uppercase tracking-wider text-[10pt] text-black">Decreto de Reposición de Partida</span>
             </div>
-            
-            <div className="absolute right-0 top-0 text-[6pt] font-mono text-gray-400 text-right uppercase">
+            <div className="absolute right-0 top-0 text-[6pt] font-mono text-black font-bold text-right leading-tight">
               CÓDIGO: CAL-ODC-022<br/>VERSIÓN: 001
             </div>
           </div>
 
-          <div className="flex justify-between items-start mb-6">
-            <div className="w-2/3 text-[10pt] leading-tight pr-4">
-               <p className="mb-1">Al Señor Cura Párroco de la Parroquia:</p>
-               <p className="font-black text-[11pt] uppercase">{parroquiaNombre}</p>
-               <p className="font-bold text-gray-600 italic uppercase">de {ciudadParroquia} — COLOMBIA.</p>
+          <div className="flex justify-between items-end mb-3 shrink-0">
+            <div className="w-2/3 text-justify text-[9.5pt] pr-4 text-black">
+               <p>Al Señor Cura Párroco de la Parroquia <strong>{parroquiaNombre}</strong>, de <span className="uppercase font-semibold">{ciudadParroquia}</span>.</p>
             </div>
-            <div className="w-1/3 border-2 border-black p-3 bg-gray-50 print:bg-gray-100 text-right shadow-sm">
-              <div className="font-black text-[7pt] uppercase tracking-widest text-gray-500 mb-1">Registro de Control</div>
-              <div className="font-mono text-xl font-black tracking-tighter border-b border-black pb-1 mb-1">{finalDecreeNumber}</div>
-              <div className="font-mono text-[7pt] uppercase font-bold text-gray-500">{emissionDateText}</div>
+            <div className="w-1/3 text-right border-2 border-black p-1.5 bg-gray-50 print:bg-gray-100">
+              <div className="font-bold text-[6.5pt] uppercase tracking-widest text-black">Decreto Número</div>
+              <div className="font-mono text-lg font-bold tracking-wider text-black leading-none my-1">{finalDecreeNumber}</div>
+              <div className="font-bold text-[6.5pt] uppercase tracking-widest text-black border-t border-black pt-0.5">Fecha de Emisión</div>
+              <div className="font-mono text-[7.5pt] uppercase font-semibold text-black">{emissionDateText}</div>
             </div>
           </div>
 
-          <div className="mb-6 text-[10.5pt] leading-relaxed text-justify">
-            <p>
-              Por el presente documento, ante la comprobada pérdida, destrucción o deterioro del registro original por motivo de 
-              <strong> {causaReposicion}</strong>, el Gobierno de la Diócesis, en uso de sus facultades, 
-              <strong> AUTORIZA Y ORDENA</strong> asentar una <strong>PARTIDA SUPLETORIA DE BAUTISMO</strong> a nombre de:
+          <div className="mb-2 text-[9pt] text-black shrink-0">
+            <p className="text-justify leading-snug">
+              Por el presente documento, ante la comprobada pérdida, destrucción o deterioro del registro original por motivo de <strong>{causaReposicion}</strong>, el Gobierno de la {diocesisName.includes('ARQUIDIÓCESIS') ? 'Arquidiócesis' : 'Diócesis'}, en uso de sus facultades, <strong>AUTORIZA Y ORDENA</strong> asentar una <strong>PARTIDA SUPLETORIA DE BAUTISMO</strong> a nombre de:
             </p>
-            <div className="text-center my-4">
-                <span className="font-black text-[13pt] uppercase tracking-wider border-b-2 border-black px-8 py-1">{fullNameSubject}</span>
+            <div className="text-center mt-1">
+                <span className="font-bold text-[11pt] text-black uppercase tracking-wider border-b border-black inline-block min-w-[70%] pb-0.5">{fullNameSubject}</span>
             </div>
           </div>
 
-          {/* --- CUADRO TÉCNICO DEL NUEVO REGISTRO --- */}
-          <div className="mb-6 border-2 border-black p-6 relative bg-gray-50/30">
-            <div className="absolute -top-3 left-6 bg-white px-4 font-black text-[7.5pt] tracking-[0.2em] uppercase border border-black shadow-sm">
+          <div className="mb-2 border-t-2 border-black pt-2 relative mt-2 flex-1 flex flex-col">
+            <div className="text-center font-bold text-[8pt] tracking-widest uppercase text-black mb-2">
               Detalles a Asentar en el Libro Supletorio
             </div>
             
-            <div className="grid grid-cols-3 gap-6 mb-6 border-b border-gray-300 pb-4">
-              <div className="text-center"><span className="text-[7pt] font-black text-gray-400 uppercase block tracking-widest mb-1">Libro Supletorio</span><span className="font-mono font-black text-[14pt] bg-white px-3 border rounded">{baptismRecord.book}</span></div>
-              <div className="text-center border-x border-gray-200"><span className="text-[7pt] font-black text-gray-400 uppercase block tracking-widest mb-1">Folio</span><span className="font-mono font-black text-[14pt] bg-white px-3 border rounded">{baptismRecord.page}</span></div>
-              <div className="text-center"><span className="text-[7pt] font-black text-gray-400 uppercase block tracking-widest mb-1">Número</span><span className="font-mono font-black text-[14pt] bg-white px-3 border rounded">{baptismRecord.entry}</span></div>
+            <div className="grid grid-cols-3 gap-2 mb-2 border border-black pb-1.5 pt-1.5 bg-white p-1.5 rounded shrink-0">
+              <div className="text-center"><span className="text-[6.5pt] font-bold text-black uppercase block tracking-wider">Libro Supletorio</span><span className="font-mono font-bold text-[10pt] text-black">{baptismRecord.book}</span></div>
+              <div className="text-center border-l border-r border-black"><span className="text-[6.5pt] font-bold text-black uppercase block tracking-wider">Folio</span><span className="font-mono font-bold text-[10pt] text-black">{baptismRecord.page}</span></div>
+              <div className="text-center"><span className="text-[6.5pt] font-bold text-black uppercase block tracking-wider">Número</span><span className="font-mono font-bold text-[10pt] text-black">{baptismRecord.entry}</span></div>
             </div>
 
-            <div className="grid grid-cols-1 gap-1">
-              <DataRow label="F. Bautismo" value={baptismRecord.sacramentDate} />
-              <DataRow label="Nombres" value={baptismRecord.firstName} />
-              <DataRow label="Apellidos" value={baptismRecord.lastName} />
-              <DataRow label="F. Nacimiento" value={baptismRecord.birthDate} />
+            <div className="flex flex-col flex-1 justify-between pt-1">
+              <DataRow label="Fecha de Bautismo" value={baptismRecord.sacramentDate} />
+              <DataRow label="Nombres" value={baptismRecord.firstName} bold />
+              <DataRow label="Apellidos" value={baptismRecord.lastName} bold />
+              <DataRow label="Fecha Nacimiento" value={baptismRecord.birthDate} />
               <DataRow label="Lugar Nacimiento" value={baptismRecord.birthPlace} />
               <DataRow label="Padre" value={baptismRecord.father} />
               <DataRow label="Madre" value={baptismRecord.mother} />
-              <div className="flex gap-4">
-                  <div className="w-[55%] flex items-end pr-1">
-                      <span className="font-bold text-black uppercase tracking-widest text-[8pt] w-36 shrink-0">Tipo de Unión:</span>
-                      <span className="font-mono flex-1 border-b border-gray-300 pl-1 uppercase text-[9pt] text-gray-800">{baptismRecord.unionType}</span>
-                  </div>
-                  <div className="w-[45%] flex items-end pl-1">
-                      <span className="font-bold text-black uppercase tracking-widest text-[8pt] w-12 shrink-0">Sexo:</span>
-                      <span className="font-mono flex-1 border-b border-gray-300 pl-1 uppercase text-[9pt] text-gray-800">{baptismRecord.sex}</span>
-                  </div>
+              <div className="flex w-full">
+                <div className="w-[55%] flex items-end pr-1">
+                    <span className="font-semibold text-black uppercase tracking-wider text-[8pt] w-36 shrink-0">Tipo de Unión:</span>
+                    <span className="font-mono flex-1 border-b border-dotted border-gray-500 pl-1 uppercase text-[8.5pt] text-black">{baptismRecord.unionType}</span>
+                </div>
+                <div className="w-[45%] flex items-end pl-1">
+                    <span className="font-semibold text-black uppercase tracking-wider text-[8pt] w-12 shrink-0">Sexo:</span>
+                    <span className="font-mono flex-1 border-b border-dotted border-gray-500 pl-1 uppercase text-[8.5pt] text-black">{baptismRecord.sex}</span>
+                </div>
               </div>
               <DataRow label="Abuelos Paternos" value={baptismRecord.paternalGrandparents} />
               <DataRow label="Abuelos Maternos" value={baptismRecord.maternalGrandparents} />
               <DataRow label="Padrinos" value={baptismRecord.godparents} />
-              <DataRow label="Sacerdote" value={baptismRecord.minister} />
-              <DataRow label="Firma (Da Fe)" value={baptismRecord.daFe} bold />
+              <DataRow label="Ministro" value={baptismRecord.minister} />
+              <DataRow label="Da Fe" value={baptismRecord.daFe} bold />
             </div>
           </div>
 
-          {/* --- DISPOSICIÓN LEGAL --- */}
-          <div className="mb-4 relative border-2 border-black p-4 bg-gray-50 print:bg-gray-100 shadow-inner">
-             <div className="absolute -top-3 left-6 bg-white px-3 font-black text-[8pt] tracking-widest uppercase border border-black">
+          <div className="mb-2 relative border border-black p-2 bg-gray-50 print:bg-gray-100 mt-2 shrink-0">
+             <div className="absolute -top-2.5 left-4 bg-gray-50 print:bg-gray-100 px-2 font-bold text-[7pt] tracking-widest uppercase border border-black border-b-0 text-black">
               Disposición
             </div>
-            <p className="font-mono text-[9.5pt] leading-tight text-justify mt-1 font-bold uppercase text-gray-700">
+            
+            <p className="font-mono text-[8pt] leading-tight text-justify mt-1 text-black font-semibold uppercase">
               CÓPIESE FIELMENTE ESTA INFORMACIÓN EN EL LIBRO DE REGISTROS SUPLETORIOS DE LA PARROQUIA. EL PÁRROCO DARÁ FE DE LA EXACTITUD DEL ASENTAMIENTO BASÁNDOSE EN EL PRESENTE DECRETO.
             </p>
           </div>
+
+          <p className="text-[7pt] text-black text-justify px-2 leading-tight shrink-0">
+            <strong>NOTA IMPORTANTE:</strong> Favor confirmar el recibo del decreto al correo oficial: <strong>{orgData.email}</strong>. El despacho parroquial deberá velar por el resguardo y custodia del nuevo libro de reposición.
+          </p>
       </div>
 
-      {/* --- FIRMAS Y SELLOS --- */}
-      <div className="w-full pt-8">
-          <div className="flex justify-between items-end px-16 mb-10">
+      {/* --- BLOQUE INFERIOR FIJO --- */}
+      <div className="w-full shrink-0 pt-2">
+          <div className="flex justify-between items-end px-12 mb-3">
             <div className="text-center w-5/12">
-              <div className="border-t-2 border-black pt-2 font-black uppercase text-[10pt] tracking-tighter">
+              <div className="border-t border-black pt-1 font-bold uppercase text-[8pt] tracking-wide text-black">
                 {cancillerName}
               </div>
-              <div className="text-[8pt] font-bold text-gray-500 uppercase tracking-[0.2em] mt-1">
+              <div className="text-[6.5pt] font-bold text-black uppercase tracking-widest mt-0.5">
                  {cargoName}
               </div>
             </div>
-            <div className="text-center">
-              <div className="h-28 w-28 border-2 border-dashed border-gray-300 rounded-full flex items-center justify-center text-[7pt] font-black uppercase text-gray-300 tracking-widest text-center leading-none p-4">
-                Sello Seco de<br/>Cancillería
+            <div className="text-center w-1/3">
+              <div className="h-20 w-20 border-2 border-dotted border-black rounded-full mx-auto flex items-center justify-center text-black text-[8px] font-bold uppercase tracking-widest text-center leading-tight p-1">
+                Sello<br/>Cancillería
               </div>
             </div>
           </div>
 
-          {/* PIE DE PÁGINA OFICIAL */}
-          <div className="w-full text-center text-[7.5pt] text-gray-500 border-t border-gray-200 pt-3">
-            <p className="font-black uppercase tracking-widest mb-1 text-gray-700">{orgData.name}</p>
-            <p className="font-medium">
-                {orgData.address} • Tel: {orgData.phone} • E-mail: {orgData.email}
-            </p>
+          <div className="w-full text-center text-[7pt] text-black border-t border-black pt-1.5">
+            <p className="font-extrabold uppercase tracking-widest mb-0.5">{orgData.name}</p>
+            <p className="font-medium">{orgData.address} • Tel: {orgData.phone} • E-mail: {orgData.email}</p>
             <p className="font-bold mt-1 tracking-widest uppercase">{orgData.city} — COLOMBIA</p>
           </div>
       </div>
+
     </div>
   );
 });
