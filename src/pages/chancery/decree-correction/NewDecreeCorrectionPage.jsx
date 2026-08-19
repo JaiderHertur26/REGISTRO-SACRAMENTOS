@@ -72,24 +72,6 @@ const NewDecreeCorrectionPage = () => {
         folio: '', 
         numero: '' 
     });
-    
-    // --- CONFIRMATION Y MARRIAGE STATES (Para el futuro) ---
-    const [confDecreeData, setConfDecreeData] = useState({ parroquia: '', decreeNumber: '', decreeDate: new Date().toISOString().split('T')[0], conceptoAnulacionId: '', targetName: '', book: '', page: '', entry: '' });
-    const [confFoundRecord, setConfFoundRecord] = useState(null);
-    const [confSearchMessage, setConfSearchMessage] = useState(null);
-    const [confSuggestions, setConfSuggestions] = useState([]);
-    const [showConfSuggestions, setShowConfSuggestions] = useState(false);
-    const confWrapperRef = useRef(null);
-    const [newConfPartida, setNewConfPartida] = useState({ sacramentDate: '', firstName: '', lastName: '', birthDate: '', lugarNacimientoDetalle: '', lugarConfirmacion: '', fatherName: '', motherName: '', padrino: '', madrina: '', minister: '', ministerFaith: '' });
-
-    const [marDecreeData, setMarDecreeData] = useState({ parroquia: '', decreeNumber: '', decreeDate: new Date().toISOString().split('T')[0], conceptoAnulacionId: '', targetName: '', book: '', page: '', entry: '' });
-    const [marFoundRecord, setMarFoundRecord] = useState(null);
-    const [marSearchMessage, setMarSearchMessage] = useState(null);
-    const [marSuggestions, setMarSuggestions] = useState([]);
-    const [showMarSuggestions, setShowMarSuggestions] = useState(false);
-    const marWrapperRef = useRef(null);
-    const [newMarPartida, setNewMarPartida] = useState({ sacramentDate: '', lugarMatrimonio: '', husbandName: '', husbandSurname: '', husbandBirthDate: '', husbandPlaceOfBirth: '', husbandFather: '', husbandMother: '', wifeName: '', wifeSurname: '', wifeBirthDate: '', wifePlaceOfBirth: '', wifeFather: '', wifeMother: '', witnesses: '', minister: '', ministerFaith: '' });
-
 
     // --- INITIALIZATION ---
     useEffect(() => {
@@ -122,8 +104,6 @@ const NewDecreeCorrectionPage = () => {
                 }
 
                 setDecreeData(prev => ({ ...prev, parroquia: entityLabel }));
-                setConfDecreeData(prev => ({ ...prev, parroquia: entityLabel }));
-                setMarDecreeData(prev => ({ ...prev, parroquia: entityLabel }));
 
                 if (currentDioceseId) {
                     const { data: conceptosData } = await supabase
@@ -155,12 +135,10 @@ const NewDecreeCorrectionPage = () => {
     useEffect(() => {
         function handleClickOutside(event) {
             if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setShowSuggestions(false);
-            if (confWrapperRef.current && !confWrapperRef.current.contains(event.target)) setShowConfSuggestions(false);
-            if (marWrapperRef.current && !marWrapperRef.current.contains(event.target)) setShowMarSuggestions(false);
         }
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, [wrapperRef, confWrapperRef, marWrapperRef]);
+    }, [wrapperRef]);
 
     const getSafeValue = (obj, ...keys) => {
         for (const key of keys) {
@@ -369,7 +347,7 @@ const NewDecreeCorrectionPage = () => {
         setIsLoading(true);
 
         try {
-            // 1. VALIDACIÓN DE DUPLICIDAD DE NÚMERO DE DECRETO
+            // 1. VALIDACIÓN DE DUPLICIDAD
             const { data: existingDecree, error: checkError } = await supabase
                 .from('decretos')
                 .select('id')
@@ -443,7 +421,7 @@ const NewDecreeCorrectionPage = () => {
             oldRawData.tipoNotaAlMargen = "porCorreccion.anulada";
 
             await supabase.from('baptisms').update({ 
-                status: 'anulada', nota_marginal: oldRawData.notaMarginal, 
+                status: 'anulada', nota_marginal: noteAnulada, 
                 raw_data: oldRawData 
             }).eq('id', foundRecord.id);
 
@@ -533,14 +511,16 @@ const NewDecreeCorrectionPage = () => {
             }, { onConflict: 'parish_id' });
 
             // 8. NOTIFICACIÓN
-            await createNotification({
-                decree_id: generateUUID(),
-                decree_type: 'correction',
-                parish_id: targetParish,
-                created_by: user.id,
-                message: `La Cancillería emitió el Decreto de Corrección #${decreeData.numeroDeDecreto} afectando la partida de ${newPartida.nombres} ${newPartida.apellidos}.`,
-                status: 'unread'
-            });
+            if (typeof createNotification === 'function') {
+                await createNotification({
+                    decree_id: generateUUID(),
+                    decree_type: 'correction',
+                    parish_id: targetParish,
+                    created_by: user.id,
+                    message: `La Cancillería emitió el Decreto de Corrección #${decreeData.numeroDeDecreto} afectando la partida de ${newPartida.nombres} ${newPartida.apellidos}.`,
+                    status: 'unread'
+                });
+            }
 
             toast({ 
                 title: "Decreto Ejecutado", 
@@ -555,78 +535,6 @@ const NewDecreeCorrectionPage = () => {
         } finally {
             setIsLoading(false);
         }
-    };
-
-    // --- MANEJADORES DE CONFIRMACIONES Y MATRIMONIOS (MOCK) ---
-    const handleConfDecreeChange = (e) => {
-        const { name, value } = e.target;
-        setConfDecreeData(prev => ({ ...prev, [name]: value }));
-        if (['book', 'page', 'entry'].includes(name)) { setConfFoundRecord(null); setConfSearchMessage(null); }
-        if (name === 'targetName') {
-            if (value.length > 2) {
-                const allConfirmations = getConfirmations(targetParish || user?.parishId);
-                const filtered = allConfirmations.filter(c => {
-                    const fullName = `${c.firstName || ''} ${c.lastName || ''} ${c.nombres || ''} ${c.apellidos || ''}`.toLowerCase();
-                    return fullName.includes(value.toLowerCase());
-                }).slice(0, 5);
-                setConfSuggestions(filtered);
-                setShowConfSuggestions(true);
-            } else {
-                setConfSuggestions([]);
-                setShowConfSuggestions(false);
-            }
-        }
-    };
-
-    const handleConfSuggestionClick = (record) => {
-        const fullName = `${record.firstName || record.nombres} ${record.lastName || record.apellidos}`;
-        setConfDecreeData(prev => ({ ...prev, targetName: fullName }));
-        setShowConfSuggestions(false);
-    };
-
-    const handleNewConfPartidaChange = (e) => {
-        const { name, value } = e.target;
-        setNewConfPartida(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleConfSearch = () => {
-        setConfSearchMessage({ type: 'error', text: "Buscador de confirmaciones en construcción" });
-    };
-
-    const handleMarDecreeChange = (e) => {
-        const { name, value } = e.target;
-        setMarDecreeData(prev => ({ ...prev, [name]: value }));
-        if (['book', 'page', 'entry'].includes(name)) { setMarFoundRecord(null); setMarSearchMessage(null); }
-        if (name === 'targetName') {
-            if (value.length > 2) {
-                const allMatrimonios = getMatrimonios(targetParish || user?.parishId);
-                const filtered = allMatrimonios.filter(m => {
-                    const husbandFull = `${m.husbandName || ''} ${m.husbandSurname || ''}`.toLowerCase();
-                    const wifeFull = `${m.wifeName || ''} ${m.wifeSurname || ''}`.toLowerCase();
-                    return husbandFull.includes(value.toLowerCase()) || wifeFull.includes(value.toLowerCase());
-                }).slice(0, 5);
-                setMarSuggestions(filtered);
-                setShowMarSuggestions(true);
-            } else {
-                setMarSuggestions([]);
-                setShowMarSuggestions(false);
-            }
-        }
-    };
-
-    const handleMarSuggestionClick = (record) => {
-        const label = `${record.husbandName} ${record.husbandSurname} & ${record.wifeName} ${record.wifeSurname}`;
-        setMarDecreeData(prev => ({ ...prev, targetName: label }));
-        setShowMarSuggestions(false);
-    };
-
-    const handleNewMarPartidaChange = (e) => {
-        const { name, value } = e.target;
-        setNewMarPartida(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleMarSearch = () => {
-        setMarSearchMessage({ type: 'error', text: "Buscador de matrimonios en construcción" });
     };
 
     const selectedConcept = conceptos.find(c => String(c.id) === String(decreeData.conceptoAnulacion));
@@ -851,7 +759,7 @@ const NewDecreeCorrectionPage = () => {
                                 {isLoading ? 'Procesando en Nube...' : 'Emitir y Sincronizar'}
                             </Button>
                         </div>
-                    </form>
+                    </div>
                 </TabsContent>
             </Tabs>
         </DashboardLayout>
