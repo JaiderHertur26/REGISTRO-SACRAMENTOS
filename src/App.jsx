@@ -89,10 +89,10 @@ import MatrimonioPartidasPage from '@/pages/parish/MatrimonioPartidasPage';
 /* --- DECREES (CORRECTION & REPLACEMENT - CHANCERY) --- */
 import NewDecreeCorrectionPage from '@/pages/chancery/decree-correction/NewDecreeCorrectionPage';
 import NewDecreeReplacementPage from '@/pages/chancery/decree-replacement/NewDecreeReplacementPage';
-import ChanceryDecreeCorrectionViewPage from '@/pages/chancery/ChanceryDecreeCorrectionViewPage';
-import ChanceryDecreeReplacementViewPage from '@/pages/chancery/ChanceryDecreeReplacementViewPage';
-import ChanceryDecreeCorrectionEditPage from '@/pages/chancery/ChanceryDecreeCorrectionEditPage';
-import ChanceryDecreeReplacementEditPage from '@/pages/chancery/ChanceryDecreeReplacementEditPage';
+import ChanceryDecreeCorrectionViewPage from '@/pages/chancery/decree-correction/ChanceryDecreeCorrectionViewPage';
+import ChanceryDecreeReplacementViewPage from '@/pages/chancery/decree-replacement/ChanceryDecreeReplacementViewPage';
+import ChanceryDecreeCorrectionEditPage from '@/pages/chancery/decree-correction/ChanceryDecreeCorrectionEditPage';
+import ChanceryDecreeReplacementEditPage from '@/pages/chancery/decree-replacement/ChanceryDecreeReplacementEditPage';
 
 /* --- ANNULMENT (PARISH) --- */
 import AnnulmentConceptsPage from '@/pages/parish/AnnulmentConceptsPage';
