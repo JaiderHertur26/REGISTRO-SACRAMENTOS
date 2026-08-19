@@ -43,11 +43,9 @@ const BaptismRepositionNewPage = () => {
           if (!user?.parishId) return;
 
           try {
-              // Traer Parámetros Supletorios
               const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
               if (paramsData && paramsData.bautizos_params) setCloudParams(paramsData.bautizos_params);
 
-              // Traer Conceptos de Reposición
               let targetDioceseId = user.dioceseId || user.diocese_id;
               if (!targetDioceseId) {
                   const { data: pData } = await supabase.from('parishes').select('diocese_id').eq('id', user.parishId).single();
@@ -59,7 +57,6 @@ const BaptismRepositionNewPage = () => {
                   if (data) setConceptos(data.filter(c => c.tipo === 'porReposicion' || c.concepto?.toLowerCase().includes('reposici')));
               }
 
-              // Párroco Actual (Firma)
               const priest = getParrocoActual(user.parishId);
               if (priest) {
                   const name = `${priest.nombre} ${priest.apellido || ''}`.trim().toUpperCase();
@@ -89,7 +86,6 @@ const BaptismRepositionNewPage = () => {
       setIsSubmitting(true);
 
       try {
-          // A. Validar que el decreto no exista
           const { data: existingDecree } = await supabase.from('decretos').select('id').eq('tipo', 'reposicion')
               .eq('parish_id', user.parishId).contains('payload', { decreeNumber: decreeData.numeroDecreto }).maybeSingle();
 
@@ -99,17 +95,16 @@ const BaptismRepositionNewPage = () => {
               return;
           }
 
-          // B. Obtener numeración de Libros Supletorios
           const supletorioLibro = String(cloudParams.suplementarioLibro || '1').padStart(4, '0');
           const supletorioFolio = String(cloudParams.suplementarioFolio || '1').padStart(4, '0');
           const supletorioNumero = String(cloudParams.suplementarioNumero || '1').padStart(4, '0');
 
-          // C. Generar Nota Marginal de Reposición
           const conceptoMatch = conceptos.find(c => String(c.id) === String(decreeData.conceptoAnulacionId));
           const conceptoText = conceptoMatch?.concepto || 'REPOSICIÓN POR DETERIORO O PÉRDIDA';
           const fechaTexto = convertDateToSpanishText(decreeData.fechaDecreto).replace(/^EL\s+/i, '').toUpperCase();
           
-          const notaMarginalTecnica = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${decreeData.numeroDecreto.toUpperCase()} DE FECHA ${fechaTexto}, DEBIDO A LA ${conceptoText.toUpperCase()} DEL ORIGINAL. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
+          // 🚀 SE MEJORÓ LA GRAMÁTICA DE LA NOTA MARGINAL
+          const notaMarginalTecnica = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${decreeData.numeroDecreto.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText.toUpperCase()}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
 
           const partidaToSave = {
               ...formData,
@@ -124,6 +119,7 @@ const BaptismRepositionNewPage = () => {
               anulado: false, status: 'seated', notaMarginal: notaMarginalTecnica
           };
 
+          // 🚀 EMPAQUETADO EXACTO QUE BUSCA EL PDF ("datosNuevaPartida")
           const payloadDecree = {
               decreeNumber: decreeData.numeroDecreto,
               numeroDecreto: decreeData.numeroDecreto,
@@ -132,10 +128,18 @@ const BaptismRepositionNewPage = () => {
               causa: conceptoText,
               targetName: `${formData.lastName} ${formData.firstName}`.trim(),
               ...formData,
+              datosNuevaPartida: {
+                  ...formData,
+                  book: supletorioLibro,
+                  page: supletorioFolio,
+                  entry: supletorioNumero,
+                  book_number: supletorioLibro,
+                  page_number: supletorioFolio,
+                  entry_number: supletorioNumero,
+              },
               newPartidaSummary: { book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, nombres: formData.firstName, apellidos: formData.lastName }
           };
 
-          // D. Crear Partida Supletoria
           const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{
               parish_id: user.parishId,
               book_number: supletorioLibro, folio: supletorioFolio, number: supletorioNumero,
@@ -149,11 +153,9 @@ const BaptismRepositionNewPage = () => {
 
           if (errBap) throw errBap;
 
-          // E. Crear Decreto
           payloadDecree.newPartidaId = newBap.id;
           await supabase.from('decretos').insert([{ parish_id: user.parishId, tipo: 'reposicion', payload: payloadDecree }]);
 
-          // F. Actualizar consecutivos
           const newParams = { ...cloudParams, suplementarioNumero: Number(supletorioNumero) + 1 };
           await supabase.from('parish_parameters').upsert({ parish_id: user.parishId, bautizos_params: newParams }, { onConflict: 'parish_id' });
 
@@ -199,7 +201,6 @@ const BaptismRepositionNewPage = () => {
                     <TabsContent value="bautismo" className="p-10 focus:outline-none">
                         <form onSubmit={handleSubmit} className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             
-                            {/* SECCIÓN 1: DATOS DEL DECRETO */}
                             <section>
                                 <div className="flex items-center gap-3 mb-8 pb-4 border-b border-gray-50">
                                     <div className="bg-blue-50 p-2 rounded-lg text-blue-600"><FileText className="w-5 h-5"/></div>
@@ -215,7 +216,7 @@ const BaptismRepositionNewPage = () => {
                                         <Input type="date" value={decreeData.fechaDecreto} onChange={(e) => setDecreeData({ ...decreeData, fechaDecreto: e.target.value })} className="py-6" />
                                     </div>
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Causa de la Reposición</label>
+                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Causa de la Reposición *</label>
                                         <select 
                                             value={decreeData.conceptoAnulacionId} 
                                             onChange={(e) => setDecreeData({ ...decreeData, conceptoAnulacionId: e.target.value })}
@@ -228,7 +229,6 @@ const BaptismRepositionNewPage = () => {
                                 </div>
                             </section>
 
-                            {/* SECCIÓN 2: DATOS DEL BAUTIZADO */}
                             <section>
                                 <div className="flex items-center gap-3 mb-8 pb-4 border-b border-gray-50">
                                     <div className="bg-green-50 p-2 rounded-lg text-green-600"><UserPlus className="w-5 h-5"/></div>
@@ -241,8 +241,8 @@ const BaptismRepositionNewPage = () => {
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Fecha Bautismo *</label><Input type="date" name="sacramentDate" value={formData.sacramentDate} onChange={(e) => setFormData({...formData, sacramentDate: e.target.value})} className="py-6" /></div>
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Fecha Nacimiento</label><Input type="date" name="birthDate" value={formData.birthDate} onChange={(e) => setFormData({...formData, birthDate: e.target.value})} className="py-6" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Fecha Bautismo</label><Input type="date" name="sacramentDate" value={formData.sacramentDate} onChange={handleChange} className="py-6" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Fecha Nacimiento</label><Input type="date" name="birthDate" value={formData.birthDate} onChange={handleChange} className="py-6" /></div>
                                         <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Lugar Nacimiento</label><Input name="placeOfBirth" value={formData.placeOfBirth} onChange={handleChange} className="py-6 uppercase text-xs font-bold" /></div>
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Sexo</label>
@@ -268,24 +268,24 @@ const BaptismRepositionNewPage = () => {
 
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Padrinos</label>
-                                        <Input name="godparents" value={formData.godparents} onChange={handleChange} className="py-6 uppercase font-bold text-gray-600 shadow-sm" />
+                                        <Input name="godparents" value={formData.godparents} onChange={handleChange} className="py-6 uppercase font-bold text-gray-600 shadow-sm" placeholder="EJ: CARLOS PÉREZ Y MARÍA GARCÍA" />
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t pt-8">
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Sacerdote Celebrante</label><Input name="minister" value={formData.minister} onChange={handleChange} className="py-6 uppercase font-black text-blue-900" /></div>
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Firma (Da Fe)</label><Input name="ministerFaith" value={formData.ministerFaith} onChange={handleChange} className="py-6 uppercase font-bold text-gray-500 bg-gray-50" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Sacerdote Celebrante</label><Input name="minister" value={formData.minister} onChange={handleChange} className="py-6 uppercase font-black text-blue-900" placeholder="NOMBRE DEL MINISTRO" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Firma (Da Fe) *</label><Input name="ministerFaith" value={formData.ministerFaith} onChange={handleChange} className="py-6 uppercase font-bold text-gray-500 bg-gray-50" /></div>
                                     </div>
                                 </div>
                             </section>
 
-                            <div className="fixed bottom-8 right-8 z-50">
+                            <div className="flex justify-end gap-4 border-t border-gray-100 pt-10">
+                                <Button type="button" variant="ghost" onClick={() => navigate('/parroquia/decretos/reposicion')} disabled={isSubmitting} className="px-8 text-gray-400 hover:text-gray-600 font-bold uppercase tracking-widest text-[10px]">Cancelar</Button>
                                 <Button 
                                     type="submit" 
                                     disabled={isSubmitting} 
-                                    className="bg-gradient-to-r from-green-600 to-green-700 hover:shadow-2xl hover:shadow-green-500/20 text-white px-12 py-8 rounded-full transition-all transform active:scale-95 font-black uppercase tracking-[0.1em] text-xs shadow-xl shadow-green-900/10"
+                                    className="bg-gradient-to-r from-green-600 to-green-700 hover:shadow-2xl hover:shadow-green-500/20 text-white px-12 py-8 rounded-2xl transition-all transform active:scale-95 font-black uppercase tracking-[0.2em] text-xs shadow-xl shadow-green-900/10"
                                 >
-                                    {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Save className="w-6 h-6 mr-3" />} 
-                                    Ejecutar Reposición en la Nube
+                                    {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Save className="w-5 h-5 mr-3" /> Ejecutar Reposición</>}
                                 </Button>
                             </div>
                         </form>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
+import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
@@ -39,7 +40,6 @@ const EditDecreeRepositionSheet = () => {
         oficinaRegistro: '', fechaExpedicion: '', book_number: '', page_number: '', entry_number: '' 
     });
 
-    // --- 1. CARGA INICIAL DE LA NUBE ---
     useEffect(() => {
         const loadDecreeData = async () => {
             const idParam = searchParams.get('id');
@@ -47,7 +47,6 @@ const EditDecreeRepositionSheet = () => {
             setIsLoading(true);
 
             try {
-                // Conceptos
                 let targetDioceseId = user.dioceseId || user.diocese_id;
                 if (!targetDioceseId) {
                     const { data: pData } = await supabase.from('parishes').select('diocese_id').eq('id', user.parishId).single();
@@ -59,14 +58,12 @@ const EditDecreeRepositionSheet = () => {
                     if (cData) setConceptos(cData);
                 }
 
-                // Decretos Locales
                 const { data: decData } = await supabase.from('decretos').select('*').eq('tipo', 'reposicion').eq('parish_id', user.parishId).order('created_at', { ascending: false });
                 if (decData) {
                     const formattedData = decData.map(item => ({ id: item.id, ...item.payload }));
                     setDecrees(formattedData);
                 }
 
-                // El Decreto Específico
                 const { data: decree, error } = await supabase.from('decretos').select('*').eq('id', idParam).single();
                 if (error) throw error;
 
@@ -81,7 +78,7 @@ const EditDecreeRepositionSheet = () => {
                     conceptoAnulacionId: payload.conceptoAnulacionId || ''
                 });
 
-                const bd = payload.newPartidaSummary || {};
+                const bd = payload.datosNuevaPartida || payload.newPartidaSummary || {};
                 setNewPartida({
                     ...payload,
                     firstName: payload.firstName || bd.nombres || '',
@@ -90,9 +87,9 @@ const EditDecreeRepositionSheet = () => {
                     sacramentDate: payload.sacramentDate || payload.fecbau || '',
                     birthDate: payload.birthDate || payload.fecnac || '',
                     placeOfBirth: payload.placeOfBirth || payload.lugarn || '',
-                    paternalGrandparents: payload.paternalGrandparents || payload.abuepat || '',
-                    maternalGrandparents: payload.maternalGrandparents || payload.abuemat || '',
-                    godparents: payload.godparents || payload.padrinos || '',
+                    paternalGrandparents: payload.paternalGrandparents || bd.paternalGrandparents || bd.abuepat || '',
+                    maternalGrandparents: payload.maternalGrandparents || bd.maternalGrandparents || bd.abuemat || '',
+                    godparents: payload.godparents || bd.godparents || bd.padrinos || '',
                     book_number: bd.book || bd.book_number || '',
                     page_number: bd.page || bd.page_number || '',
                     entry_number: bd.entry || bd.entry_number || ''
@@ -109,11 +106,7 @@ const EditDecreeRepositionSheet = () => {
 
     const handleDecreeChange = (e) => setDecreeData(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
     const handleNewPartidaChange = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
-    const handleNewPartidaChangeRaw = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
-    // =========================================================================
-    // 💾 ACTUALIZACIÓN HACIA LA NUBE
-    // =========================================================================
     const handleUpdate = async (e) => {
         e.preventDefault();
         if (!selectedDecreeId) return;
@@ -124,9 +117,10 @@ const EditDecreeRepositionSheet = () => {
             const conceptoMatch = conceptos.find(c => String(c.id) === String(decreeData.conceptoAnulacionId));
             const causaText = conceptoMatch ? conceptoMatch.concepto.toUpperCase() : 'REPOSICIÓN';
             const fechaTexto = convertDateToSpanishText(decreeData.decreeDate).replace(/^EL\s+/i, '').toUpperCase();
-            const notaReposicion = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${decreeData.decreeNumber.toUpperCase()} DE FECHA ${fechaTexto}, DEBIDO A LA ${causaText} DEL ORIGINAL. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
+            
+            // 🚀 GRAMÁTICA CORREGIDA AQUÍ TAMBIÉN
+            const notaReposicion = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${decreeData.decreeNumber.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${causaText}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
 
-            // 1. Actualizar Partida Supletoria
             const { data: supData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', user.parishId)
                 .eq('book_number', pad(newPartida.book_number)).eq('folio', pad(newPartida.page_number)).eq('number', pad(newPartida.entry_number)).maybeSingle();
 
@@ -150,13 +144,14 @@ const EditDecreeRepositionSheet = () => {
                 }).eq('id', supData.id);
             }
 
-            // 2. Actualizar Decreto
+            // 🚀 EMPAQUETADO EXACTO QUE BUSCA EL PDF PARA LA EDICIÓN
             const newPayload = {
                 ...originalPayload,
                 decreeNumber: decreeData.decreeNumber, decreeDate: decreeData.decreeDate,
                 conceptoAnulacionId: decreeData.conceptoAnulacionId, causa: causaText,
                 targetName: `${newPartida.lastName} ${newPartida.firstName}`.trim(),
                 ...newPartida,
+                datosNuevaPartida: { ...newPartida, book: newPartida.book_number, page: newPartida.page_number, entry: newPartida.entry_number },
                 newPartidaSummary: { book: newPartida.book_number, page: newPartida.page_number, entry: newPartida.entry_number, nombres: newPartida.firstName, apellidos: newPartida.lastName }
             };
 
@@ -174,11 +169,9 @@ const EditDecreeRepositionSheet = () => {
         try {
             const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
             
-            // Eliminar partida viva
             await supabase.from('baptisms').delete().eq('parish_id', user.parishId)
                 .eq('book_number', pad(newPartida.book_number)).eq('folio', pad(newPartida.page_number)).eq('number', pad(newPartida.entry_number));
 
-            // Eliminar Decreto
             await supabase.from('decretos').delete().eq('id', selectedDecreeId);
 
             toast({ title: "Eliminado", description: "El decreto y su partida han sido removidos." });
@@ -231,7 +224,7 @@ const EditDecreeRepositionSheet = () => {
                                 <div className="flex items-center justify-between mb-8 pb-4 border-b border-gray-50">
                                     <div className="flex items-center gap-3">
                                         <div className="bg-blue-600 text-white p-2.5 rounded-xl shadow-lg shadow-blue-900/10"><FileText className="w-5 h-5"/></div>
-                                        <h3 className="text-sm font-black text-gray-900 uppercase tracking-[0.2em]">01. Datos del Decreto</h3>
+                                        <h3 className="text-sm font-black text-gray-900 uppercase tracking-[0.2em]">01. Datos del Decreto Maestro</h3>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -245,7 +238,12 @@ const EditDecreeRepositionSheet = () => {
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Concepto o Causa</label>
-                                        <select name="conceptoAnulacionId" value={decreeData.conceptoAnulacionId} onChange={handleDecreeChange} className="w-full h-[50px] px-4 border border-gray-200 rounded-xl outline-none font-bold text-xs bg-gray-50 uppercase tracking-tighter">
+                                        <select 
+                                            name="conceptoAnulacionId"
+                                            value={decreeData.conceptoAnulacionId} 
+                                            onChange={handleDecreeChange}
+                                            className="w-full h-[50px] px-4 border border-gray-200 rounded-xl outline-none font-bold text-xs bg-gray-50 uppercase tracking-tighter transition-all focus:bg-white"
+                                        >
                                             {conceptos.map(c => <option key={c.id} value={c.id}>{c.codigo} - {c.concepto}</option>)}
                                         </select>
                                     </div>
@@ -255,28 +253,30 @@ const EditDecreeRepositionSheet = () => {
                             <section>
                                 <div className="flex items-center gap-3 mb-8 pb-4 border-b border-gray-50">
                                     <div className="bg-green-600 text-white p-2.5 rounded-xl shadow-lg shadow-green-900/10"><UserPlus className="w-5 h-5"/></div>
-                                    <h3 className="text-sm font-black text-gray-800 uppercase tracking-[0.2em]">02. Partida Supletoria</h3>
+                                    <h3 className="text-sm font-black text-gray-800 uppercase tracking-[0.2em]">02. Información de la Partida Supletoria</h3>
                                 </div>
 
                                 <div className="space-y-8">
                                     <div className="grid grid-cols-3 gap-6 bg-gray-50/50 p-6 rounded-3xl border border-gray-100 shadow-inner">
-                                        <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase ml-1 text-center block">Libro</label><Input name="book_number" value={newPartida.book_number} onChange={handleNewPartidaChange} className="bg-white text-center font-black font-mono text-lg py-6" /></div>
-                                        <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase ml-1 text-center block">Folio</label><Input name="page_number" value={newPartida.page_number} onChange={handleNewPartidaChange} className="bg-white text-center font-black font-mono text-lg py-6" /></div>
-                                        <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase ml-1 text-center block">Acta</label><Input name="entry_number" value={newPartida.entry_number} onChange={handleNewPartidaChange} className="bg-white text-center font-black font-mono text-lg py-6" /></div>
+                                        <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase ml-1 text-center block">Libro</label><Input name="book_number" value={newPartida.book_number} onChange={handleNewPartidaChange} className="bg-white text-center font-black font-mono text-lg py-6 shadow-sm border-none" /></div>
+                                        <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase ml-1 text-center block">Folio</label><Input name="page_number" value={newPartida.page_number} onChange={handleNewPartidaChange} className="bg-white text-center font-black font-mono text-lg py-6 shadow-sm border-none" /></div>
+                                        <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase ml-1 text-center block">Acta</label><Input name="entry_number" value={newPartida.entry_number} onChange={handleNewPartidaChange} className="bg-white text-center font-black font-mono text-lg py-6 shadow-sm border-none" /></div>
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Apellidos</label><Input name="lastName" value={newPartida.lastName} onChange={handleNewPartidaChangeUpper} className="py-6 font-black uppercase text-gray-800" /></div>
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Nombres</label><Input name="firstName" value={newPartida.firstName} onChange={handleNewPartidaChangeUpper} className="py-6 font-black uppercase text-gray-800" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Apellidos Completos</label><Input name="lastName" value={newPartida.lastName} onChange={handleNewPartidaChange} className="py-6 font-black uppercase text-gray-800" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Nombres Completos</label><Input name="firstName" value={newPartida.firstName} onChange={handleNewPartidaChange} className="py-6 font-black uppercase text-gray-800" /></div>
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">F. Bautismo</label><Input type="date" name="sacramentDate" value={newPartida.sacramentDate} onChange={handleNewPartidaChangeRaw} className="py-6" /></div>
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">F. Nacimiento</label><Input type="date" name="birthDate" value={newPartida.birthDate} onChange={handleNewPartidaChangeRaw} className="py-6" /></div>
+                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">F. Bautismo</label><Input type="date" name="sacramentDate" value={newPartida.sacramentDate} onChange={handleNewPartidaChange} className="py-6" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">F. Nacimiento</label><Input type="date" name="birthDate" value={newPartida.birthDate} onChange={handleNewPartidaChange} className="py-6" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase">Lugar Nac.</label><Input name="placeOfBirth" value={newPartida.placeOfBirth} onChange={handleNewPartidaChange} className="py-6 uppercase text-xs font-bold" /></div>
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-black text-gray-400 uppercase">Sexo</label>
-                                            <select name="sex" value={newPartida.sex} onChange={handleNewPartidaChangeRaw} className="w-full h-[50px] px-4 border border-gray-200 rounded-xl font-bold bg-gray-50 uppercase text-xs">
-                                                <option value="MASCULINO">MASCULINO</option><option value="FEMENINO">FEMENINO</option>
+                                            <select name="sex" value={newPartida.sex} onChange={handleNewPartidaChange} className="w-full h-[50px] px-4 border border-gray-200 rounded-xl font-bold bg-gray-50 uppercase text-xs">
+                                                <option value="MASCULINO">MASCULINO</option>
+                                                <option value="FEMENINO">FEMENINO</option>
                                             </select>
                                         </div>
                                     </div>
@@ -284,31 +284,36 @@ const EditDecreeRepositionSheet = () => {
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-8 border-t border-dashed border-gray-100">
                                         <div className="bg-blue-50/50 p-6 rounded-[2.5rem] border border-blue-100/50 space-y-4 shadow-sm">
                                             <p className="text-[10px] font-black text-blue-700 uppercase tracking-widest ml-1">Línea Paterna</p>
-                                            <Input name="fatherName" value={newPartida.fatherName} onChange={handleNewPartidaChangeUpper} className="bg-white font-bold uppercase text-xs" />
-                                            <Input name="paternalGrandparents" value={newPartida.paternalGrandparents} onChange={handleNewPartidaChangeUpper} className="bg-white text-[10px] uppercase" />
+                                            <Input name="fatherName" placeholder="Nombre del Padre" value={newPartida.fatherName} onChange={handleNewPartidaChange} className="bg-white font-bold uppercase text-xs" />
+                                            <Input name="paternalGrandparents" placeholder="Abuelos Paternos" value={newPartida.paternalGrandparents} onChange={handleNewPartidaChange} className="bg-white text-[10px] uppercase font-medium" />
                                         </div>
                                         <div className="bg-pink-50/50 p-6 rounded-[2.5rem] border border-pink-100/50 space-y-4 shadow-sm">
                                             <p className="text-[10px] font-black text-pink-700 uppercase tracking-widest ml-1">Línea Materna</p>
-                                            <Input name="motherName" value={newPartida.motherName} onChange={handleNewPartidaChangeUpper} className="bg-white font-bold uppercase text-xs" />
-                                            <Input name="maternalGrandparents" value={newPartida.maternalGrandparents} onChange={handleNewPartidaChangeUpper} className="bg-white text-[10px] uppercase" />
+                                            <Input name="motherName" placeholder="Nombre de la Madre" value={newPartida.motherName} onChange={handleNewPartidaChange} className="bg-white font-bold uppercase text-xs" />
+                                            <Input name="maternalGrandparents" placeholder="Abuelos Maternos" value={newPartida.maternalGrandparents} onChange={handleNewPartidaChange} className="bg-white text-[10px] uppercase font-medium" />
                                         </div>
                                     </div>
 
                                     <div className="space-y-2 pt-4">
                                         <label className="text-[10px] font-black text-gray-400 uppercase ml-1 flex items-center gap-2"><Users className="w-3 h-3"/> Padrinos</label>
-                                        <Input name="godparents" value={newPartida.godparents} onChange={handleNewPartidaChangeUpper} className="py-6 uppercase font-bold text-gray-600 shadow-sm" />
+                                        <Input name="godparents" value={newPartida.godparents} onChange={handleNewPartidaChange} className="py-6 uppercase font-bold text-gray-600 shadow-sm" />
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t pt-8">
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Sacerdote Celebrante</label><Input name="minister" value={newPartida.minister} onChange={handleNewPartidaChangeUpper} className="py-6 uppercase font-black text-blue-900 shadow-sm" /></div>
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Firma (Da Fe)</label><Input name="ministerFaith" value={newPartida.ministerFaith} onChange={handleNewPartidaChangeUpper} className="py-6 uppercase font-bold text-gray-500 bg-gray-50" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Sacerdote Celebrante</label><Input name="minister" value={newPartida.minister} onChange={handleNewPartidaChange} className="py-6 uppercase font-black text-blue-900 shadow-sm" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">Firma (Da Fe)</label><Input name="ministerFaith" value={newPartida.ministerFaith} onChange={handleNewPartidaChange} className="py-6 uppercase font-bold text-gray-500 bg-gray-50" /></div>
                                     </div>
                                 </div>
                             </section>
 
                             <div className="flex justify-end gap-4 border-t border-gray-100 pt-10 sticky bottom-0 bg-white">
-                                <Button type="button" variant="outline" onClick={() => setShowDeleteModal(true)} disabled={isLoading} className="text-red-600 border-red-200 hover:bg-red-50"><Trash2 className="w-4 h-4 mr-2" /> Eliminar</Button>
-                                <Button type="submit" disabled={isLoading} className="bg-gradient-to-r from-green-600 to-green-700 text-white font-black px-8 uppercase text-xs"><Save className="w-4 h-4 mr-2" /> Guardar Cambios</Button>
+                                <Button 
+                                    type="submit" 
+                                    disabled={isLoading}
+                                    className="bg-gradient-to-r from-green-600 to-green-700 hover:shadow-2xl hover:shadow-green-500/20 text-white px-12 py-8 rounded-2xl transition-all transform active:scale-95 font-black uppercase tracking-[0.15em] text-xs shadow-xl shadow-green-900/10"
+                                >
+                                    {isLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <><Save className="w-5 h-5 mr-3"/> Sincronizar Cambios</>}
+                                </Button>
                             </div>
                         </form>
                     )}
@@ -318,10 +323,11 @@ const EditDecreeRepositionSheet = () => {
             <ConfirmationDialog 
                 isOpen={showDeleteModal}
                 title="¿Eliminar Decreto?"
-                message="Esta acción borrará el registro del decreto y eliminará la partida supletoria de la Nube. No se puede deshacer."
+                message="Esta acción borrará el registro del decreto y eliminará la partida supletoria de la base de datos permanente. No se puede deshacer."
                 onConfirm={handleDelete}
                 onClose={() => setShowDeleteModal(false)}
                 variant="destructive"
+                confirmText="Sí, Eliminar Todo"
             />
         </DashboardLayout>
     );

@@ -74,8 +74,8 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
   if (!decreeData) return null;
 
   const {
-    decreeNumber, decreeDate, targetName,
-    newPartidaSummary = {}, datosNuevaPartida = {}, concepto
+    decreeNumber, numeroDecreto, decreeDate, fechaDecreto, targetName,
+    newPartidaSummary = {}, datosNuevaPartida = {}, concepto, causa
   } = decreeData;
 
   const misDatosList = authUser?.parishId ? getMisDatosList(authUser.parishId) : [];
@@ -96,7 +96,8 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
   const parroquiaNombre = targetParishInfo.name || misDatosParroquia.nombre || authUser?.parishName || 'NUESTRA PARROQUIA';
   const ciudadParroquia = targetParishInfo.city || misDatosParroquia.ciudad || authUser?.city || 'CIUDAD';
 
-  const bd = datosNuevaPartida || newPartidaSummary || {};
+  // 🚀 BUSCADOR INTELIGENTE DE VALORES
+  const getVal = (key) => datosNuevaPartida[key] || decreeData[key] || newPartidaSummary[key] || '';
 
   const getFormattedSex = (val) => {
       const s = String(val || '').toUpperCase();
@@ -105,32 +106,43 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
       return '---';
   };
 
+  const getFormattedUnion = (val) => {
+      const u = String(val || '').toUpperCase();
+      if (u === '1' || u.includes('CATÓLICO') || u.includes('CATOLICO')) return 'MATRIMONIO CATÓLICO';
+      if (u === '2' || u.includes('CIVIL')) return 'MATRIMONIO CIVIL';
+      if (u === '3' || u.includes('LIBRE')) return 'UNIÓN LIBRE';
+      if (u === '4' || u.includes('SOLTERA')) return 'MADRE SOLTERA';
+      return u || 'OTRO CASO';
+  };
+
+  // 🚀 EVITA EL ERROR DE "0---" Rellenando solo si el valor es válido
+  const pad = (val) => val && String(val).trim() !== '' && val !== '---' ? String(val).padStart(4, '0') : '----';
+
   const baptismRecord = {
-    book: String(bd.book || bd.book_number || bd.numeroLibro || bd.Libro || '---').padStart(4, '0'),
-    page: String(bd.page || bd.page_number || bd.folio || '---').padStart(4, '0'),
-    entry: String(bd.entry || bd.entry_number || bd.numero || bd.numeroActa || '---').padStart(4, '0'),
-    sacramentDate: bd.sacramentDate || bd.fechaSacramento || '---',
-    firstName: (bd.firstName || bd.nombres || '').toUpperCase(),
-    lastName: (bd.lastName || bd.apellidos || '').toUpperCase(),
-    birthDate: bd.birthDate || bd.fechaNacimiento || '---',
-    birthPlace: (bd.placeOfBirth || bd.lugarNacimiento || bd.lugarNacimientoDetalle || '---').toUpperCase(),
-    father: (bd.fatherName || bd.nombrePadre || '---').toUpperCase(),
-    mother: (bd.motherName || bd.nombreMadre || '---').toUpperCase(),
-    sex: getFormattedSex(bd.sex || bd.sexo),
-    paternalGrandparents: (bd.paternalGrandparents || bd.abuelosPaternos || '---').toUpperCase(),
-    maternalGrandparents: (bd.maternalGrandparents || bd.abuelosMaternos || '---').toUpperCase(),
-    godparents: (bd.godparents || bd.padrinos || '---').toUpperCase(),
-    minister: (bd.minister || bd.ministro || '---').toUpperCase(),
-    daFe: (bd.ministerFaith || bd.daFe || 'PÁRROCO ENCARGADO').toUpperCase(),
-    serialRegCivil: bd.serialRegCivil || bd.serialRegistro || '---',
-    nuipNuit: bd.nuipNuit || bd.nuip || '---',
-    oficinaRegistro: (bd.oficinaRegistro || '---').toUpperCase(),
-    fechaExpedicion: bd.fechaExpedicion || bd.fechaExpedicionRegistro || '---'
+    book: pad(getVal('book') || getVal('book_number') || getVal('numeroLibro') || getVal('Libro')),
+    page: pad(getVal('page') || getVal('page_number') || getVal('folio')),
+    entry: pad(getVal('entry') || getVal('entry_number') || getVal('numero') || getVal('numeroActa')),
+    sacramentDate: getVal('sacramentDate') || getVal('fechaSacramento') || getVal('fecbau') || '---',
+    firstName: (getVal('firstName') || getVal('nombres') || '').toUpperCase(),
+    lastName: (getVal('lastName') || getVal('apellidos') || '').toUpperCase(),
+    birthDate: getVal('birthDate') || getVal('fechaNacimiento') || getVal('fecnac') || '---',
+    birthPlace: (getVal('placeOfBirth') || getVal('lugarNacimiento') || getVal('lugarNacimientoDetalle') || getVal('lugarn') || '---').toUpperCase(),
+    father: (getVal('fatherName') || getVal('nombrePadre') || getVal('padre') || '---').toUpperCase(),
+    mother: (getVal('motherName') || getVal('nombreMadre') || getVal('madre') || '---').toUpperCase(),
+    sex: getFormattedSex(getVal('sex') || getVal('sexo')),
+    unionType: getFormattedUnion(getVal('tipoUnionPadres') || getVal('tipohijo')),
+    paternalGrandparents: (getVal('paternalGrandparents') || getVal('abuelosPaternos') || getVal('abuepat') || '---').toUpperCase(),
+    maternalGrandparents: (getVal('maternalGrandparents') || getVal('abuelosMaternos') || getVal('abuemat') || '---').toUpperCase(),
+    godparents: (getVal('godparents') || getVal('padrinos') || '---').toUpperCase(),
+    minister: (getVal('minister') || getVal('ministro') || '---').toUpperCase(),
+    daFe: (getVal('ministerFaith') || getVal('daFe') || getVal('da_fe') || 'PÁRROCO ENCARGADO').toUpperCase(),
   };
 
   const fullNameSubject = targetName?.toUpperCase() || `${baptismRecord.firstName} ${baptismRecord.lastName}`.trim() || '---';
-  const causaReposicion = (concepto || 'PÉRDIDA O DETERIORO DEL ORIGINAL').toUpperCase();
-  const emissionDateText = decreeDate ? convertDateToSpanishTextNatural(decreeDate) : '---';
+  const finalDecreeNumber = decreeNumber || numeroDecreto || 'SN-000';
+  const finalDecreeDate = decreeDate || fechaDecreto;
+  const causaReposicion = (causa || concepto || 'PÉRDIDA O DETERIORO DEL ORIGINAL').toUpperCase();
+  const emissionDateText = finalDecreeDate ? convertDateToSpanishTextNatural(finalDecreeDate) : '---';
 
   const DataRow = ({ label, value, bold }) => (
     <div className="flex items-end mb-1.5">
@@ -146,8 +158,8 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
       <style>{`
         @media print {
           @page { margin: 10mm; size: letter; }
-          body { background: white; }
-          #reposition-print-area { width: 100% !important; height: auto !important; position: static !important; }
+          body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          #reposition-print-area { width: 100% !important; height: auto !important; position: static !important; padding: 0 !important; margin: 0 !important; }
         }
       `}</style>
 
@@ -157,7 +169,7 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
             <h1 className="text-[15pt] font-black uppercase tracking-[0.2em] mb-1">{diocesisName}</h1>
             <h2 className="text-[11pt] font-bold uppercase tracking-widest text-gray-600">Oficina de Cancillería</h2>
             
-            <div className="mt-4 inline-block border-2 border-black px-6 py-2 bg-gray-50">
+            <div className="mt-4 inline-block border-2 border-black px-6 py-2 bg-gray-50 print:bg-gray-100">
                <span className="font-black uppercase tracking-[0.1em] text-[12pt]">Decreto de Reposición de Partida</span>
             </div>
             
@@ -167,14 +179,14 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
           </div>
 
           <div className="flex justify-between items-start mb-6">
-            <div className="w-2/3 text-[10pt] leading-tight">
-               <p className="mb-1">Al Señor Cura Párroco de:</p>
+            <div className="w-2/3 text-[10pt] leading-tight pr-4">
+               <p className="mb-1">Al Señor Cura Párroco de la Parroquia:</p>
                <p className="font-black text-[11pt] uppercase">{parroquiaNombre}</p>
-               <p className="font-bold text-gray-600 italic uppercase">{ciudadParroquia} — COLOMBIA</p>
+               <p className="font-bold text-gray-600 italic uppercase">de {ciudadParroquia} — COLOMBIA.</p>
             </div>
-            <div className="w-1/3 border-2 border-black p-3 bg-gray-50 text-right shadow-sm">
+            <div className="w-1/3 border-2 border-black p-3 bg-gray-50 print:bg-gray-100 text-right shadow-sm">
               <div className="font-black text-[7pt] uppercase tracking-widest text-gray-500 mb-1">Registro de Control</div>
-              <div className="font-mono text-xl font-black tracking-tighter border-b border-black pb-1 mb-1">{decreeNumber || 'SN-000'}</div>
+              <div className="font-mono text-xl font-black tracking-tighter border-b border-black pb-1 mb-1">{finalDecreeNumber}</div>
               <div className="font-mono text-[7pt] uppercase font-bold text-gray-500">{emissionDateText}</div>
             </div>
           </div>
@@ -207,24 +219,29 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
               <DataRow label="Nombres" value={baptismRecord.firstName} />
               <DataRow label="Apellidos" value={baptismRecord.lastName} />
               <DataRow label="F. Nacimiento" value={baptismRecord.birthDate} />
+              <DataRow label="Lugar Nacimiento" value={baptismRecord.birthPlace} />
               <DataRow label="Padre" value={baptismRecord.father} />
               <DataRow label="Madre" value={baptismRecord.mother} />
               <div className="flex gap-4">
-                  <div className="flex-1"><DataRow label="Abuelo Pat." value={baptismRecord.paternalGrandparents} /></div>
-                  <div className="flex-1"><DataRow label="Abuelo Mat." value={baptismRecord.maternalGrandparents} /></div>
+                  <div className="w-[55%] flex items-end pr-1">
+                      <span className="font-bold text-black uppercase tracking-widest text-[8pt] w-36 shrink-0">Tipo de Unión:</span>
+                      <span className="font-mono flex-1 border-b border-gray-300 pl-1 uppercase text-[9pt] text-gray-800">{baptismRecord.unionType}</span>
+                  </div>
+                  <div className="w-[45%] flex items-end pl-1">
+                      <span className="font-bold text-black uppercase tracking-widest text-[8pt] w-12 shrink-0">Sexo:</span>
+                      <span className="font-mono flex-1 border-b border-gray-300 pl-1 uppercase text-[9pt] text-gray-800">{baptismRecord.sex}</span>
+                  </div>
               </div>
+              <DataRow label="Abuelos Paternos" value={baptismRecord.paternalGrandparents} />
+              <DataRow label="Abuelos Maternos" value={baptismRecord.maternalGrandparents} />
               <DataRow label="Padrinos" value={baptismRecord.godparents} />
               <DataRow label="Sacerdote" value={baptismRecord.minister} />
               <DataRow label="Firma (Da Fe)" value={baptismRecord.daFe} bold />
-              
-              <div className="mt-2 pt-2 border-t border-dashed border-gray-300 grid grid-cols-2 gap-4">
-                <DataRow label="Reg. Civil" value={baptismRecord.serialRegCivil} />
-                <DataRow label="NUIP" value={baptismRecord.nuipNuit} />
-              </div>
             </div>
           </div>
 
-          <div className="mb-4 relative border-2 border-black p-4 bg-gray-50 shadow-inner">
+          {/* --- DISPOSICIÓN LEGAL --- */}
+          <div className="mb-4 relative border-2 border-black p-4 bg-gray-50 print:bg-gray-100 shadow-inner">
              <div className="absolute -top-3 left-6 bg-white px-3 font-black text-[8pt] tracking-widest uppercase border border-black">
               Disposición
             </div>
@@ -252,10 +269,11 @@ const PrintRepositionDecree = forwardRef(({ decreeData }, ref) => {
             </div>
           </div>
 
+          {/* PIE DE PÁGINA OFICIAL */}
           <div className="w-full text-center text-[7.5pt] text-gray-500 border-t border-gray-200 pt-3">
             <p className="font-black uppercase tracking-widest mb-1 text-gray-700">{orgData.name}</p>
             <p className="font-medium">
-                {orgData.address} • Tel: {orgData.phone} • {orgData.email}
+                {orgData.address} • Tel: {orgData.phone} • E-mail: {orgData.email}
             </p>
             <p className="font-bold mt-1 tracking-widest uppercase">{orgData.city} — COLOMBIA</p>
           </div>
