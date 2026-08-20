@@ -181,31 +181,28 @@ const EditCorrectionPage = () => {
             const targetParish = newPartida.parishId;
             const supSum = originalPayload?.newPartidaSummary;
             
-            // Usamos la info original asegurando que los consecutivos queden estáticos al editar
             const currentBook = pad(supSum?.book || supSum?.Libro || newPartida.book_number);
             const currentPage = pad(supSum?.page || supSum?.folio || newPartida.page_number);
             const currentEntry = pad(supSum?.entry || supSum?.numero || newPartida.entry_number);
 
-            const reemplazarVariables = (template) => {
-                if (!template) return "";
-                return template
-                    .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
-                    .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
-                    .replace(/\[LIBRO_NUEVA[\]\)]|\[LIBRO_PARTIDA_NUEVA[\]\)]|\[LIBRO NUEVA[\]\)]/gi, currentBook)
-                    .replace(/\[FOLIO_NUEVA[\]\)]|\[FOLIO_PARTIDA_NUEVA[\]\)]|\[FOLIO NUEVA[\]\)]/gi, currentPage)
-                    .replace(/\[NUMERO_NUEVA[\]\)]|\[NUMERO_PARTIDA_NUEVA[\]\)]|\[NUMERO NUEVA[\]\)]/gi, currentEntry)
-                    .replace(/\[OFICINA_DECRETO\]/g, 'CANCILLERÍA')
-                    .replace(/\[LIBRO_ANULADA\]/g, pad(decreeData.Libro))
-                    .replace(/\[FOLIO_ANULADA\]/g, pad(decreeData.folio))
-                    .replace(/\[NUMERO_PARTIDA_ANULADA\]/g, pad(decreeData.numero))
-                    .replace(/\[MINISTRO\]|\[NOMBRE_SACERDOTE\]/gi, newPartida.daFe);
-            };
+            // 💡 REEMPLAZADOR FLEXIBLE: Atrapa corchetes, paréntesis y espacios accidentales de la plantilla
+            let noteAnulada = chanceryNotesConfig?.correccion_anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO] DE FECHA [FECHA_DECRETO]. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-[LIBRO_NUEVA] F-[FOLIO_NUEVA] N-[NUMERO_NUEVA].";
+            noteAnulada = noteAnulada
+                .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
+                .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
+                .replace(/\[LIBRO_NUEVA[\]\)]|\[LIBRO_PARTIDA_NUEVA[\]\)]|\[LIBRO NUEVA[\]\)]/gi, currentBook)
+                .replace(/\[FOLIO_NUEVA[\]\)]|\[FOLIO_PARTIDA_NUEVA[\]\)]|\[FOLIO NUEVA[\]\)]/gi, currentPage)
+                .replace(/\[NUMERO_NUEVA[\]\)]|\[NUMERO_PARTIDA_NUEVA[\]\)]|\[NUMERO NUEVA[\]\)]/gi, currentEntry);
 
-            const templateAnulada = chanceryNotesConfig?.correccion_anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO] DE FECHA [FECHA_DECRETO]. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-[LIBRO_NUEVA] F-[FOLIO_NUEVA] N-[NUMERO_NUEVA].";
-            const noteAnulada = reemplazarVariables(templateAnulada);
-
-            const templateNueva = chanceryNotesConfig?.correccion_nueva || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] DE FECHA: [FECHA_DECRETO] EXPEDIDO POR: [OFICINA_DECRETO] Y ANULA LA PARTIDA DEL LIBRO: [LIBRO_ANULADA], FOLIO: [FOLIO_ANULADA], NÚMERO: [NUMERO_PARTIDA_ANULADA]. DA FE: [MINISTRO].";
-            const notaSupletoriaFinal = reemplazarVariables(templateNueva);
+            let notaSupletoriaFinal = chanceryNotesConfig?.correccion_nueva || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] DE FECHA: [FECHA_DECRETO] EXPEDIDO POR: [OFICINA_DECRETO] Y ANULA LA PARTIDA DEL LIBRO: [LIBRO_ANULADA], FOLIO: [FOLIO_ANULADA], NÚMERO: [NUMERO_PARTIDA_ANULADA]. DA FE: [MINISTRO].";
+            notaSupletoriaFinal = notaSupletoriaFinal
+                .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
+                .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
+                .replace(/\[OFICINA_DECRETO\]/g, 'CANCILLERÍA')
+                .replace(/\[LIBRO_ANULADA\]/g, pad(decreeData.Libro))
+                .replace(/\[FOLIO_ANULADA\]/g, pad(decreeData.folio))
+                .replace(/\[NUMERO_PARTIDA_ANULADA\]/g, pad(decreeData.numero))
+                .replace(/\[NOMBRE_SACERDOTE\]|\[MINISTRO\]/gi, newPartida.daFe);
 
             // 1. Actualizar Partida Original
             if (foundRecord) {
@@ -266,9 +263,10 @@ const EditCorrectionPage = () => {
             const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
             const targetParishId = newPartida.parishId;
             
-            // ⚠️ FIX CLAVE: Extraer los datos a borrar del payload original igual que en la Parroquia
-            const supSum = originalPayload?.newPartidaSummary;
+            // 💡 GUÍA DE PARROQUIA: Extraer datos desde la memoria inmutable del decreto
+            const newSum = originalPayload?.newPartidaSummary;
 
+            // 1. Restaurar Original
             if (foundRecord) {
                 const cleanedRaw = { ...foundRecord };
                 delete cleanedRaw.notaMarginal; delete cleanedRaw.anulado; delete cleanedRaw.isAnnulled;
@@ -276,20 +274,22 @@ const EditCorrectionPage = () => {
                 await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', foundRecord.id);
             }
 
-            if (supSum) {
-                const delBook = pad(supSum.book || supSum.Libro);
-                const delPage = pad(supSum.page || supSum.folio);
-                const delEntry = pad(supSum.entry || supSum.numero);
+            // 2. Eliminar Supletoria y Revertir Parámetro
+            if (newSum) {
+                const newBook = pad(newSum.book || newSum.Libro);
+                const newPage = pad(newSum.page || newSum.folio);
+                const newEntry = pad(newSum.entry || newSum.numero);
 
                 await supabase.from('baptisms').delete()
-                    .eq('parish_id', targetParishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
+                    .eq('parish_id', targetParishId).eq('book_number', newBook).eq('folio', newPage).eq('number', newEntry);
                 
+                // --- REVERSA MATEMÁTICA EXACTA COMO EN PARROQUIA ---
                 try {
-                    const { data: paramsData } = await supabase.from('parish_parameters')
+                    const { data: pData } = await supabase.from('parish_parameters')
                         .select('bautizos_params').eq('parish_id', targetParishId).maybeSingle();
 
-                    if (paramsData && paramsData.bautizos_params) {
-                        const cloudParams = paramsData.bautizos_params;
+                    if (pData && pData.bautizos_params) {
+                        const cloudParams = pData.bautizos_params;
                         
                         const previosSupletorios = calculatePreviousConsecutive(
                             cloudParams.suplementarioNumero,
@@ -299,25 +299,27 @@ const EditCorrectionPage = () => {
                             cloudParams.suplementarioReiniciar || false
                         );
 
-                        if (parseInt(delEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
-                            const newParams = { 
+                        if (parseInt(newEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
+                            const newParamsObj = { 
                                 ...cloudParams, 
-                                suplementarioNumero: pad(previosSupletorios.numero), // FORZANDO LOS CEROS A LA BD
-                                suplementarioFolio: pad(previosSupletorios.folio),   // FORZANDO LOS CEROS A LA BD
-                                suplementarioLibro: pad(previosSupletorios.libro)
+                                suplementarioNumero: previosSupletorios.numero,
+                                suplementarioFolio: previosSupletorios.folio,
+                                suplementarioLibro: previosSupletorios.libro
                             };
-
-                            await supabase.from('parish_parameters').update({ bautizos_params: newParams }).eq('parish_id', targetParishId);
+                            
+                            await supabase.from('parish_parameters').update({ bautizos_params: newParamsObj }).eq('parish_id', targetParishId);
                         }
                     }
-                } catch (err) { console.error("Error revirtiendo el consecutivo en la nube:", err); }
+                } catch (err) { console.error("Error revirtiendo consecutivos:", err); }
             }
 
+            // 3. Eliminar Decreto
             await supabase.from('decretos').delete().eq('id', selectedDecreeId);
 
-            toast({ title: "Eliminado", description: "Decreto removido y consecutivos restaurados remotamente.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Restauración Completada", description: "Decreto borrado, partida restaurada y consecutivos actualizados.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/chancery/decree-correction/view');
         } catch (e) { 
+            console.error("Error al restaurar:", e);
             toast({ title: "Error", description: "Fallo al restaurar y eliminar.", variant: "destructive" }); 
         } finally { 
             setIsSubmitting(false); setShowDeleteModal(false); 
