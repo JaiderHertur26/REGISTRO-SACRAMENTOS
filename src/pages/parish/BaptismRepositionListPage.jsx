@@ -118,7 +118,8 @@ if (pData && pData.bautizos_params) {
         .update({ bautizos_params: newParamsObj })
         .eq('parish_id', user.parishId);
 }
-            
+            }
+
             // 2. Eliminar el Decreto
             await supabase.from('decretos').delete().eq('id', deleteConfig.id);
 
