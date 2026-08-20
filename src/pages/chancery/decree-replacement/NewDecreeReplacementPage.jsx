@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
@@ -11,7 +11,6 @@ import { useToast } from '@/components/ui/use-toast';
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 import { supabase } from '@/lib/supabaseClient';
 import CityAutocomplete from '@/components/CityAutocomplete'; 
-import { calculateNextConsecutive } from '@/services/sacramentParametersService'; // 🚀 MOTOR MATEMÁTICO INYECTADO
 
 const NewDecreeReplacementPage = () => {
     const { user } = useAuth();
@@ -19,7 +18,7 @@ const NewDecreeReplacementPage = () => {
     const { toast } = useToast();
     
     // 🚀 CEREBRO GLOBAL
-    const { getMisDatosList, getCiudadesList, getParrocos } = useAppData();
+    const { getMisDatosList } = useAppData();
     
     const [activeTab, setActiveTab] = useState("bautismo");
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,7 +31,6 @@ const NewDecreeReplacementPage = () => {
     
     // --- ESTADOS PARA LAS LISTAS DEPENDIENTES DE LA PARROQUIA ---
     const [ciudades, setCiudades] = useState([]);
-    const [listaSacerdotes, setListaSacerdotes] = useState([]);
     
     // Contadores en vivo desde Supabase
     const [nextParams, setNextParams] = useState({ libro: '', folio: '', numero: '' });
@@ -115,7 +113,6 @@ const NewDecreeReplacementPage = () => {
                 setNextParams({ libro: '', folio: '', numero: '' });
                 setBautismoNewPartida(prev => ({ ...prev, ministerFaith: '', minister: '' }));
                 setCiudades([]);
-                setListaSacerdotes([]);
                 return;
             }
 
@@ -135,14 +132,7 @@ const NewDecreeReplacementPage = () => {
 
                 // B. Traer Párroco Activo de la Parroquia Seleccionada
                 const { data: priestData } = await supabase.from('parrocos').select('payload').eq('parish_id', pid);
-                const pList = [];
                 if (priestData && priestData.length > 0) {
-                    priestData.forEach(r => {
-                        const name = `${r.payload.nombre || ''} ${r.payload.apellido || ''}`.trim().toUpperCase();
-                        pList.push(name.startsWith('PBRO') ? name : `PBRO. ${name}`);
-                    });
-                    setListaSacerdotes(pList);
-                    
                     const active = priestData.find(r => String(r.payload.estado || r.payload.Estado) === '1');
                     if (active) {
                         let name = `${active.payload.nombre || ''} ${active.payload.apellido || ''}`.trim().toUpperCase();
@@ -152,7 +142,6 @@ const NewDecreeReplacementPage = () => {
                         setBautismoNewPartida(prev => ({ ...prev, ministerFaith: 'PÁRROCO ENCARGADO', minister: 'PÁRROCO ENCARGADO' }));
                     }
                 } else {
-                    setListaSacerdotes([]);
                     setBautismoNewPartida(prev => ({ ...prev, ministerFaith: 'PÁRROCO ENCARGADO', minister: 'PÁRROCO ENCARGADO' }));
                 }
 
@@ -192,7 +181,7 @@ const NewDecreeReplacementPage = () => {
 
     // --- SUBMIT 100% SUPABASE ---
     const handleSubmit = async (e) => {
-        e.preventDefault(); // Captura para evitar submit por tecla enter, pero el onClick manda.
+        e.preventDefault();
         
         if (!bautismoDecree.targetParishId) {
             return toast({ title: "Faltan Datos", description: "Debe seleccionar la Parroquia Destino.", variant: "destructive" });
@@ -216,12 +205,7 @@ const NewDecreeReplacementPage = () => {
                 return;
             }
 
-            // 2. Extraer Consecutivos Supletorios
-            const supletorioLibro = String(nextParams.libro).padStart(4, '0');
-            const supletorioFolio = String(nextParams.folio).padStart(4, '0');
-            const supletorioNumero = String(nextParams.numero).padStart(4, '0');
-
-            // 3. Generar Nota Marginal
+            // 2. Motor de Notas (Usando plantillas de Cancillería o Defaults)
             const conceptoMatch = conceptos.find(c => String(c.id) === String(bautismoDecree.conceptoAnulacionId));
             const conceptoText = conceptoMatch?.concepto || 'REPOSICIÓN POR DETERIORO O PÉRDIDA';
             const fechaTexto = convertDateToSpanishText(bautismoDecree.fechaDecreto).replace(/^EL\s+/i, '').toUpperCase();
@@ -234,11 +218,11 @@ const NewDecreeReplacementPage = () => {
                 .replace(/\[CAUSA_REPOSICION\]/g, conceptoText.toUpperCase())
                 .replace(/\[MINISTRO\]/g, bautismoNewPartida.daFe);
 
-            // 4. Mapeo idéntico al de Parroquia
+            // 3. Preparar Partida Supletoria
             const partidaToSave = {
                 ...bautismoNewPartida,
-                Libro: supletorioLibro, folio: supletorioFolio, numero: supletorioNumero,
-                book_number: supletorioLibro, page_number: supletorioFolio, entry_number: supletorioNumero,
+                Libro: nextParams.libro, folio: nextParams.folio, numero: nextParams.numero,
+                book_number: nextParams.libro, page_number: nextParams.folio, entry_number: nextParams.numero,
                 nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName,
                 fecbau: bautismoNewPartida.sacramentDate, fecnac: bautismoNewPartida.birthDate,
                 lugarn: bautismoNewPartida.lugarNacimientoDetalle, sex: bautismoNewPartida.sex,
@@ -253,13 +237,13 @@ const NewDecreeReplacementPage = () => {
                 decreeDate: bautismoDecree.fechaDecreto, conceptoAnulacionId: bautismoDecree.conceptoAnulacionId,
                 causa: conceptoText, targetName: `${bautismoNewPartida.lastName} ${bautismoNewPartida.firstName}`.trim(),
                 ...bautismoNewPartida,
-                datosNuevaPartida: { ...bautismoNewPartida, book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, book_number: supletorioLibro, page_number: supletorioFolio, entry_number: supletorioNumero },
-                newPartidaSummary: { book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName }
+                datosNuevaPartida: { ...bautismoNewPartida, book: nextParams.libro, page: nextParams.folio, entry: nextParams.numero, book_number: nextParams.libro, page_number: nextParams.folio, entry_number: nextParams.numero },
+                newPartidaSummary: { book: nextParams.libro, page: nextParams.folio, entry: nextParams.numero, nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName }
             };
 
-            // 5. Inserción Directa de Partida a Supabase
+            // 4. Inserción Directa de Partida a Supabase
             const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{
-                parish_id: bautismoDecree.targetParishId, book_number: supletorioLibro, folio: supletorioFolio, number: supletorioNumero,
+                parish_id: bautismoDecree.targetParishId, book_number: nextParams.libro, folio: nextParams.folio, number: nextParams.numero,
                 celebration_date: bautismoNewPartida.sacramentDate || null, nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName, sexo: bautismoNewPartida.sex,
                 fecha_nacimiento: bautismoNewPartida.birthDate || null, lugar_nacimiento: bautismoNewPartida.lugarNacimientoDetalle,
                 nombre_padre: bautismoNewPartida.fatherName, nombre_madre: bautismoNewPartida.motherName, tipo_union_padres: bautismoNewPartida.tipoUnionPadres,
@@ -270,29 +254,13 @@ const NewDecreeReplacementPage = () => {
 
             if (errBap) throw errBap;
 
-            // 6. Inserción del Decreto a Supabase
+            // 5. Inserción del Decreto a Supabase
             payloadDecree.newPartidaId = newBap.id;
             await supabase.from('decretos').insert([{ parish_id: bautismoDecree.targetParishId, tipo: 'reposicion', payload: payloadDecree }]);
 
-            // 7. INCREMENTAR CONSECUTIVOS USANDO EL MOTOR MATEMÁTICO CANÓNICO 🚀
-            const p = cloudParams || {};
-            const nextSup = calculateNextConsecutive(
-                supletorioNumero,
-                supletorioFolio,
-                supletorioLibro,
-                p.suplementarioPartidas || 2,
-                p.suplementarioReiniciar || false
-            );
-
-            await supabase.from('parish_parameters').upsert({ 
-                parish_id: bautismoDecree.targetParishId, 
-                bautizos_params: { 
-                    ...p, 
-                    suplementarioNumero: nextSup.numero,
-                    suplementarioFolio: nextSup.folio,
-                    suplementarioLibro: nextSup.libro
-                } 
-            }, { onConflict: 'parish_id' });
+            // 6. Incrementar Consecutivo Supletorio de la Parroquia
+            const newParams = { ...cloudParams, suplementarioNumero: Number(nextParams.numero) + 1 };
+            await supabase.from('parish_parameters').upsert({ parish_id: bautismoDecree.targetParishId, bautizos_params: newParams }, { onConflict: 'parish_id' });
 
             toast({ title: "Reposición Exitosa", description: "Partida y Decreto sincronizados remotamente.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/chancery/decree-replacement/view');
@@ -304,6 +272,7 @@ const NewDecreeReplacementPage = () => {
         }
     };
 
+    // --- ESTILOS VISUALES ---
     const inputClass = "h-11 w-full px-4 py-2 text-sm text-gray-900 font-bold border border-gray-200 rounded-xl focus:ring-4 focus:ring-amber-500/10 focus:border-amber-500 outline-none transition-all bg-gray-50/50 focus:bg-white uppercase shadow-sm";
     const labelClass = "block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1";
 
@@ -314,18 +283,8 @@ const NewDecreeReplacementPage = () => {
         </div>
     );
 
-    const formatParishOption = (parish) => {
-        const todosMisDatos = getMisDatosList(parish.id) || [];
-        const nombre = todosMisDatos[0]?.nombre || parish.name || 'Parroquia';
-        const ciudad = todosMisDatos[0]?.ciudad || parish.city || 'Ciudad';
-        return `${nombre.toUpperCase()} - ${ciudad.toUpperCase()}`;
-    };
-
     return (
         <DashboardLayout entityName={user?.dioceseName || "Cancillería"}>
-            <datalist id="lista-parrocos">
-                {listaSacerdotes.map((s, idx) => <option key={idx} value={s} />)}
-            </datalist>
 
             <div className="max-w-5xl mx-auto pb-20 pt-6">
                 <div className="mb-10 flex flex-col md:flex-row justify-between items-end gap-6">
@@ -349,7 +308,7 @@ const NewDecreeReplacementPage = () => {
                     </TabsList>
 
                     <TabsContent value="bautismo" className="focus:outline-none">
-                        <div className="bg-white rounded-[2.5rem] shadow-2xl border border-gray-100 overflow-hidden relative animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <form onSubmit={handleSubmit} className="bg-white rounded-[2.5rem] shadow-2xl border border-gray-100 overflow-hidden relative animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-amber-500 via-[#D4AF37] to-amber-500"></div>
 
                             <div className="p-12 space-y-10">
@@ -361,7 +320,7 @@ const NewDecreeReplacementPage = () => {
                                             <label className={labelClass}>Parroquia Destino (Dónde se asentará) *</label>
                                             <select required name="targetParishId" value={bautismoDecree.targetParishId} onChange={(e) => setBautismoDecree({...bautismoDecree, targetParishId: e.target.value})} className={`${inputClass} border-amber-200 bg-amber-50/30 text-amber-700`}>
                                                 <option value="">-- SELECCIONE LA PARROQUIA DE LA DIÓCESIS --</option>
-                                                {parishesList.map(p => <option key={p.id} value={p.id}>{formatParishOption(p)}</option>)}
+                                                {parishesList.map(p => <option key={p.id} value={p.id}>{p.name.toUpperCase()} - {(p.city || '').toUpperCase()}</option>)}
                                             </select>
                                         </div>
                                         <div><label className={labelClass}>Número de Decreto *</label><input required name="numeroDecreto" value={bautismoDecree.numeroDecreto} onChange={handleDecreeChange} className={inputClass} placeholder="EJ: 005-2025" /></div>
@@ -443,20 +402,20 @@ const NewDecreeReplacementPage = () => {
                                 <section className={`transition-opacity duration-300 ${!bautismoDecree.targetParishId ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
                                     <SectionHeader number="06" title="Ministro y Autoridad" icon={PenTool} />
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                        <div><label className={labelClass}>Sacerdote Celebrante</label><input name="minister" list="lista-parrocos" value={bautismoNewPartida.minister} onChange={handleChange} className={`${inputClass} border-l-8 border-l-amber-500`} /></div>
-                                        <div><label className={labelClass}>Firma (Da Fe) *</label><input name="ministerFaith" required list="lista-parrocos" value={bautismoNewPartida.ministerFaith} onChange={handleChange} className={inputClass} /></div>
+                                        <div><label className={labelClass}>Sacerdote Celebrante</label><input name="minister" value={bautismoNewPartida.minister} onChange={handleChange} className={`${inputClass} border-l-8 border-l-amber-500`} /></div>
+                                        <div><label className={labelClass}>Firma (Da Fe) *</label><input name="ministerFaith" required value={bautismoNewPartida.ministerFaith} onChange={handleChange} className={inputClass} /></div>
                                     </div>
                                     <div><label className={labelClass}>Padrinos</label><input name="godparents" value={bautismoNewPartida.godparents} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
                                 </section>
 
                                 <div className="flex justify-end gap-4 border-t border-gray-100 pt-12">
-                                    <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] hover:bg-gray-50 transition-all">Descartar</Button>
-                                    <Button type="button" onClick={handleSubmit} disabled={isSubmitting || !bautismoDecree.targetParishId} className="bg-gradient-to-r from-amber-600 to-[#2C3E50] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                                    <Button type="button" variant="ghost" onClick={() => navigate('/chancery/decree-replacement/view')} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] hover:bg-gray-50 transition-all">Descartar</Button>
+                                    <Button type="submit" disabled={isSubmitting || !bautismoDecree.targetParishId} className="bg-gradient-to-r from-amber-600 to-[#2C3E50] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
                                         {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Save className="w-5 h-5 mr-3" />} Emitir Decreto Remoto
                                     </Button>
                                 </div>
                             </div>
-                        </div>
+                        </form>
                     </TabsContent>
                 </Tabs>
             </div>
