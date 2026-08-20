@@ -136,13 +136,14 @@ const EditDecreeCorrectionSheet = () => {
             const supSum = originalPayload.newPartidaSummary;
             const notasConfig = typeof obtenerNotasAlMargen === 'function' ? obtenerNotasAlMargen(user.parishId) : null;
 
+            // FIX: Soporte para ambas variables
             let noteAnulada = notasConfig?.porCorreccion?.anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO]";
             noteAnulada = noteAnulada
                 .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
                 .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
-                .replace(/\[LIBRO_NUEVA\]/g, pad(supSum.book || supSum.Libro))
-                .replace(/\[FOLIO_NUEVA\]/g, pad(supSum.page || supSum.folio))
-                .replace(/\[NUMERO_PARTIDA_NUEVA\]/g, pad(supSum.entry || supSum.numero));
+                .replace(/\[LIBRO_NUEVA\]|\[LIBRO_PARTIDA_NUEVA\]/g, pad(supSum.book || supSum.Libro))
+                .replace(/\[FOLIO_NUEVA\]|\[FOLIO_PARTIDA_NUEVA\]/g, pad(supSum.page || supSum.folio))
+                .replace(/\[NUMERO_NUEVA\]|\[NUMERO_PARTIDA_NUEVA\]/g, pad(supSum.entry || supSum.numero));
 
             let notaSupletoriaFinal = notasConfig?.porCorreccion?.nuevaPartida || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] Y ANULA LA ORIGINAL.";
             notaSupletoriaFinal = notaSupletoriaFinal
@@ -152,7 +153,7 @@ const EditDecreeCorrectionSheet = () => {
                 .replace(/\[LIBRO_ANULADA\]/g, pad(decreeData.Libro))
                 .replace(/\[FOLIO_ANULADA\]/g, pad(decreeData.folio))
                 .replace(/\[NUMERO_PARTIDA_ANULADA\]/g, pad(decreeData.numero))
-                .replace(/\[NOMBRE_SACERDOTE\]/g, newPartida.daFe);
+                .replace(/\[NOMBRE_SACERDOTE\]|\[MINISTRO\]/g, newPartida.daFe);
 
             if (foundRecord) {
                 const oldRawData = { ...foundRecord };
@@ -215,57 +216,51 @@ const EditDecreeCorrectionSheet = () => {
                 await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', foundRecord.id);
             }
 
-            // Eliminar supletoria y revertir parámetros
             if (supSum) {
                 const delBook = pad(supSum.book || supSum.Libro);
                 const delPage = pad(supSum.page || supSum.folio);
                 const delEntry = pad(supSum.entry || supSum.numero);
 
-                await supabase.from('baptisms').delete()
-                    .eq('parish_id', user.parishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
+                await supabase.from('baptisms').delete().eq('parish_id', user.parishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
                 
                 // --- REVERSA MATEMÁTICA PERFECTA ---
                 try {
-                    const { data: paramsData } = await supabase.from('parish_parameters')
-                        .select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
+                    const parishIdTarget = user.parishId; 
+
+                    const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', parishIdTarget).single();
 
                     if (paramsData && paramsData.bautizos_params) {
                         const cloudParams = paramsData.bautizos_params;
                         
-                        const expectedNext = calculateNextConsecutive(
-                            delEntry, delPage, delBook,
+                        const previosSupletorios = calculatePreviousConsecutive(
+                            cloudParams.suplementarioNumero,
+                            cloudParams.suplementarioFolio,
+                            cloudParams.suplementarioLibro,
                             cloudParams.suplementarioPartidas || 2,
                             cloudParams.suplementarioReiniciar || false
                         );
 
-                        if (
-                            pad(cloudParams.suplementarioNumero) === pad(expectedNext.numero) &&
-                            pad(cloudParams.suplementarioFolio) === pad(expectedNext.folio) &&
-                            pad(cloudParams.suplementarioLibro) === pad(expectedNext.libro)
-                        ) {
+                        // FIX: Comparamos de forma flexible para que la reversión siempre funcione
+                        if (parseInt(delEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
                             const newParams = { 
                                 ...cloudParams, 
-                                suplementarioNumero: delEntry,
-                                suplementarioFolio: delPage,
-                                suplementarioLibro: delBook
+                                suplementarioNumero: previosSupletorios.numero,
+                                suplementarioFolio: previosSupletorios.folio,
+                                suplementarioLibro: previosSupletorios.libro
                             };
 
-                            await supabase.from('parish_parameters').update({ bautizos_params: newParams }).eq('parish_id', user.parishId);
+                            await supabase.from('parish_parameters').update({ bautizos_params: newParams }).eq('parish_id', parishIdTarget);
                         }
                     }
                 } catch (err) { console.error("Error revirtiendo el consecutivo en la nube:", err); }
             }
 
-            // Eliminar decreto
             await supabase.from('decretos').delete().eq('id', decreeId);
 
             toast({ title: "Eliminado", description: "Decreto eliminado y partida original restaurada.", className: "bg-green-50 text-green-900" });
             navigate('/parroquia/decretos/ver-correcciones');
-        } catch (error) { 
-            toast({ title: "Error", description: "No se pudo eliminar de la Nube.", variant: "destructive" }); 
-        } finally { 
-            setIsSubmitting(false); setShowDeleteModal(false); 
-        }
+        } catch (error) { toast({ title: "Error", description: "No se pudo eliminar de la Nube.", variant: "destructive" }); } 
+        finally { setIsSubmitting(false); setShowDeleteModal(false); }
     };
 
     if (isLoading) return <DashboardLayout entityName={user?.parishName || "Parroquia"}><div className="flex justify-center items-center h-[60vh]"><Loader2 className="w-12 h-12 text-[#4B7BA7] animate-spin" /></div></DashboardLayout>;

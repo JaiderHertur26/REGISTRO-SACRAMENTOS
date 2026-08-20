@@ -68,7 +68,8 @@ const BaptismCorrectionListPage = () => {
                 if (origData) {
                     const cleanedRaw = { ...origData.raw_data };
                     delete cleanedRaw.notaMarginal; 
-                    cleanedRaw.anulado = false; cleanedRaw.status = 'seated';
+                    cleanedRaw.anulado = false;
+                    cleanedRaw.status = 'seated';
                     
                     await supabase.from('baptisms').update({ 
                         status: 'seated', nota_marginal: null, raw_data: cleanedRaw 
@@ -76,45 +77,40 @@ const BaptismCorrectionListPage = () => {
                 }
             }
 
-            // 2. Eliminar la Supletoria y Revertir Consecutivos Seguros
+            // 2. Eliminar la Partida Supletoria y Revertir el Parámetro
             if (newSum) {
-                const delBook = pad(newSum.book || newSum.Libro);
-                const delPage = pad(newSum.page || newSum.folio);
-                const delEntry = pad(newSum.entry || newSum.numero);
+                const newBook = pad(newSum.book || newSum.Libro);
+                const newPage = pad(newSum.page || newSum.folio);
+                const newEntry = pad(newSum.entry || newSum.numero);
 
                 await supabase.from('baptisms').delete()
-                    .eq('parish_id', user.parishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
+                    .eq('parish_id', user.parishId).eq('book_number', newBook).eq('folio', newPage).eq('number', newEntry);
 
                 // --- REVERSA MATEMÁTICA PERFECTA ---
                 try {
-                    const { data: paramsData } = await supabase.from('parish_parameters')
+                    const { data: pData } = await supabase.from('parish_parameters')
                         .select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
 
-                    if (paramsData && paramsData.bautizos_params) {
-                        const cloudParams = paramsData.bautizos_params;
+                    if (pData && pData.bautizos_params) {
+                        const cloudParams = pData.bautizos_params;
                         
-                        // Calculamos el "siguiente" de la partida borrada
-                        const expectedNext = calculateNextConsecutive(
-                            delEntry, delPage, delBook,
+                        const previosSupletorios = calculatePreviousConsecutive(
+                            cloudParams.suplementarioNumero,
+                            cloudParams.suplementarioFolio,
+                            cloudParams.suplementarioLibro,
                             cloudParams.suplementarioPartidas || 2,
                             cloudParams.suplementarioReiniciar || false
                         );
 
-                        // Si el parámetro actual de la nube es igual al "siguiente" esperado, procedemos
-                        if (
-                            pad(cloudParams.suplementarioNumero) === pad(expectedNext.numero) &&
-                            pad(cloudParams.suplementarioFolio) === pad(expectedNext.folio) &&
-                            pad(cloudParams.suplementarioLibro) === pad(expectedNext.libro)
-                        ) {
-                            // Asignamos EXACTAMENTE los valores eliminados (forzados como String)
+                        // FIX: Comparamos como enteros. Si es seguro, inyectamos los folios exactos con ceros.
+                        if (parseInt(newEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
                             const newParamsObj = { 
                                 ...cloudParams, 
-                                suplementarioNumero: delEntry,
-                                suplementarioFolio: delPage,
-                                suplementarioLibro: delBook
+                                suplementarioNumero: previosSupletorios.numero,
+                                suplementarioFolio: previosSupletorios.folio,
+                                suplementarioLibro: previosSupletorios.libro
                             };
                             
-                            // Usamos update en vez de upsert
                             await supabase.from('parish_parameters').update({ bautizos_params: newParamsObj }).eq('parish_id', user.parishId);
                         }
                     }
@@ -124,9 +120,10 @@ const BaptismCorrectionListPage = () => {
             // 3. Eliminar el Decreto
             await supabase.from('decretos').delete().eq('id', deleteConfig.id);
 
-            toast({ title: "Restauración Completada", description: "Decreto borrado y consecutivos actualizados correctamente.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Restauración Completada", description: "Decreto borrado, partida restaurada y consecutivos actualizados.", className: "bg-green-50 text-green-900 border-green-200" });
             loadParishCorrectionsFromCloud();
         } catch (error) { 
+            console.error("Error al restaurar:", error);
             toast({ title: "Error", description: "No se pudo restaurar la partida.", variant: "destructive" }); 
         } finally { 
             setIsDeleting(false); setDeleteConfig({ isOpen: false, id: null, name: '' }); 

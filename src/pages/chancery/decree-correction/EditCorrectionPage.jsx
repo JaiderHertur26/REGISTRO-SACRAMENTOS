@@ -180,13 +180,14 @@ const EditCorrectionPage = () => {
             const pad = (num) => String(num).padStart(4, '0');
             const targetParish = newPartida.parishId;
 
+            // FIX: Soporte para ambas variables (NUMERO_NUEVA o NUMERO_PARTIDA_NUEVA)
             let noteAnulada = chanceryNotesConfig?.correccion_anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO] DE FECHA [FECHA_DECRETO]. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-[LIBRO_NUEVA] F-[FOLIO_NUEVA] N-[NUMERO_NUEVA].";
             noteAnulada = noteAnulada
                 .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
                 .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
-                .replace(/\[LIBRO_NUEVA\]/g, pad(newPartida.book_number))
-                .replace(/\[FOLIO_NUEVA\]/g, pad(newPartida.page_number))
-                .replace(/\[NUMERO_PARTIDA_NUEVA\]/g, pad(newPartida.entry_number));
+                .replace(/\[LIBRO_NUEVA\]|\[LIBRO_PARTIDA_NUEVA\]/g, pad(newPartida.book_number))
+                .replace(/\[FOLIO_NUEVA\]|\[FOLIO_PARTIDA_NUEVA\]/g, pad(newPartida.page_number))
+                .replace(/\[NUMERO_NUEVA\]|\[NUMERO_PARTIDA_NUEVA\]/g, pad(newPartida.entry_number));
 
             let notaSupletoriaFinal = chanceryNotesConfig?.correccion_nueva || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] DE FECHA: [FECHA_DECRETO] EXPEDIDO POR: [OFICINA_DECRETO] Y ANULA LA PARTIDA DEL LIBRO: [LIBRO_ANULADA], FOLIO: [FOLIO_ANULADA], NÚMERO: [NUMERO_PARTIDA_ANULADA]. DA FE: [MINISTRO].";
             notaSupletoriaFinal = notaSupletoriaFinal
@@ -279,22 +280,21 @@ const EditCorrectionPage = () => {
                 if (paramsData && paramsData.bautizos_params) {
                     const cloudParams = paramsData.bautizos_params;
                     
-                    const expectedNext = calculateNextConsecutive(
-                        delEntry, delPage, delBook,
+                    const previosSupletorios = calculatePreviousConsecutive(
+                        cloudParams.suplementarioNumero,
+                        cloudParams.suplementarioFolio,
+                        cloudParams.suplementarioLibro,
                         cloudParams.suplementarioPartidas || 2,
                         cloudParams.suplementarioReiniciar || false
                     );
 
-                    if (
-                        pad(cloudParams.suplementarioNumero) === pad(expectedNext.numero) &&
-                        pad(cloudParams.suplementarioFolio) === pad(expectedNext.folio) &&
-                        pad(cloudParams.suplementarioLibro) === pad(expectedNext.libro)
-                    ) {
+                    // FIX: Comparamos como enteros. Si es seguro, retrocedemos inyectando el valor matemático correcto.
+                    if (parseInt(delEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
                         const newParams = { 
                             ...cloudParams, 
-                            suplementarioNumero: delEntry,
-                            suplementarioFolio: delPage,
-                            suplementarioLibro: delBook
+                            suplementarioNumero: previosSupletorios.numero,
+                            suplementarioFolio: previosSupletorios.folio,
+                            suplementarioLibro: previosSupletorios.libro
                         };
 
                         await supabase.from('parish_parameters').update({ bautizos_params: newParams }).eq('parish_id', targetParishId);
