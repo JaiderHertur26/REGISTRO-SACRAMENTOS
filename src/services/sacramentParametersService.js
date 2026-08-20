@@ -197,10 +197,6 @@ export const getNextMatrimonioNumbers = async (parishId) => {
 // 🔢 CÁLCULO DE CONSECUTIVOS (AVANCE Y RETROCESO)
 // ============================================================================
 
-/**
- * Avanza el consecutivo (Para nuevas partidas o decretos)
- * Cubre: Casos 1, 2 y 4
- */
 export const calculateNextConsecutive = (currentNumero, currentFolio, currentLibro, maxPartidasPorFolio, reiniciarEnFolioNuevo) => {
     let num = parseInt(currentNumero || 1, 10);
     let fol = parseInt(currentFolio || 1, 10);
@@ -208,7 +204,6 @@ export const calculateNextConsecutive = (currentNumero, currentFolio, currentLib
     const limit = parseInt(maxPartidasPorFolio || 1, 10);
 
     if (reiniciarEnFolioNuevo) {
-        // Regla: Al llenar el folio, pasamos al siguiente y el número vuelve a 1
         if (num >= limit) {
             fol += 1;
             num = 1;
@@ -216,7 +211,6 @@ export const calculateNextConsecutive = (currentNumero, currentFolio, currentLib
             num += 1;
         }
     } else {
-        // Regla: El número crece infinitamente. El folio avanza cada vez que el número completa un ciclo del límite.
         num += 1;
         if ((num - 1) % limit === 0) {
             fol += 1;
@@ -230,17 +224,12 @@ export const calculateNextConsecutive = (currentNumero, currentFolio, currentLib
     };
 };
 
-/**
- * Retrocede el consecutivo (Para cuando se elimina/anula una partida)
- * Revierte matemáticamente los Casos 1, 2 y 4
- */
 export const calculatePreviousConsecutive = (currentNumero, currentFolio, currentLibro, maxPartidasPorFolio, reiniciarEnFolioNuevo) => {
     let num = parseInt(currentNumero || 1, 10);
     let fol = parseInt(currentFolio || 1, 10);
     let lib = parseInt(currentLibro || 1, 10);
     const limit = parseInt(maxPartidasPorFolio || 1, 10);
 
-    // Evitar retroceder más allá del 1-1
     if (fol <= 1 && num <= 1) {
         return {
             numero: String(num).padStart(4, '0'),
@@ -250,7 +239,6 @@ export const calculatePreviousConsecutive = (currentNumero, currentFolio, curren
     }
 
     if (reiniciarEnFolioNuevo) {
-        // Regla Inversa: Si el número es 1 y bajamos, volvemos al folio anterior en su límite máximo
         if (num === 1 && fol > 1) {
             fol -= 1;
             num = limit;
@@ -258,7 +246,6 @@ export const calculatePreviousConsecutive = (currentNumero, currentFolio, curren
             num -= 1;
         }
     } else {
-        // Regla Inversa: Si el número actual abrió un folio nuevo, al retroceder cerramos ese folio
         if ((num - 1) % limit === 0 && fol > 1) {
             fol -= 1;
         }
@@ -272,21 +259,13 @@ export const calculatePreviousConsecutive = (currentNumero, currentFolio, curren
     };
 };
 
-/**
- * Avanza el Número de Registro Global (Caso 3)
- */
 export const calculateNextRegistro = (currentRegistro) => {
     const next = parseInt(currentRegistro || 0, 10) + 1;
     return String(next).padStart(6, '0');
 };
 
-/**
- * Retrocede el Número de Registro Global (Caso 3)
- */
 export const calculatePreviousRegistro = (currentRegistro) => {
     let prev = parseInt(currentRegistro || 1, 10) - 1;
     if (prev < 1) prev = 1;
     return String(prev).padStart(6, '0');
-};
-
 };
