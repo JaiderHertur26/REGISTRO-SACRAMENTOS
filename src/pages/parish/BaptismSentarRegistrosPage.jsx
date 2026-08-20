@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import BaptismTicket from '@/components/BaptismTicket';
 import { supabase } from '@/lib/supabaseClient'; 
+import { calculateNextConsecutive } from '@/services/sacramentParametersService';
 
 const BaptismSentarRegistrosPage = () => {
     const { user } = useAuth();
@@ -140,20 +141,12 @@ const BaptismSentarRegistrosPage = () => {
             let pPorFolio = parseInt(p[`${prefix}Partidas`], 10) || 2;
             let restart = p[`${prefix}RestartNumber`];
 
+            // Pasamos el contador por el motor matemático las veces que sea necesario (por si es un lote)
             for (let i = 0; i < count; i++) {
-                if (restart) {
-                    if (cNumero >= pPorFolio) {
-                        cFolio++;
-                        cNumero = 1;
-                    } else {
-                        cNumero++;
-                    }
-                } else {
-                    if (cNumero % pPorFolio === 0) {
-                        cFolio++;
-                    }
-                    cNumero++;
-                }
+                const siguiente = calculateNextConsecutive(cNumero, cFolio, cLibro, pPorFolio, restart);
+                cNumero = parseInt(siguiente.numero, 10);
+                cFolio = parseInt(siguiente.folio, 10);
+                cLibro = parseInt(siguiente.libro, 10);
             }
 
             const updatedParams = { 

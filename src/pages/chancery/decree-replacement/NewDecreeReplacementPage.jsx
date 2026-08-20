@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 import { supabase } from '@/lib/supabaseClient';
 import CityAutocomplete from '@/components/CityAutocomplete'; 
+import { calculateNextConsecutive } from '@/services/sacramentParametersService';
 
 const NewDecreeReplacementPage = () => {
     const { user } = useAuth();
@@ -258,9 +259,26 @@ const NewDecreeReplacementPage = () => {
             payloadDecree.newPartidaId = newBap.id;
             await supabase.from('decretos').insert([{ parish_id: bautismoDecree.targetParishId, tipo: 'reposicion', payload: payloadDecree }]);
 
-            // 6. Incrementar Consecutivo Supletorio de la Parroquia
-            const newParams = { ...cloudParams, suplementarioNumero: Number(nextParams.numero) + 1 };
-            await supabase.from('parish_parameters').upsert({ parish_id: bautismoDecree.targetParishId, bautizos_params: newParams }, { onConflict: 'parish_id' });
+            // 4. Calcular e incrementar consecutivos correctamente con el motor
+const siguientesSupletorios = calculateNextConsecutive(
+    cloudParams.suplementarioNumero,
+    cloudParams.suplementarioFolio,
+    cloudParams.suplementarioLibro,
+    cloudParams.suplementarioPartidas,
+    cloudParams.suplementarioReiniciar
+);
+
+const newParams = { 
+    ...cloudParams, 
+    suplementarioNumero: siguientesSupletorios.numero,
+    suplementarioFolio: siguientesSupletorios.folio,
+    suplementarioLibro: siguientesSupletorios.libro
+};
+
+await supabase.from('parish_parameters').upsert({ 
+    parish_id: user.parishId || targetParish, // Usa targetParish si estás en la vista de Cancillería
+    bautizos_params: newParams 
+}, { onConflict: 'parish_id' });
 
             toast({ title: "Reposición Exitosa", description: "Partida y Decreto sincronizados remotamente.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/chancery/decree-replacement/view');

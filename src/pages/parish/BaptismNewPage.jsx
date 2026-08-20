@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import BaptismTicket from '@/components/BaptismTicket';
 import CityAutocomplete from '@/components/CityAutocomplete';
+import { calculateNextRegistro } from '@/services/sacramentParametersService';
+import { supabase } from '@/lib/supabaseClient'; // Asegúrate de tener supabase importado para guardar el nuevo número
 
 const BaptismNewPage = () => {
     const { user } = useAuth(); 
@@ -114,12 +116,25 @@ const BaptismNewPage = () => {
         setIsSubmitting(true);
         
         try {
-            const nextReg = String(Date.now()).slice(-6);
+            // 🚀 CASO 3: Calcular el Número de Registro matemáticamente
+            const currentRegistro = fullParamsCache?.numeroRegistroActual || "000000";
+            const nextReg = calculateNextRegistro(currentRegistro);
+            
+            // Asignar el nuevo número calculado a la data a guardar
             const dataToSave = { ...formData, numeroRegistro: nextReg };
 
             const res = await saveBaptismToSource(dataToSave, parishId, 'pending');
 
             if (res.success) {
+                // 🚀 ACTUALIZAR LA NUBE: Guardar el nuevo Número de Registro para el próximo
+                if (fullParamsCache) {
+                    const updatedParams = { ...fullParamsCache, numeroRegistroActual: nextReg };
+                    await supabase.from('parish_parameters').upsert({
+                        parish_id: parishId,
+                        bautizos_params: updatedParams
+                    }, { onConflict: 'parish_id' });
+                }
+
                 setTicketData(dataToSave);
                 setIsSuccess(true);
                 toast({ title: "Guardado Exitoso", description: "Borrador enviado a la nube.", className: "bg-green-50 text-green-900 border-green-200" });

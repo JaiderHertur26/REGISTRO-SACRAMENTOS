@@ -10,6 +10,7 @@ import { Save, ArrowLeft, FileText, UserPlus, AlertCircle, CheckCircle2, Search,
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import { marginalNotesEngine } from '@/utils/marginalNotesEngine'; 
+import { calculateNextConsecutive } from '@/services/sacramentParametersService';
 
 const BaptismCorrectionNewPage = () => {
   const { user } = useAuth();
@@ -228,9 +229,26 @@ const BaptismCorrectionNewPage = () => {
             raw_data: { ...foundRecord, notaMarginal: noteAnulada, anulado: true, status: 'anulada' } 
         }).eq('id', foundRecord.id);
 
-        // 4. Incrementar consecutivos usando UPSERT
-        const newParams = { ...cloudParams, suplementarioNumero: Number(supletorioNumero) + 1 };
-        await supabase.from('parish_parameters').upsert({ parish_id: user.parishId, bautizos_params: newParams }, { onConflict: 'parish_id' });
+        // 4. Calcular e incrementar consecutivos correctamente con el motor
+const siguientesSupletorios = calculateNextConsecutive(
+    cloudParams.suplementarioNumero,
+    cloudParams.suplementarioFolio,
+    cloudParams.suplementarioLibro,
+    cloudParams.suplementarioPartidas,
+    cloudParams.suplementarioReiniciar
+);
+
+const newParams = { 
+    ...cloudParams, 
+    suplementarioNumero: siguientesSupletorios.numero,
+    suplementarioFolio: siguientesSupletorios.folio,
+    suplementarioLibro: siguientesSupletorios.libro
+};
+
+await supabase.from('parish_parameters').upsert({ 
+    parish_id: user.parishId || targetParish, // Usa targetParish si estás en la vista de Cancillería
+    bautizos_params: newParams 
+}, { onConflict: 'parish_id' });
 
         // 5. Crear Nueva Partida Supletoria
         const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{

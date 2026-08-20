@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 import { supabase } from '@/lib/supabaseClient';
 import CityAutocomplete from '@/components/CityAutocomplete'; 
+import { calculateNextConsecutive } from '@/services/sacramentParametersService';
 
 const BaptismRepositionNewPage = () => {
     const { user } = useAuth();
@@ -171,8 +172,26 @@ const BaptismRepositionNewPage = () => {
             payloadDecree.newPartidaId = newBap.id;
             await supabase.from('decretos').insert([{ parish_id: user.parishId, tipo: 'reposicion', payload: payloadDecree }]);
 
-            const newParams = { ...cloudParams, suplementarioNumero: Number(supletorioNumero) + 1 };
-            await supabase.from('parish_parameters').upsert({ parish_id: user.parishId, bautizos_params: newParams }, { onConflict: 'parish_id' });
+            // 4. Calcular e incrementar consecutivos correctamente con el motor
+const siguientesSupletorios = calculateNextConsecutive(
+    cloudParams.suplementarioNumero,
+    cloudParams.suplementarioFolio,
+    cloudParams.suplementarioLibro,
+    cloudParams.suplementarioPartidas,
+    cloudParams.suplementarioReiniciar
+);
+
+const newParams = { 
+    ...cloudParams, 
+    suplementarioNumero: siguientesSupletorios.numero,
+    suplementarioFolio: siguientesSupletorios.folio,
+    suplementarioLibro: siguientesSupletorios.libro
+};
+
+await supabase.from('parish_parameters').upsert({ 
+    parish_id: user.parishId || targetParish, // Usa targetParish si estás en la vista de Cancillería
+    bautizos_params: newParams 
+}, { onConflict: 'parish_id' });
 
             toast({ title: "Reposición Exitosa", description: "La partida supletoria ha sido creada en la Nube.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/parroquia/decretos/reposicion');

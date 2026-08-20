@@ -10,6 +10,7 @@ import { useToast } from '@/components/ui/use-toast';
 import ViewCorrectionDecreeModal from '@/components/modals/ViewCorrectionDecreeModal';
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import { supabase } from '@/lib/supabaseClient';
+import { calculatePreviousConsecutive } from '@/services/sacramentParametersService';
 
 const BaptismCorrectionListPage = () => {
     const { user } = useAuth();
@@ -96,32 +97,38 @@ const BaptismCorrectionListPage = () => {
                     .eq('folio', newPage)
                     .eq('number', newEntry);
 
-                // 🚀 AQUÍ OCURRE LA MAGIA DEL REVERSO DEL LIBRO SUPLETORIO
-                const { data: pData } = await supabase
-                    .from('parish_parameters')
-                    .select('bautizos_params')
-                    .eq('parish_id', user.parishId)
-                    .maybeSingle();
+                // 🚀 AQUÍ OCURRE LA MAGIA DEL REVERSO DEL LIBRO SUPLETORIO CON EL MOTOR
+const { data: pData } = await supabase
+    .from('parish_parameters')
+    .select('bautizos_params')
+    .eq('parish_id', user.parishId)
+    .maybeSingle();
 
-                if (pData && pData.bautizos_params) {
-                    const currentParams = pData.bautizos_params;
-                    const currentSupNum = Number(currentParams.suplementarioNumero);
-                    const deletedEntryNum = Number(newEntry);
+if (pData && pData.bautizos_params) {
+    const currentParams = pData.bautizos_params;
+    
+    // Usamos el motor para saber exactamente cómo retroceder el folio y número
+    const previosSupletorios = calculatePreviousConsecutive(
+        currentParams.suplementarioNumero,
+        currentParams.suplementarioFolio,
+        currentParams.suplementarioLibro,
+        currentParams.suplementarioPartidas,
+        currentParams.suplementarioReiniciar
+    );
 
-                    // Validamos si el registro borrado fue el último generado
-                    if (deletedEntryNum === currentSupNum - 1) {
-                        const newParamsObj = { 
-                            ...currentParams, 
-                            suplementarioNumero: currentSupNum - 1 
-                        };
-                        
-                        await supabase
-                            .from('parish_parameters')
-                            .update({ bautizos_params: newParamsObj })
-                            .eq('parish_id', user.parishId);
-                    }
-                }
-            }
+    const newParamsObj = { 
+        ...currentParams, 
+        suplementarioNumero: previosSupletorios.numero,
+        suplementarioFolio: previosSupletorios.folio,
+        suplementarioLibro: previosSupletorios.libro
+    };
+    
+    await supabase
+        .from('parish_parameters')
+        .update({ bautizos_params: newParamsObj })
+        .eq('parish_id', user.parishId);
+}
+           
 
             // 4. Eliminar el Decreto
             await supabase.from('decretos').delete().eq('id', deleteConfig.id);

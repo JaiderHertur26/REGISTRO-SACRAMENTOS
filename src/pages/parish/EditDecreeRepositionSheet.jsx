@@ -12,6 +12,7 @@ import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 import { supabase } from '@/lib/supabaseClient';
 import CityAutocomplete from '@/components/CityAutocomplete'; 
+import { calculatePreviousConsecutive } from '@/services/sacramentParametersService';
 
 const EditDecreeRepositionSheet = () => {
     const { user } = useAuth();
@@ -208,6 +209,49 @@ const EditDecreeRepositionSheet = () => {
             await supabase.from('baptisms').delete().eq('parish_id', user.parishId)
                 .eq('book_number', pad(newPartida.book_number)).eq('folio', pad(newPartida.page_number)).eq('number', pad(newPartida.entry_number));
             await supabase.from('decretos').delete().eq('id', selectedDecreeId);
+
+            // --- INICIO DE REVERSA MATEMÁTICA DE CONSECUTIVOS ---
+try {
+    // IMPORTANTE: Usa user.parishId en la versión Parroquia, 
+    // y newPartida.parishId (o targetParishId) en la versión Cancillería
+    const parishIdTarget = user.parishId; // Cambia esto en Cancillería por: newPartida.parishId
+
+    // 1. Consultar los parámetros EXACTOS actuales en el momento de eliminar
+    const { data: paramsData } = await supabase
+        .from('parish_parameters')
+        .select('bautizos_params')
+        .eq('parish_id', parishIdTarget)
+        .single();
+
+    if (paramsData && paramsData.bautizos_params) {
+        const cloudParams = paramsData.bautizos_params;
+        
+        // 2. Calcular el consecutivo anterior (Retroceso)
+        const previosSupletorios = calculatePreviousConsecutive(
+            cloudParams.suplementarioNumero,
+            cloudParams.suplementarioFolio,
+            cloudParams.suplementarioLibro,
+            cloudParams.suplementarioPartidas,
+            cloudParams.suplementarioReiniciar
+        );
+
+        // 3. Empacar y actualizar la base de datos con los números retrocedidos
+        const newParams = { 
+            ...cloudParams, 
+            suplementarioNumero: previosSupletorios.numero,
+            suplementarioFolio: previosSupletorios.folio,
+            suplementarioLibro: previosSupletorios.libro
+        };
+
+        await supabase.from('parish_parameters').upsert({ 
+            parish_id: parishIdTarget, 
+            bautizos_params: newParams 
+        }, { onConflict: 'parish_id' });
+    }
+} catch (err) {
+    console.error("Error revirtiendo el consecutivo en la nube:", err);
+}
+// --- FIN DE REVERSA MATEMÁTICA ---
 
             toast({ title: "Eliminado", description: "El decreto y la partida supletoria han sido removidos.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/parroquia/decretos/reposicion');

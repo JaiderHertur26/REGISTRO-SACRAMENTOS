@@ -194,49 +194,99 @@ export const getNextMatrimonioNumbers = async (parishId) => {
 };
 
 // ============================================================================
-// 🔢 MOTOR INTELIGENTE DE CÁLCULO DE CONSECUTIVOS CANÓNICOS
+// 🔢 CÁLCULO DE CONSECUTIVOS (AVANCE Y RETROCESO)
 // ============================================================================
+
+/**
+ * Avanza el consecutivo (Para nuevas partidas o decretos)
+ * Cubre: Casos 1, 2 y 4
+ */
 export const calculateNextConsecutive = (currentNumero, currentFolio, currentLibro, maxPartidasPorFolio, reiniciarEnFolioNuevo) => {
     let num = parseInt(currentNumero || 1, 10);
     let fol = parseInt(currentFolio || 1, 10);
     let lib = parseInt(currentLibro || 1, 10);
-    const max = parseInt(maxPartidasPorFolio || 1, 10);
+    const limit = parseInt(maxPartidasPorFolio || 1, 10);
 
     if (reiniciarEnFolioNuevo) {
-        // REGLA 1: Si el número llega al tope del folio, el folio avanza y el número vuelve a 1.
-        if (num >= max) {
+        // Regla: Al llenar el folio, pasamos al siguiente y el número vuelve a 1
+        if (num >= limit) {
             fol += 1;
             num = 1;
         } else {
             num += 1;
         }
     } else {
-        // REGLA 2: El número es absoluto (nunca vuelve a 1). Si es múltiplo del tope, el folio avanza.
-        if (num % max === 0) {
+        // Regla: El número crece infinitamente. El folio avanza cada vez que el número completa un ciclo del límite.
+        num += 1;
+        if ((num - 1) % limit === 0) {
             fol += 1;
         }
-        num += 1;
     }
 
     return {
         numero: String(num).padStart(4, '0'),
         folio: String(fol).padStart(4, '0'),
-        libro: String(lib).padStart(4, '0') // El libro NUNCA avanza automáticamente
+        libro: String(lib).padStart(4, '0')
     };
 };
 
-// 🔢 UTILIDAD PARA EL NÚMERO DE REGISTRO CIVIL (Nuevos Bautismos)
-export const calculateNextRegistro = (currentRegistro) => {
-    if (!currentRegistro) return '000001';
-    
-    // Extraemos solo la parte numérica para poder incrementarla, respetando si tiene letras iniciales
-    const numMatch = String(currentRegistro).match(/\d+/);
-    if (numMatch) {
-        const numStr = numMatch[0];
-        const nextNum = parseInt(numStr, 10) + 1;
-        const paddedNext = String(nextNum).padStart(numStr.length, '0');
-        // Reemplazamos la porción numérica por la nueva e incrementada
-        return String(currentRegistro).replace(numStr, paddedNext);
+/**
+ * Retrocede el consecutivo (Para cuando se elimina/anula una partida)
+ * Revierte matemáticamente los Casos 1, 2 y 4
+ */
+export const calculatePreviousConsecutive = (currentNumero, currentFolio, currentLibro, maxPartidasPorFolio, reiniciarEnFolioNuevo) => {
+    let num = parseInt(currentNumero || 1, 10);
+    let fol = parseInt(currentFolio || 1, 10);
+    let lib = parseInt(currentLibro || 1, 10);
+    const limit = parseInt(maxPartidasPorFolio || 1, 10);
+
+    // Evitar retroceder más allá del 1-1
+    if (fol <= 1 && num <= 1) {
+        return {
+            numero: String(num).padStart(4, '0'),
+            folio: String(fol).padStart(4, '0'),
+            libro: String(lib).padStart(4, '0')
+        };
     }
-    return currentRegistro;
+
+    if (reiniciarEnFolioNuevo) {
+        // Regla Inversa: Si el número es 1 y bajamos, volvemos al folio anterior en su límite máximo
+        if (num === 1 && fol > 1) {
+            fol -= 1;
+            num = limit;
+        } else {
+            num -= 1;
+        }
+    } else {
+        // Regla Inversa: Si el número actual abrió un folio nuevo, al retroceder cerramos ese folio
+        if ((num - 1) % limit === 0 && fol > 1) {
+            fol -= 1;
+        }
+        num -= 1;
+    }
+
+    return {
+        numero: String(num).padStart(4, '0'),
+        folio: String(fol).padStart(4, '0'),
+        libro: String(lib).padStart(4, '0')
+    };
+};
+
+/**
+ * Avanza el Número de Registro Global (Caso 3)
+ */
+export const calculateNextRegistro = (currentRegistro) => {
+    const next = parseInt(currentRegistro || 0, 10) + 1;
+    return String(next).padStart(6, '0');
+};
+
+/**
+ * Retrocede el Número de Registro Global (Caso 3)
+ */
+export const calculatePreviousRegistro = (currentRegistro) => {
+    let prev = parseInt(currentRegistro || 1, 10) - 1;
+    if (prev < 1) prev = 1;
+    return String(prev).padStart(6, '0');
+};
+
 };
