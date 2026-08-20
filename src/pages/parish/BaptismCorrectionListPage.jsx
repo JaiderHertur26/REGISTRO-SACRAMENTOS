@@ -55,101 +55,81 @@ const BaptismCorrectionListPage = () => {
             const origSum = decreeToUndo.originalPartidaSummary;
             const newSum = decreeToUndo.newPartidaSummary;
 
-            // 1. Restaurar la Partida Original (Quitar Anulado)
+            // 1. Restaurar la Partida Original
             if (origSum) {
                 const origBook = pad(origSum.book || origSum.Libro);
                 const origPage = pad(origSum.page || origSum.folio);
                 const origEntry = pad(origSum.entry || origSum.numero);
 
-                const { data: origData } = await supabase
-                    .from('baptisms')
-                    .select('id, raw_data')
-                    .eq('parish_id', user.parishId)
-                    .eq('book_number', origBook)
-                    .eq('folio', origPage)
-                    .eq('number', origEntry)
-                    .maybeSingle();
+                const { data: origData } = await supabase.from('baptisms')
+                    .select('id, raw_data').eq('parish_id', user.parishId)
+                    .eq('book_number', origBook).eq('folio', origPage).eq('number', origEntry).maybeSingle();
 
                 if (origData) {
                     const cleanedRaw = { ...origData.raw_data };
                     delete cleanedRaw.notaMarginal; 
-                    cleanedRaw.anulado = false;
-                    cleanedRaw.status = 'seated';
+                    cleanedRaw.anulado = false; cleanedRaw.status = 'seated';
                     
                     await supabase.from('baptisms').update({ 
-                        status: 'seated', 
-                        nota_marginal: null, 
-                        raw_data: cleanedRaw 
+                        status: 'seated', nota_marginal: null, raw_data: cleanedRaw 
                     }).eq('id', origData.id);
                 }
             }
 
-            // 2. Eliminar la Partida Supletoria y Revertir el Parámetro de forma segura
+            // 2. Eliminar la Supletoria y Revertir Consecutivos Seguros
             if (newSum) {
-                const newBook = pad(newSum.book || newSum.Libro);
-                const newPage = pad(newSum.page || newSum.folio);
-                const newEntry = pad(newSum.entry || newSum.numero);
+                const delBook = pad(newSum.book || newSum.Libro);
+                const delPage = pad(newSum.page || newSum.folio);
+                const delEntry = pad(newSum.entry || newSum.numero);
 
                 await supabase.from('baptisms').delete()
-                    .eq('parish_id', user.parishId)
-                    .eq('book_number', newBook)
-                    .eq('folio', newPage)
-                    .eq('number', newEntry);
+                    .eq('parish_id', user.parishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
 
-                // --- INICIO DE REVERSA MATEMÁTICA SEGURA ---
+                // --- REVERSA MATEMÁTICA PERFECTA ---
                 try {
-                    const { data: pData } = await supabase
-                        .from('parish_parameters')
-                        .select('bautizos_params')
-                        .eq('parish_id', user.parishId)
-                        .maybeSingle();
+                    const { data: paramsData } = await supabase.from('parish_parameters')
+                        .select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
 
-                    if (pData && pData.bautizos_params) {
-                        const currentParams = pData.bautizos_params;
+                    if (paramsData && paramsData.bautizos_params) {
+                        const cloudParams = paramsData.bautizos_params;
                         
-                        const previosSupletorios = calculatePreviousConsecutive(
-                            currentParams.suplementarioNumero,
-                            currentParams.suplementarioFolio,
-                            currentParams.suplementarioLibro,
-                            currentParams.suplementarioPartidas || 2,
-                            currentParams.suplementarioReiniciar || false
+                        // Calculamos el "siguiente" de la partida borrada
+                        const expectedNext = calculateNextConsecutive(
+                            delEntry, delPage, delBook,
+                            cloudParams.suplementarioPartidas || 2,
+                            cloudParams.suplementarioReiniciar || false
                         );
 
-                        // VERIFICACIÓN DE SEGURIDAD: Solo revertir si la partida eliminada es la ÚLTIMA que se creó
-                        if (previosSupletorios.numero === newEntry && previosSupletorios.folio === newPage && previosSupletorios.libro === newBook) {
+                        // Si el parámetro actual de la nube es igual al "siguiente" esperado, procedemos
+                        if (
+                            pad(cloudParams.suplementarioNumero) === pad(expectedNext.numero) &&
+                            pad(cloudParams.suplementarioFolio) === pad(expectedNext.folio) &&
+                            pad(cloudParams.suplementarioLibro) === pad(expectedNext.libro)
+                        ) {
+                            // Asignamos EXACTAMENTE los valores eliminados (forzados como String)
                             const newParamsObj = { 
-                                ...currentParams, 
-                                suplementarioNumero: previosSupletorios.numero,
-                                suplementarioFolio: previosSupletorios.folio,
-                                suplementarioLibro: previosSupletorios.libro
+                                ...cloudParams, 
+                                suplementarioNumero: delEntry,
+                                suplementarioFolio: delPage,
+                                suplementarioLibro: delBook
                             };
                             
-                            await supabase
-                                .from('parish_parameters')
-                                .update({ bautizos_params: newParamsObj })
-                                .eq('parish_id', user.parishId);
+                            // Usamos update en vez de upsert
+                            await supabase.from('parish_parameters').update({ bautizos_params: newParamsObj }).eq('parish_id', user.parishId);
                         }
                     }
-                } catch (err) {
-                    console.error("Error revirtiendo consecutivos:", err);
-                }
+                } catch (err) { console.error("Error revirtiendo consecutivos:", err); }
             }
 
             // 3. Eliminar el Decreto
             await supabase.from('decretos').delete().eq('id', deleteConfig.id);
 
-            toast({ 
-                title: "Restauración Completada", 
-                description: "Decreto borrado, partida restaurada y consecutivos actualizados.", 
-                className: "bg-green-50 text-green-900 border-green-200" 
-            });
+            toast({ title: "Restauración Completada", description: "Decreto borrado y consecutivos actualizados correctamente.", className: "bg-green-50 text-green-900 border-green-200" });
             loadParishCorrectionsFromCloud();
         } catch (error) { 
-            console.error("Error al restaurar:", error);
             toast({ title: "Error", description: "No se pudo restaurar la partida.", variant: "destructive" }); 
         } finally { 
-            setIsDeleting(false);
-            setDeleteConfig({ isOpen: false, id: null, name: '' }); 
+            setIsDeleting(false); setDeleteConfig({ isOpen: false, id: null, name: '' }); 
         }
     };
 

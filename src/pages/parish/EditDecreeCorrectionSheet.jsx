@@ -204,9 +204,8 @@ const EditDecreeCorrectionSheet = () => {
     const handleDelete = async () => {
         setIsSubmitting(true);
         try {
-            // Corrección de la función pad
             const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
-            const supSum = originalPayload.newPartidaSummary;
+            const supSum = originalPayload?.newPartidaSummary;
 
             // Restaurar original
             if (foundRecord) {
@@ -222,48 +221,39 @@ const EditDecreeCorrectionSheet = () => {
                 const delPage = pad(supSum.page || supSum.folio);
                 const delEntry = pad(supSum.entry || supSum.numero);
 
-                await supabase.from('baptisms').delete().eq('parish_id', user.parishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
+                await supabase.from('baptisms').delete()
+                    .eq('parish_id', user.parishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
                 
-                // --- INICIO DE REVERSA MATEMÁTICA DE CONSECUTIVOS ---
+                // --- REVERSA MATEMÁTICA PERFECTA ---
                 try {
-                    const parishIdTarget = user.parishId; 
-
-                    const { data: paramsData } = await supabase
-                        .from('parish_parameters')
-                        .select('bautizos_params')
-                        .eq('parish_id', parishIdTarget)
-                        .maybeSingle();
+                    const { data: paramsData } = await supabase.from('parish_parameters')
+                        .select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
 
                     if (paramsData && paramsData.bautizos_params) {
                         const cloudParams = paramsData.bautizos_params;
                         
-                        const previosSupletorios = calculatePreviousConsecutive(
-                            cloudParams.suplementarioNumero,
-                            cloudParams.suplementarioFolio,
-                            cloudParams.suplementarioLibro,
+                        const expectedNext = calculateNextConsecutive(
+                            delEntry, delPage, delBook,
                             cloudParams.suplementarioPartidas || 2,
                             cloudParams.suplementarioReiniciar || false
                         );
 
-                        // Seguridad: comprobar que retrocedemos la última registrada
-                        if (previosSupletorios.numero === delEntry && previosSupletorios.folio === delPage && previosSupletorios.libro === delBook) {
+                        if (
+                            pad(cloudParams.suplementarioNumero) === pad(expectedNext.numero) &&
+                            pad(cloudParams.suplementarioFolio) === pad(expectedNext.folio) &&
+                            pad(cloudParams.suplementarioLibro) === pad(expectedNext.libro)
+                        ) {
                             const newParams = { 
                                 ...cloudParams, 
-                                suplementarioNumero: previosSupletorios.numero,
-                                suplementarioFolio: previosSupletorios.folio,
-                                suplementarioLibro: previosSupletorios.libro
+                                suplementarioNumero: delEntry,
+                                suplementarioFolio: delPage,
+                                suplementarioLibro: delBook
                             };
 
-                            // Cambio a .update para evitar problemas de constraint
-                            await supabase.from('parish_parameters').update({ 
-                                bautizos_params: newParams 
-                            }).eq('parish_id', parishIdTarget);
+                            await supabase.from('parish_parameters').update({ bautizos_params: newParams }).eq('parish_id', user.parishId);
                         }
                     }
-                } catch (err) {
-                    console.error("Error revirtiendo el consecutivo en la nube:", err);
-                }
-                // --- FIN DE REVERSA MATEMÁTICA ---
+                } catch (err) { console.error("Error revirtiendo el consecutivo en la nube:", err); }
             }
 
             // Eliminar decreto
