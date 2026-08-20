@@ -177,27 +177,35 @@ const EditCorrectionPage = () => {
         setIsSubmitting(true);
 
         try {
-            const pad = (num) => String(num).padStart(4, '0');
+            const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
             const targetParish = newPartida.parishId;
+            const supSum = originalPayload?.newPartidaSummary;
+            
+            // Usamos la info original asegurando que los consecutivos queden estáticos al editar
+            const currentBook = pad(supSum?.book || supSum?.Libro || newPartida.book_number);
+            const currentPage = pad(supSum?.page || supSum?.folio || newPartida.page_number);
+            const currentEntry = pad(supSum?.entry || supSum?.numero || newPartida.entry_number);
 
-            // FIX: Soporte para ambas variables (NUMERO_NUEVA o NUMERO_PARTIDA_NUEVA)
-            let noteAnulada = chanceryNotesConfig?.correccion_anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO] DE FECHA [FECHA_DECRETO]. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-[LIBRO_NUEVA] F-[FOLIO_NUEVA] N-[NUMERO_NUEVA].";
-            noteAnulada = noteAnulada
-                .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
-                .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
-                .replace(/\[LIBRO_NUEVA\]|\[LIBRO_PARTIDA_NUEVA\]/g, pad(newPartida.book_number))
-                .replace(/\[FOLIO_NUEVA\]|\[FOLIO_PARTIDA_NUEVA\]/g, pad(newPartida.page_number))
-                .replace(/\[NUMERO_NUEVA\]|\[NUMERO_PARTIDA_NUEVA\]/g, pad(newPartida.entry_number));
+            const reemplazarVariables = (template) => {
+                if (!template) return "";
+                return template
+                    .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
+                    .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
+                    .replace(/\[LIBRO_NUEVA[\]\)]|\[LIBRO_PARTIDA_NUEVA[\]\)]|\[LIBRO NUEVA[\]\)]/gi, currentBook)
+                    .replace(/\[FOLIO_NUEVA[\]\)]|\[FOLIO_PARTIDA_NUEVA[\]\)]|\[FOLIO NUEVA[\]\)]/gi, currentPage)
+                    .replace(/\[NUMERO_NUEVA[\]\)]|\[NUMERO_PARTIDA_NUEVA[\]\)]|\[NUMERO NUEVA[\]\)]/gi, currentEntry)
+                    .replace(/\[OFICINA_DECRETO\]/g, 'CANCILLERÍA')
+                    .replace(/\[LIBRO_ANULADA\]/g, pad(decreeData.Libro))
+                    .replace(/\[FOLIO_ANULADA\]/g, pad(decreeData.folio))
+                    .replace(/\[NUMERO_PARTIDA_ANULADA\]/g, pad(decreeData.numero))
+                    .replace(/\[MINISTRO\]|\[NOMBRE_SACERDOTE\]/gi, newPartida.daFe);
+            };
 
-            let notaSupletoriaFinal = chanceryNotesConfig?.correccion_nueva || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] DE FECHA: [FECHA_DECRETO] EXPEDIDO POR: [OFICINA_DECRETO] Y ANULA LA PARTIDA DEL LIBRO: [LIBRO_ANULADA], FOLIO: [FOLIO_ANULADA], NÚMERO: [NUMERO_PARTIDA_ANULADA]. DA FE: [MINISTRO].";
-            notaSupletoriaFinal = notaSupletoriaFinal
-                .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
-                .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
-                .replace(/\[OFICINA_DECRETO\]/g, 'CANCILLERÍA')
-                .replace(/\[LIBRO_ANULADA\]/g, pad(decreeData.Libro))
-                .replace(/\[FOLIO_ANULADA\]/g, pad(decreeData.folio))
-                .replace(/\[NUMERO_PARTIDA_ANULADA\]/g, pad(decreeData.numero))
-                .replace(/\[MINISTRO\]/g, newPartida.daFe);
+            const templateAnulada = chanceryNotesConfig?.correccion_anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO] DE FECHA [FECHA_DECRETO]. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-[LIBRO_NUEVA] F-[FOLIO_NUEVA] N-[NUMERO_NUEVA].";
+            const noteAnulada = reemplazarVariables(templateAnulada);
+
+            const templateNueva = chanceryNotesConfig?.correccion_nueva || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] DE FECHA: [FECHA_DECRETO] EXPEDIDO POR: [OFICINA_DECRETO] Y ANULA LA PARTIDA DEL LIBRO: [LIBRO_ANULADA], FOLIO: [FOLIO_ANULADA], NÚMERO: [NUMERO_PARTIDA_ANULADA]. DA FE: [MINISTRO].";
+            const notaSupletoriaFinal = reemplazarVariables(templateNueva);
 
             // 1. Actualizar Partida Original
             if (foundRecord) {
@@ -215,7 +223,7 @@ const EditCorrectionPage = () => {
             }
 
             // 2. Actualizar Partida Supletoria
-            const { data: supData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', targetParish).eq('book_number', pad(newPartida.book_number)).eq('folio', pad(newPartida.page_number)).eq('number', pad(newPartida.entry_number)).maybeSingle();
+            const { data: supData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', targetParish).eq('book_number', currentBook).eq('folio', currentPage).eq('number', currentEntry).maybeSingle();
 
             if (supData) {
                 const updatedRaw = {
@@ -239,8 +247,8 @@ const EditCorrectionPage = () => {
                 conceptoAnulacionId: decreeData.conceptoAnulacionId || decreeData.conceptoAnulacion,
                 targetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(),
                 ...newPartida,
-                datosNuevaPartida: { ...newPartida, book: newPartida.book_number, page: newPartida.page_number, entry: newPartida.entry_number },
-                newPartidaSummary: { book: newPartida.book_number, page: newPartida.page_number, entry: newPartida.entry_number, nombres: newPartida.nombres, apellidos: newPartida.apellidos }
+                datosNuevaPartida: { ...newPartida, book: currentBook, page: currentPage, entry: currentEntry },
+                newPartidaSummary: { book: currentBook, page: currentPage, entry: currentEntry, nombres: newPartida.nombres, apellidos: newPartida.apellidos }
             };
 
             await supabase.from('decretos').update({ payload: newPayload }).eq('id', selectedDecreeId);
@@ -257,6 +265,9 @@ const EditCorrectionPage = () => {
         try {
             const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
             const targetParishId = newPartida.parishId;
+            
+            // ⚠️ FIX CLAVE: Extraer los datos a borrar del payload original igual que en la Parroquia
+            const supSum = originalPayload?.newPartidaSummary;
 
             if (foundRecord) {
                 const cleanedRaw = { ...foundRecord };
@@ -265,42 +276,42 @@ const EditCorrectionPage = () => {
                 await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', foundRecord.id);
             }
 
-            const delBook = pad(newPartida.book_number);
-            const delPage = pad(newPartida.page_number);
-            const delEntry = pad(newPartida.entry_number);
+            if (supSum) {
+                const delBook = pad(supSum.book || supSum.Libro);
+                const delPage = pad(supSum.page || supSum.folio);
+                const delEntry = pad(supSum.entry || supSum.numero);
 
-            await supabase.from('baptisms').delete()
-                .eq('parish_id', targetParishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
-            
-            // --- REVERSA MATEMÁTICA PERFECTA (REMOTO) ---
-            try {
-                const { data: paramsData } = await supabase.from('parish_parameters')
-                    .select('bautizos_params').eq('parish_id', targetParishId).maybeSingle();
+                await supabase.from('baptisms').delete()
+                    .eq('parish_id', targetParishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
+                
+                try {
+                    const { data: paramsData } = await supabase.from('parish_parameters')
+                        .select('bautizos_params').eq('parish_id', targetParishId).maybeSingle();
 
-                if (paramsData && paramsData.bautizos_params) {
-                    const cloudParams = paramsData.bautizos_params;
-                    
-                    const previosSupletorios = calculatePreviousConsecutive(
-                        cloudParams.suplementarioNumero,
-                        cloudParams.suplementarioFolio,
-                        cloudParams.suplementarioLibro,
-                        cloudParams.suplementarioPartidas || 2,
-                        cloudParams.suplementarioReiniciar || false
-                    );
+                    if (paramsData && paramsData.bautizos_params) {
+                        const cloudParams = paramsData.bautizos_params;
+                        
+                        const previosSupletorios = calculatePreviousConsecutive(
+                            cloudParams.suplementarioNumero,
+                            cloudParams.suplementarioFolio,
+                            cloudParams.suplementarioLibro,
+                            cloudParams.suplementarioPartidas || 2,
+                            cloudParams.suplementarioReiniciar || false
+                        );
 
-                    // FIX: Comparamos como enteros. Si es seguro, retrocedemos inyectando el valor matemático correcto.
-                    if (parseInt(delEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
-                        const newParams = { 
-                            ...cloudParams, 
-                            suplementarioNumero: previosSupletorios.numero,
-                            suplementarioFolio: previosSupletorios.folio,
-                            suplementarioLibro: previosSupletorios.libro
-                        };
+                        if (parseInt(delEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
+                            const newParams = { 
+                                ...cloudParams, 
+                                suplementarioNumero: pad(previosSupletorios.numero), // FORZANDO LOS CEROS A LA BD
+                                suplementarioFolio: pad(previosSupletorios.folio),   // FORZANDO LOS CEROS A LA BD
+                                suplementarioLibro: pad(previosSupletorios.libro)
+                            };
 
-                        await supabase.from('parish_parameters').update({ bautizos_params: newParams }).eq('parish_id', targetParishId);
+                            await supabase.from('parish_parameters').update({ bautizos_params: newParams }).eq('parish_id', targetParishId);
+                        }
                     }
-                }
-            } catch (err) { console.error("Error revirtiendo el consecutivo en la nube:", err); }
+                } catch (err) { console.error("Error revirtiendo el consecutivo en la nube:", err); }
+            }
 
             await supabase.from('decretos').delete().eq('id', selectedDecreeId);
 

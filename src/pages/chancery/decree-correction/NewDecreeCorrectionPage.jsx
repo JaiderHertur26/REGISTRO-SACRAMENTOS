@@ -227,14 +227,14 @@ const NewDecreeCorrectionPage = () => {
             const supletorioFolio = String(cloudParams.suplementarioFolio || '1').padStart(4, '0');
             const supletorioNumero = String(cloudParams.suplementarioNumero || '1').padStart(4, '0');
 
-            // 2. MOTOR DE NOTAS (Usando plantillas de Cancillería o Defaults)
+            // 2. MOTOR DE NOTAS (Con Regex blindado para errores ortográficos en plantilla)
             let templateAnulada = chanceryNotesConfig?.correccion_anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO] DE FECHA [FECHA_DECRETO]. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-[LIBRO_NUEVA] F-[FOLIO_NUEVA] N-[NUMERO_NUEVA].";
             let noteAnulada = templateAnulada
                 .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
                 .replace(/\[NUMERO_DECRETO\]/g, decreeData.numeroDeDecreto)
-                .replace(/\[LIBRO_NUEVA\]/g, supletorioLibro)
-                .replace(/\[FOLIO_NUEVA\]/g, supletorioFolio)
-                .replace(/\[NUMERO_PARTIDA_NUEVA\]/g, supletorioNumero);
+                .replace(/\[LIBRO_NUEVA[\]\)]|\[LIBRO_PARTIDA_NUEVA[\]\)]|\[LIBRO NUEVA[\]\)]/gi, supletorioLibro)
+                .replace(/\[FOLIO_NUEVA[\]\)]|\[FOLIO_PARTIDA_NUEVA[\]\)]|\[FOLIO NUEVA[\]\)]/gi, supletorioFolio)
+                .replace(/\[NUMERO_NUEVA[\]\)]|\[NUMERO NUEVA[\]\)]|\[NUMERO_PARTIDA_NUEVA[\]\)]/gi, supletorioNumero);
 
             let templateNueva = chanceryNotesConfig?.correccion_nueva || "ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NÚMERO: [NUMERO_DECRETO] DE FECHA: [FECHA_DECRETO] EXPEDIDO POR: [OFICINA_DECRETO] Y ANULA LA PARTIDA DEL LIBRO: [LIBRO_ANULADA], FOLIO: [FOLIO_ANULADA], NÚMERO: [NUMERO_PARTIDA_ANULADA]. DA FE: [MINISTRO].";
             let notaSupletoriaFinal = templateNueva
@@ -244,7 +244,7 @@ const NewDecreeCorrectionPage = () => {
                 .replace(/\[LIBRO_ANULADA\]/g, String(decreeData.Libro).padStart(4, '0'))
                 .replace(/\[FOLIO_ANULADA\]/g, String(decreeData.folio).padStart(4, '0'))
                 .replace(/\[NUMERO_PARTIDA_ANULADA\]/g, String(decreeData.numero).padStart(4, '0'))
-                .replace(/\[MINISTRO\]/g, newPartida.daFe);
+                .replace(/\[MINISTRO\]|\[NOMBRE_SACERDOTE\]/gi, newPartida.daFe);
 
             const partidaToSave = {
                 ...newPartida,
@@ -290,7 +290,7 @@ const NewDecreeCorrectionPage = () => {
                 cloudParams.suplementarioNumero,
                 cloudParams.suplementarioFolio,
                 cloudParams.suplementarioLibro,
-                cloudParams.suplementarioPartidas || 2, // Salvavidas por si es parroquia nueva
+                cloudParams.suplementarioPartidas || 2, 
                 cloudParams.suplementarioReiniciar || false
             );
 
@@ -301,7 +301,6 @@ const NewDecreeCorrectionPage = () => {
                 suplementarioLibro: siguientesSupletorios.libro
             };
 
-            // ⚠️ CORRECCIÓN CLAVE: Garantizar que se actualiza SOLO la parroquia destino
             await supabase.from('parish_parameters').upsert({ 
                 parish_id: targetParish, 
                 bautizos_params: newParams 
