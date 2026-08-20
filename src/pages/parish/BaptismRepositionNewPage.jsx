@@ -172,26 +172,26 @@ const BaptismRepositionNewPage = () => {
             payloadDecree.newPartidaId = newBap.id;
             await supabase.from('decretos').insert([{ parish_id: user.parishId, tipo: 'reposicion', payload: payloadDecree }]);
 
-            // 4. Calcular e incrementar consecutivos correctamente con el motor
-const siguientesSupletorios = calculateNextConsecutive(
-    cloudParams.suplementarioNumero,
-    cloudParams.suplementarioFolio,
-    cloudParams.suplementarioLibro,
-    cloudParams.suplementarioPartidas,
-    cloudParams.suplementarioReiniciar
-);
+            // 4. Calcular e incrementar consecutivos correctamente con el motor y salvavidas
+            const siguientesSupletorios = calculateNextConsecutive(
+                cloudParams.suplementarioNumero,
+                cloudParams.suplementarioFolio,
+                cloudParams.suplementarioLibro,
+                cloudParams.suplementarioPartidas || 2,
+                cloudParams.suplementarioReiniciar || false
+            );
 
-const newParams = { 
-    ...cloudParams, 
-    suplementarioNumero: siguientesSupletorios.numero,
-    suplementarioFolio: siguientesSupletorios.folio,
-    suplementarioLibro: siguientesSupletorios.libro
-};
+            const newParams = { 
+                ...cloudParams, 
+                suplementarioNumero: siguientesSupletorios.numero,
+                suplementarioFolio: siguientesSupletorios.folio,
+                suplementarioLibro: siguientesSupletorios.libro
+            };
 
-await supabase.from('parish_parameters').upsert({ 
-    parish_id: user.parishId || targetParish, // Usa targetParish si estás en la vista de Cancillería
-    bautizos_params: newParams 
-}, { onConflict: 'parish_id' });
+            await supabase.from('parish_parameters').upsert({ 
+                parish_id: user.parishId, // En parroquia es estrictamente este
+                bautizos_params: newParams 
+            }, { onConflict: 'parish_id' });
 
             toast({ title: "Reposición Exitosa", description: "La partida supletoria ha sido creada en la Nube.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/parroquia/decretos/reposicion');
@@ -293,7 +293,6 @@ await supabase.from('parish_parameters').upsert({
                                         <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="birthDate" value={formData.birthDate} onChange={handleChange} className={inputClass} /></div>
                                         <div>
                                             <label className={labelClass}>Lugar de Nacimiento</label>
-                                            {/* 🚀 EL CITYAUTOCOMPLETE ESTÁ AQUÍ LISTO */}
                                             <CityAutocomplete name="placeOfBirth" value={formData.placeOfBirth} onChange={handleCityChange} cities={ciudades} className={inputClass} />
                                         </div>
                                     </div>

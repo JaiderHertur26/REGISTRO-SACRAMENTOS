@@ -205,53 +205,53 @@ const ChanceryDecreeReplacementEditPage = () => {
         setIsSubmitting(true);
         try {
             const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
-            const targetParish = newPartida.parishId;
+            const targetParishId = newPartida.parishId;
 
-            await supabase.from('baptisms').delete().eq('parish_id', targetParish)
+            await supabase.from('baptisms').delete().eq('parish_id', targetParishId)
                 .eq('book_number', pad(newPartida.book_number)).eq('folio', pad(newPartida.page_number)).eq('number', pad(newPartida.entry_number));
 
             await supabase.from('decretos').delete().eq('id', selectedDecreeId);
 
             // --- INICIO DE REVERSA MATEMÁTICA DE CONSECUTIVOS ---
-try {
-    const parishIdTarget = newPartida.parishId; // ← Así apuntará a la parroquia a la que se le anula el decreto
+            try {
+                const parishIdTarget = newPartida.parishId; // ← Apuntando a la parroquia destino (Cancillería)
 
-    // 1. Consultar los parámetros EXACTOS actuales en el momento de eliminar
-    const { data: paramsData } = await supabase
-        .from('parish_parameters')
-        .select('bautizos_params')
-        .eq('parish_id', parishIdTarget)
-        .single();
+                // 1. Consultar los parámetros EXACTOS actuales en el momento de eliminar
+                const { data: paramsData } = await supabase
+                    .from('parish_parameters')
+                    .select('bautizos_params')
+                    .eq('parish_id', parishIdTarget)
+                    .single();
 
-    if (paramsData && paramsData.bautizos_params) {
-        const cloudParams = paramsData.bautizos_params;
-        
-        // 2. Calcular el consecutivo anterior (Retroceso)
-        const previosSupletorios = calculatePreviousConsecutive(
-            cloudParams.suplementarioNumero,
-            cloudParams.suplementarioFolio,
-            cloudParams.suplementarioLibro,
-            cloudParams.suplementarioPartidas,
-            cloudParams.suplementarioReiniciar
-        );
+                if (paramsData && paramsData.bautizos_params) {
+                    const cloudParams = paramsData.bautizos_params;
+                    
+                    // 2. Calcular el consecutivo anterior con SALVAVIDAS
+                    const previosSupletorios = calculatePreviousConsecutive(
+                        cloudParams.suplementarioNumero,
+                        cloudParams.suplementarioFolio,
+                        cloudParams.suplementarioLibro,
+                        cloudParams.suplementarioPartidas || 2,
+                        cloudParams.suplementarioReiniciar || false
+                    );
 
-        // 3. Empacar y actualizar la base de datos con los números retrocedidos
-        const newParams = { 
-            ...cloudParams, 
-            suplementarioNumero: previosSupletorios.numero,
-            suplementarioFolio: previosSupletorios.folio,
-            suplementarioLibro: previosSupletorios.libro
-        };
+                    // 3. Empacar y actualizar
+                    const newParams = { 
+                        ...cloudParams, 
+                        suplementarioNumero: previosSupletorios.numero,
+                        suplementarioFolio: previosSupletorios.folio,
+                        suplementarioLibro: previosSupletorios.libro
+                    };
 
-        await supabase.from('parish_parameters').upsert({ 
-            parish_id: parishIdTarget, 
-            bautizos_params: newParams 
-        }, { onConflict: 'parish_id' });
-    }
-} catch (err) {
-    console.error("Error revirtiendo el consecutivo en la nube:", err);
-}
-// --- FIN DE REVERSA MATEMÁTICA ---
+                    await supabase.from('parish_parameters').upsert({ 
+                        parish_id: parishIdTarget, 
+                        bautizos_params: newParams 
+                    }, { onConflict: 'parish_id' });
+                }
+            } catch (err) {
+                console.error("Error revirtiendo el consecutivo en la nube:", err);
+            }
+            // --- FIN DE REVERSA MATEMÁTICA ---
 
             toast({ title: "Eliminado", description: "El decreto y la partida supletoria han sido removidos.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/chancery/decree-replacement');
@@ -383,7 +383,7 @@ try {
                                             </div>
                                             <div className="bg-pink-50/30 p-8 rounded-[2rem] border border-pink-100/50 space-y-5 shadow-sm">
                                                 <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Línea Materna</p>
-                                                <input name="nombreMadre" placeholder="NOMBRE DE LA MADRE" value={newPartida.nombreMadre} onChange={handleNewPartidaChange} className={inputClass} />
+                                                <input name="motherName" placeholder="NOMBRE DE LA MADRE" value={newPartida.motherName} onChange={handleNewPartidaChange} className={inputClass} />
                                                 <textarea name="abuelosMaternos" placeholder="ABUELOS MATERNOS" value={newPartida.abuelosMaternos} onChange={handleNewPartidaChange} className={`${inputClass} h-20 py-3 resize-none`} />
                                             </div>
                                         </div>
@@ -415,12 +415,12 @@ try {
 
                 <ConfirmationDialog 
                     isOpen={showDeleteModal}
-                    title="Restaurar Partida y Eliminar Decreto"
-                    message="El decreto de reposición será borrado de la nube y la partida supletoria será destruida permanentemente."
+                    title="Restaurar Consecutivos y Eliminar"
+                    message="Esta acción borrará el registro del decreto y eliminará la partida supletoria permanentemente de la Nube."
                     onConfirm={handleDelete}
                     onClose={() => setShowDeleteModal(false)}
                     variant="destructive"
-                    confirmText="Sí, Ejecutar Eliminación"
+                    confirmText="Sí, Eliminar Todo"
                 />
             </div>
         </DashboardLayout>

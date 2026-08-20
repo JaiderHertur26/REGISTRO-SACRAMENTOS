@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
@@ -20,7 +20,7 @@ const EditCorrectionPage = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const { toast } = useToast();
-    const { getMisDatosList, getCiudadesList, getParrocos } = useAppData();
+    const { getMisDatosList, getCiudadesList, getParrocos, obtenerNotasAlMargen } = useAppData();
 
     const [activeTab, setActiveTab] = useState("bautismo");
     const [decrees, setDecrees] = useState([]);
@@ -130,7 +130,6 @@ const EditCorrectionPage = () => {
 
                     const bd = payload.datosNuevaPartida || payload.newPartidaSummary || {};
                     
-                    // 🚀 POBLACIÓN INTELIGENTE: Mezclando datos del decreto con los de la original encontrada
                     setNewPartida({
                         parishId: parishId,
                         lugarBautismo: payload.lugarBautismo || bd.lugarBautismo || origDataRaw.lugarBautismo || origDataRaw.lugar_bautismo || '',
@@ -163,11 +162,10 @@ const EditCorrectionPage = () => {
         loadDecreeData();
     }, [user, decreeId, getCiudadesList, getParrocos]);
 
-    // 🚀 AHORA ESTÁN CORRECTAMENTE DECLARADAS
     const handleDecreeChange = (e) => setDecreeData(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
     const handleNewPartidaChangeUpper = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
     const handleNewPartidaChangeRaw = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
-    const handleNewPartidaChange = handleNewPartidaChangeUpper; // Alias de seguridad
+    const handleNewPartidaChange = handleNewPartidaChangeUpper; 
     const handleCityChange = (data) => {
         let value = data?.target?.value || data?.nombre || data || "";
         setNewPartida(prev => ({ ...prev, lugarNacimiento: String(value).toUpperCase() }));
@@ -209,7 +207,7 @@ const EditCorrectionPage = () => {
                 oldRawData.isAnnulled = true;
                 oldRawData.annulmentDate = decreeData.fechaEmision;
                 oldRawData.annulmentDecree = decreeData.numeroDeDecreto;
-                oldRawData.conceptoAnulacionId = decreeData.conceptoAnulacion;
+                oldRawData.conceptoAnulacionId = decreeData.conceptoAnulacionId || decreeData.conceptoAnulacion;
                 oldRawData.tipoNotaAlMargen = "porCorreccion.anulada";
 
                 await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada, raw_data: oldRawData }).eq('id', foundRecord.id);
@@ -270,45 +268,43 @@ const EditCorrectionPage = () => {
             await supabase.from('decretos').delete().eq('id', selectedDecreeId);
 
             // --- INICIO DE REVERSA MATEMÁTICA DE CONSECUTIVOS ---
-try {
-    const parishIdTarget = newPartida.parishId; // ← Así apuntará a la parroquia a la que se le anula el decreto
+            try {
+                // 1. Consultar los parámetros EXACTOS actuales de la PARROQUIA DESTINO en el momento de eliminar
+                const { data: paramsData } = await supabase
+                    .from('parish_parameters')
+                    .select('bautizos_params')
+                    .eq('parish_id', targetParishId)
+                    .single();
 
-    // 1. Consultar los parámetros EXACTOS actuales en el momento de eliminar
-    const { data: paramsData } = await supabase
-        .from('parish_parameters')
-        .select('bautizos_params')
-        .eq('parish_id', parishIdTarget)
-        .single();
+                if (paramsData && paramsData.bautizos_params) {
+                    const cloudParams = paramsData.bautizos_params;
+                    
+                    // 2. Calcular el consecutivo anterior (Retroceso) con valores por defecto de seguridad
+                    const previosSupletorios = calculatePreviousConsecutive(
+                        cloudParams.suplementarioNumero,
+                        cloudParams.suplementarioFolio,
+                        cloudParams.suplementarioLibro,
+                        cloudParams.suplementarioPartidas || 2,
+                        cloudParams.suplementarioReiniciar || false
+                    );
 
-    if (paramsData && paramsData.bautizos_params) {
-        const cloudParams = paramsData.bautizos_params;
-        
-        // 2. Calcular el consecutivo anterior (Retroceso)
-        const previosSupletorios = calculatePreviousConsecutive(
-            cloudParams.suplementarioNumero,
-            cloudParams.suplementarioFolio,
-            cloudParams.suplementarioLibro,
-            cloudParams.suplementarioPartidas,
-            cloudParams.suplementarioReiniciar
-        );
+                    // 3. Empacar y actualizar la base de datos con los números retrocedidos
+                    const newParams = { 
+                        ...cloudParams, 
+                        suplementarioNumero: previosSupletorios.numero,
+                        suplementarioFolio: previosSupletorios.folio,
+                        suplementarioLibro: previosSupletorios.libro
+                    };
 
-        // 3. Empacar y actualizar la base de datos con los números retrocedidos
-        const newParams = { 
-            ...cloudParams, 
-            suplementarioNumero: previosSupletorios.numero,
-            suplementarioFolio: previosSupletorios.folio,
-            suplementarioLibro: previosSupletorios.libro
-        };
-
-        await supabase.from('parish_parameters').upsert({ 
-            parish_id: parishIdTarget, 
-            bautizos_params: newParams 
-        }, { onConflict: 'parish_id' });
-    }
-} catch (err) {
-    console.error("Error revirtiendo el consecutivo en la nube:", err);
-}
-// --- FIN DE REVERSA MATEMÁTICA ---
+                    await supabase.from('parish_parameters').upsert({ 
+                        parish_id: targetParishId, 
+                        bautizos_params: newParams 
+                    }, { onConflict: 'parish_id' });
+                }
+            } catch (err) {
+                console.error("Error revirtiendo el consecutivo en la nube:", err);
+            }
+            // --- FIN DE REVERSA MATEMÁTICA ---
 
             toast({ title: "Eliminado", description: "Decreto removido. Partida original restaurada remotamente.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/chancery/decree-correction/view');

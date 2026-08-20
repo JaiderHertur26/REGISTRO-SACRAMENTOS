@@ -97,37 +97,37 @@ const BaptismCorrectionListPage = () => {
                     .eq('folio', newPage)
                     .eq('number', newEntry);
 
-                // 🚀 AQUÍ OCURRE LA MAGIA DEL REVERSO DEL LIBRO SUPLETORIO CON EL MOTOR
-const { data: pData } = await supabase
-    .from('parish_parameters')
-    .select('bautizos_params')
-    .eq('parish_id', user.parishId)
-    .maybeSingle();
+                // 🚀 AQUÍ OCURRE LA MAGIA DEL REVERSO DEL LIBRO SUPLETORIO CON EL MOTOR Y SALVAVIDAS
+                const { data: pData } = await supabase
+                    .from('parish_parameters')
+                    .select('bautizos_params')
+                    .eq('parish_id', user.parishId)
+                    .maybeSingle();
 
-if (pData && pData.bautizos_params) {
-    const currentParams = pData.bautizos_params;
-    
-    // Usamos el motor para saber exactamente cómo retroceder el folio y número
-    const previosSupletorios = calculatePreviousConsecutive(
-        currentParams.suplementarioNumero,
-        currentParams.suplementarioFolio,
-        currentParams.suplementarioLibro,
-        currentParams.suplementarioPartidas,
-        currentParams.suplementarioReiniciar
-    );
+                if (pData && pData.bautizos_params) {
+                    const currentParams = pData.bautizos_params;
+                    
+                    // Usamos el motor para saber exactamente cómo retroceder el folio y número
+                    const previosSupletorios = calculatePreviousConsecutive(
+                        currentParams.suplementarioNumero,
+                        currentParams.suplementarioFolio,
+                        currentParams.suplementarioLibro,
+                        currentParams.suplementarioPartidas || 2, // SALVAVIDAS
+                        currentParams.suplementarioReiniciar || false // SALVAVIDAS
+                    );
 
-    const newParamsObj = { 
-        ...currentParams, 
-        suplementarioNumero: previosSupletorios.numero,
-        suplementarioFolio: previosSupletorios.folio,
-        suplementarioLibro: previosSupletorios.libro
-    };
-    
-    await supabase
-        .from('parish_parameters')
-        .update({ bautizos_params: newParamsObj })
-        .eq('parish_id', user.parishId);
-}
+                    const newParamsObj = { 
+                        ...currentParams, 
+                        suplementarioNumero: previosSupletorios.numero,
+                        suplementarioFolio: previosSupletorios.folio,
+                        suplementarioLibro: previosSupletorios.libro
+                    };
+                    
+                    await supabase
+                        .from('parish_parameters')
+                        .update({ bautizos_params: newParamsObj })
+                        .eq('parish_id', user.parishId);
+                }
             }
 
             // 4. Eliminar el Decreto

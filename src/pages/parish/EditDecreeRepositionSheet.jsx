@@ -211,47 +211,45 @@ const EditDecreeRepositionSheet = () => {
             await supabase.from('decretos').delete().eq('id', selectedDecreeId);
 
             // --- INICIO DE REVERSA MATEMÁTICA DE CONSECUTIVOS ---
-try {
-    // IMPORTANTE: Usa user.parishId en la versión Parroquia, 
-    // y newPartida.parishId (o targetParishId) en la versión Cancillería
-    const parishIdTarget = user.parishId; // Cambia esto en Cancillería por: newPartida.parishId
+            try {
+                const parishIdTarget = user.parishId;
 
-    // 1. Consultar los parámetros EXACTOS actuales en el momento de eliminar
-    const { data: paramsData } = await supabase
-        .from('parish_parameters')
-        .select('bautizos_params')
-        .eq('parish_id', parishIdTarget)
-        .single();
+                // 1. Consultar los parámetros EXACTOS actuales en el momento de eliminar
+                const { data: paramsData } = await supabase
+                    .from('parish_parameters')
+                    .select('bautizos_params')
+                    .eq('parish_id', parishIdTarget)
+                    .single();
 
-    if (paramsData && paramsData.bautizos_params) {
-        const cloudParams = paramsData.bautizos_params;
-        
-        // 2. Calcular el consecutivo anterior (Retroceso)
-        const previosSupletorios = calculatePreviousConsecutive(
-            cloudParams.suplementarioNumero,
-            cloudParams.suplementarioFolio,
-            cloudParams.suplementarioLibro,
-            cloudParams.suplementarioPartidas,
-            cloudParams.suplementarioReiniciar
-        );
+                if (paramsData && paramsData.bautizos_params) {
+                    const cloudParams = paramsData.bautizos_params;
+                    
+                    // 2. Calcular el consecutivo anterior con SALVAVIDAS
+                    const previosSupletorios = calculatePreviousConsecutive(
+                        cloudParams.suplementarioNumero,
+                        cloudParams.suplementarioFolio,
+                        cloudParams.suplementarioLibro,
+                        cloudParams.suplementarioPartidas || 2,
+                        cloudParams.suplementarioReiniciar || false
+                    );
 
-        // 3. Empacar y actualizar la base de datos con los números retrocedidos
-        const newParams = { 
-            ...cloudParams, 
-            suplementarioNumero: previosSupletorios.numero,
-            suplementarioFolio: previosSupletorios.folio,
-            suplementarioLibro: previosSupletorios.libro
-        };
+                    // 3. Empacar y actualizar
+                    const newParams = { 
+                        ...cloudParams, 
+                        suplementarioNumero: previosSupletorios.numero,
+                        suplementarioFolio: previosSupletorios.folio,
+                        suplementarioLibro: previosSupletorios.libro
+                    };
 
-        await supabase.from('parish_parameters').upsert({ 
-            parish_id: parishIdTarget, 
-            bautizos_params: newParams 
-        }, { onConflict: 'parish_id' });
-    }
-} catch (err) {
-    console.error("Error revirtiendo el consecutivo en la nube:", err);
-}
-// --- FIN DE REVERSA MATEMÁTICA ---
+                    await supabase.from('parish_parameters').upsert({ 
+                        parish_id: parishIdTarget, 
+                        bautizos_params: newParams 
+                    }, { onConflict: 'parish_id' });
+                }
+            } catch (err) {
+                console.error("Error revirtiendo el consecutivo en la nube:", err);
+            }
+            // --- FIN DE REVERSA MATEMÁTICA ---
 
             toast({ title: "Eliminado", description: "El decreto y la partida supletoria han sido removidos.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/parroquia/decretos/reposicion');
