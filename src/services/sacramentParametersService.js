@@ -194,25 +194,49 @@ export const getNextMatrimonioNumbers = async (parishId) => {
 };
 
 // ============================================================================
-// 🔢 CÁLCULO DE CONSECUTIVOS
+// 🔢 MOTOR INTELIGENTE DE CÁLCULO DE CONSECUTIVOS CANÓNICOS
 // ============================================================================
 export const calculateNextConsecutive = (currentNumero, currentFolio, currentLibro, maxPartidasPorFolio, reiniciarEnFolioNuevo) => {
-    let nextNumero = parseInt(currentNumero || 1, 10) + 1;
-    let nextFolio = parseInt(currentFolio || 1, 10);
-    let nextLibro = parseInt(currentLibro || 1, 10);
-    const partidasPorFolio = parseInt(maxPartidasPorFolio || 1, 10);
-    const expectedFolio = Math.ceil(nextNumero / partidasPorFolio);
+    let num = parseInt(currentNumero || 1, 10);
+    let fol = parseInt(currentFolio || 1, 10);
+    let lib = parseInt(currentLibro || 1, 10);
+    const max = parseInt(maxPartidasPorFolio || 1, 10);
 
-    if (expectedFolio > nextFolio) {
-        nextFolio = expectedFolio;
-        if (reiniciarEnFolioNuevo) {
-            nextNumero = 1;
+    if (reiniciarEnFolioNuevo) {
+        // REGLA 1: Si el número llega al tope del folio, el folio avanza y el número vuelve a 1.
+        if (num >= max) {
+            fol += 1;
+            num = 1;
+        } else {
+            num += 1;
         }
+    } else {
+        // REGLA 2: El número es absoluto (nunca vuelve a 1). Si es múltiplo del tope, el folio avanza.
+        if (num % max === 0) {
+            fol += 1;
+        }
+        num += 1;
     }
 
     return {
-        numero: String(nextNumero).padStart(4, '0'),
-        folio: String(nextFolio).padStart(4, '0'),
-        libro: String(nextLibro).padStart(4, '0')
+        numero: String(num).padStart(4, '0'),
+        folio: String(fol).padStart(4, '0'),
+        libro: String(lib).padStart(4, '0') // El libro NUNCA avanza automáticamente
     };
+};
+
+// 🔢 UTILIDAD PARA EL NÚMERO DE REGISTRO CIVIL (Nuevos Bautismos)
+export const calculateNextRegistro = (currentRegistro) => {
+    if (!currentRegistro) return '000001';
+    
+    // Extraemos solo la parte numérica para poder incrementarla, respetando si tiene letras iniciales
+    const numMatch = String(currentRegistro).match(/\d+/);
+    if (numMatch) {
+        const numStr = numMatch[0];
+        const nextNum = parseInt(numStr, 10) + 1;
+        const paddedNext = String(nextNum).padStart(numStr.length, '0');
+        // Reemplazamos la porción numérica por la nueva e incrementada
+        return String(currentRegistro).replace(numStr, paddedNext);
+    }
+    return currentRegistro;
 };
