@@ -48,7 +48,6 @@ const BaptismCorrectionListPage = () => {
     const confirmDelete = async () => {
         setIsDeleting(true);
         try {
-            // 1. Encontrar el decreto en la memoria actual
             const decreeToUndo = corrections.find(c => c.id === deleteConfig.id);
             if (!decreeToUndo) throw new Error("Decreto no encontrado");
 
@@ -56,7 +55,7 @@ const BaptismCorrectionListPage = () => {
             const origSum = decreeToUndo.originalPartidaSummary;
             const newSum = decreeToUndo.newPartidaSummary;
 
-            // 2. Restaurar la Partida Original (Quitar Anulado)
+            // 1. Restaurar la Partida Original (Quitar Anulado)
             if (origSum) {
                 const origBook = pad(origSum.book || origSum.Libro);
                 const origPage = pad(origSum.page || origSum.folio);
@@ -85,7 +84,7 @@ const BaptismCorrectionListPage = () => {
                 }
             }
 
-            // 3. Eliminar la Partida Supletoria y Revertir el Parámetro
+            // 2. Eliminar la Partida Supletoria y Revertir el Parámetro de forma segura
             if (newSum) {
                 const newBook = pad(newSum.book || newSum.Libro);
                 const newPage = pad(newSum.page || newSum.folio);
@@ -97,40 +96,46 @@ const BaptismCorrectionListPage = () => {
                     .eq('folio', newPage)
                     .eq('number', newEntry);
 
-                // 🚀 AQUÍ OCURRE LA MAGIA DEL REVERSO DEL LIBRO SUPLETORIO CON EL MOTOR Y SALVAVIDAS
-                const { data: pData } = await supabase
-                    .from('parish_parameters')
-                    .select('bautizos_params')
-                    .eq('parish_id', user.parishId)
-                    .maybeSingle();
-
-                if (pData && pData.bautizos_params) {
-                    const currentParams = pData.bautizos_params;
-                    
-                    // Usamos el motor para saber exactamente cómo retroceder el folio y número
-                    const previosSupletorios = calculatePreviousConsecutive(
-                        currentParams.suplementarioNumero,
-                        currentParams.suplementarioFolio,
-                        currentParams.suplementarioLibro,
-                        currentParams.suplementarioPartidas || 2, // SALVAVIDAS
-                        currentParams.suplementarioReiniciar || false // SALVAVIDAS
-                    );
-
-                    const newParamsObj = { 
-                        ...currentParams, 
-                        suplementarioNumero: previosSupletorios.numero,
-                        suplementarioFolio: previosSupletorios.folio,
-                        suplementarioLibro: previosSupletorios.libro
-                    };
-                    
-                    await supabase
+                // --- INICIO DE REVERSA MATEMÁTICA SEGURA ---
+                try {
+                    const { data: pData } = await supabase
                         .from('parish_parameters')
-                        .update({ bautizos_params: newParamsObj })
-                        .eq('parish_id', user.parishId);
+                        .select('bautizos_params')
+                        .eq('parish_id', user.parishId)
+                        .maybeSingle();
+
+                    if (pData && pData.bautizos_params) {
+                        const currentParams = pData.bautizos_params;
+                        
+                        const previosSupletorios = calculatePreviousConsecutive(
+                            currentParams.suplementarioNumero,
+                            currentParams.suplementarioFolio,
+                            currentParams.suplementarioLibro,
+                            currentParams.suplementarioPartidas || 2,
+                            currentParams.suplementarioReiniciar || false
+                        );
+
+                        // VERIFICACIÓN DE SEGURIDAD: Solo revertir si la partida eliminada es la ÚLTIMA que se creó
+                        if (previosSupletorios.numero === newEntry && previosSupletorios.folio === newPage && previosSupletorios.libro === newBook) {
+                            const newParamsObj = { 
+                                ...currentParams, 
+                                suplementarioNumero: previosSupletorios.numero,
+                                suplementarioFolio: previosSupletorios.folio,
+                                suplementarioLibro: previosSupletorios.libro
+                            };
+                            
+                            await supabase
+                                .from('parish_parameters')
+                                .update({ bautizos_params: newParamsObj })
+                                .eq('parish_id', user.parishId);
+                        }
+                    }
+                } catch (err) {
+                    console.error("Error revirtiendo consecutivos:", err);
                 }
             }
 
-            // 4. Eliminar el Decreto
+            // 3. Eliminar el Decreto
             await supabase.from('decretos').delete().eq('id', deleteConfig.id);
 
             toast({ 

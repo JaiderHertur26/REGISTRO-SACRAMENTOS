@@ -204,9 +204,11 @@ const EditDecreeCorrectionSheet = () => {
     const handleDelete = async () => {
         setIsSubmitting(true);
         try {
-            const pad = (num) => String(num).padStart(4, '0');
+            // Corrección de la función pad
+            const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
             const supSum = originalPayload.newPartidaSummary;
 
+            // Restaurar original
             if (foundRecord) {
                 const cleanedRaw = { ...foundRecord };
                 delete cleanedRaw.notaMarginal; delete cleanedRaw.anulado; delete cleanedRaw.isAnnulled;
@@ -214,59 +216,66 @@ const EditDecreeCorrectionSheet = () => {
                 await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', foundRecord.id);
             }
 
+            // Eliminar supletoria y revertir parámetros
             if (supSum) {
-                await supabase.from('baptisms').delete().eq('parish_id', user.parishId).eq('book_number', pad(supSum.book || supSum.Libro)).eq('folio', pad(supSum.page || supSum.folio)).eq('number', pad(supSum.entry || supSum.numero));
+                const delBook = pad(supSum.book || supSum.Libro);
+                const delPage = pad(supSum.page || supSum.folio);
+                const delEntry = pad(supSum.entry || supSum.numero);
+
+                await supabase.from('baptisms').delete().eq('parish_id', user.parishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
+                
+                // --- INICIO DE REVERSA MATEMÁTICA DE CONSECUTIVOS ---
+                try {
+                    const parishIdTarget = user.parishId; 
+
+                    const { data: paramsData } = await supabase
+                        .from('parish_parameters')
+                        .select('bautizos_params')
+                        .eq('parish_id', parishIdTarget)
+                        .maybeSingle();
+
+                    if (paramsData && paramsData.bautizos_params) {
+                        const cloudParams = paramsData.bautizos_params;
+                        
+                        const previosSupletorios = calculatePreviousConsecutive(
+                            cloudParams.suplementarioNumero,
+                            cloudParams.suplementarioFolio,
+                            cloudParams.suplementarioLibro,
+                            cloudParams.suplementarioPartidas || 2,
+                            cloudParams.suplementarioReiniciar || false
+                        );
+
+                        // Seguridad: comprobar que retrocedemos la última registrada
+                        if (previosSupletorios.numero === delEntry && previosSupletorios.folio === delPage && previosSupletorios.libro === delBook) {
+                            const newParams = { 
+                                ...cloudParams, 
+                                suplementarioNumero: previosSupletorios.numero,
+                                suplementarioFolio: previosSupletorios.folio,
+                                suplementarioLibro: previosSupletorios.libro
+                            };
+
+                            // Cambio a .update para evitar problemas de constraint
+                            await supabase.from('parish_parameters').update({ 
+                                bautizos_params: newParams 
+                            }).eq('parish_id', parishIdTarget);
+                        }
+                    }
+                } catch (err) {
+                    console.error("Error revirtiendo el consecutivo en la nube:", err);
+                }
+                // --- FIN DE REVERSA MATEMÁTICA ---
             }
 
+            // Eliminar decreto
             await supabase.from('decretos').delete().eq('id', decreeId);
-
-            // --- INICIO DE REVERSA MATEMÁTICA DE CONSECUTIVOS ---
-try {
-    // IMPORTANTE: Usa user.parishId en la versión Parroquia, 
-    // y newPartida.parishId (o targetParishId) en la versión Cancillería
-    const parishIdTarget = user.parishId; // Cambia esto en Cancillería por: newPartida.parishId
-
-    // 1. Consultar los parámetros EXACTOS actuales en el momento de eliminar
-    const { data: paramsData } = await supabase
-        .from('parish_parameters')
-        .select('bautizos_params')
-        .eq('parish_id', parishIdTarget)
-        .single();
-
-    if (paramsData && paramsData.bautizos_params) {
-        const cloudParams = paramsData.bautizos_params;
-        
-        // 2. Calcular el consecutivo anterior (Retroceso)
-        const previosSupletorios = calculatePreviousConsecutive(
-            cloudParams.suplementarioNumero,
-            cloudParams.suplementarioFolio,
-            cloudParams.suplementarioLibro,
-            cloudParams.suplementarioPartidas,
-            cloudParams.suplementarioReiniciar
-        );
-
-        // 3. Empacar y actualizar la base de datos con los números retrocedidos
-        const newParams = { 
-            ...cloudParams, 
-            suplementarioNumero: previosSupletorios.numero,
-            suplementarioFolio: previosSupletorios.folio,
-            suplementarioLibro: previosSupletorios.libro
-        };
-
-        await supabase.from('parish_parameters').upsert({ 
-            parish_id: parishIdTarget, 
-            bautizos_params: newParams 
-        }, { onConflict: 'parish_id' });
-    }
-} catch (err) {
-    console.error("Error revirtiendo el consecutivo en la nube:", err);
-}
-// --- FIN DE REVERSA MATEMÁTICA ---
 
             toast({ title: "Eliminado", description: "Decreto eliminado y partida original restaurada.", className: "bg-green-50 text-green-900" });
             navigate('/parroquia/decretos/ver-correcciones');
-        } catch (error) { toast({ title: "Error", description: "No se pudo eliminar de la Nube.", variant: "destructive" }); } 
-        finally { setIsSubmitting(false); setShowDeleteModal(false); }
+        } catch (error) { 
+            toast({ title: "Error", description: "No se pudo eliminar de la Nube.", variant: "destructive" }); 
+        } finally { 
+            setIsSubmitting(false); setShowDeleteModal(false); 
+        }
     };
 
     if (isLoading) return <DashboardLayout entityName={user?.parishName || "Parroquia"}><div className="flex justify-center items-center h-[60vh]"><Loader2 className="w-12 h-12 text-[#4B7BA7] animate-spin" /></div></DashboardLayout>;

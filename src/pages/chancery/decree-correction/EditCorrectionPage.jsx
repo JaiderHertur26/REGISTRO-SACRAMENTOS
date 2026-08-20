@@ -257,6 +257,7 @@ const EditCorrectionPage = () => {
             const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
             const targetParishId = newPartida.parishId;
 
+            // Restaurar original
             if (foundRecord) {
                 const cleanedRaw = { ...foundRecord };
                 delete cleanedRaw.notaMarginal; delete cleanedRaw.anulado; delete cleanedRaw.isAnnulled;
@@ -264,22 +265,24 @@ const EditCorrectionPage = () => {
                 await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', foundRecord.id);
             }
 
-            await supabase.from('baptisms').delete().eq('parish_id', targetParishId).eq('book_number', pad(newPartida.book_number)).eq('folio', pad(newPartida.page_number)).eq('number', pad(newPartida.entry_number));
+            const delBook = pad(newPartida.book_number);
+            const delPage = pad(newPartida.page_number);
+            const delEntry = pad(newPartida.entry_number);
+
+            await supabase.from('baptisms').delete().eq('parish_id', targetParishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
             await supabase.from('decretos').delete().eq('id', selectedDecreeId);
 
             // --- INICIO DE REVERSA MATEMÁTICA DE CONSECUTIVOS ---
             try {
-                // 1. Consultar los parámetros EXACTOS actuales de la PARROQUIA DESTINO en el momento de eliminar
                 const { data: paramsData } = await supabase
                     .from('parish_parameters')
                     .select('bautizos_params')
                     .eq('parish_id', targetParishId)
-                    .single();
+                    .maybeSingle();
 
                 if (paramsData && paramsData.bautizos_params) {
                     const cloudParams = paramsData.bautizos_params;
                     
-                    // 2. Calcular el consecutivo anterior (Retroceso) con valores por defecto de seguridad
                     const previosSupletorios = calculatePreviousConsecutive(
                         cloudParams.suplementarioNumero,
                         cloudParams.suplementarioFolio,
@@ -288,18 +291,20 @@ const EditCorrectionPage = () => {
                         cloudParams.suplementarioReiniciar || false
                     );
 
-                    // 3. Empacar y actualizar la base de datos con los números retrocedidos
-                    const newParams = { 
-                        ...cloudParams, 
-                        suplementarioNumero: previosSupletorios.numero,
-                        suplementarioFolio: previosSupletorios.folio,
-                        suplementarioLibro: previosSupletorios.libro
-                    };
+                    // Seguridad: comprobar que retrocedemos la última registrada
+                    if (previosSupletorios.numero === delEntry && previosSupletorios.folio === delPage && previosSupletorios.libro === delBook) {
+                        const newParams = { 
+                            ...cloudParams, 
+                            suplementarioNumero: previosSupletorios.numero,
+                            suplementarioFolio: previosSupletorios.folio,
+                            suplementarioLibro: previosSupletorios.libro
+                        };
 
-                    await supabase.from('parish_parameters').upsert({ 
-                        parish_id: targetParishId, 
-                        bautizos_params: newParams 
-                    }, { onConflict: 'parish_id' });
+                        // Cambio a .update
+                        await supabase.from('parish_parameters').update({ 
+                            bautizos_params: newParams 
+                        }).eq('parish_id', targetParishId);
+                    }
                 }
             } catch (err) {
                 console.error("Error revirtiendo el consecutivo en la nube:", err);
@@ -308,8 +313,11 @@ const EditCorrectionPage = () => {
 
             toast({ title: "Eliminado", description: "Decreto removido. Partida original restaurada remotamente.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/chancery/decree-correction/view');
-        } catch (e) { toast({ title: "Error", description: "Fallo al restaurar y eliminar.", variant: "destructive" }); } 
-        finally { setIsSubmitting(false); setShowDeleteModal(false); }
+        } catch (e) { 
+            toast({ title: "Error", description: "Fallo al restaurar y eliminar.", variant: "destructive" }); 
+        } finally { 
+            setIsSubmitting(false); setShowDeleteModal(false); 
+        }
     };
 
     const filteredDecrees = decrees.filter(d => (d.decreeNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) || (d.targetName || '').toLowerCase().includes(searchTerm.toLowerCase()));
