@@ -181,11 +181,11 @@ const EditCorrectionPage = () => {
             const targetParish = newPartida.parishId;
             const supSum = originalPayload?.newPartidaSummary;
             
+            // IGUAL QUE EN PARROQUIA: Mantenemos fijos los valores originales para no corromper la BD
             const currentBook = pad(supSum?.book || supSum?.Libro || newPartida.book_number);
             const currentPage = pad(supSum?.page || supSum?.folio || newPartida.page_number);
             const currentEntry = pad(supSum?.entry || supSum?.numero || newPartida.entry_number);
 
-            // 💡 REEMPLAZADOR FLEXIBLE: Atrapa corchetes, paréntesis y espacios accidentales de la plantilla
             let noteAnulada = chanceryNotesConfig?.correccion_anulada || "PARTIDA ANULADA POR DECRETO No. [NUMERO_DECRETO] DE FECHA [FECHA_DECRETO]. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-[LIBRO_NUEVA] F-[FOLIO_NUEVA] N-[NUMERO_NUEVA].";
             noteAnulada = noteAnulada
                 .replace(/\[FECHA_DECRETO\]/g, convertDateToSpanishText(decreeData.fechaEmision).replace(/^EL\s+/i, ''))
@@ -255,6 +255,72 @@ const EditCorrectionPage = () => {
 
         } catch (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); } 
         finally { setIsSubmitting(false); }
+    };
+
+    const handleDelete = async () => {
+        setIsSubmitting(true);
+        try {
+            const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
+            const targetParishId = newPartida.parishId;
+            
+            // 💡 CALCO EXACTO DE PARROQUIA: Extraer de la memoria inmutable del decreto
+            const newSum = originalPayload?.newPartidaSummary;
+
+            if (foundRecord) {
+                const cleanedRaw = { ...foundRecord };
+                delete cleanedRaw.notaMarginal; delete cleanedRaw.anulado; delete cleanedRaw.isAnnulled;
+                cleanedRaw.status = 'seated'; cleanedRaw.estado = 'permanente';
+                await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', foundRecord.id);
+            }
+
+            if (newSum) {
+                const delBook = pad(newSum.book || newSum.Libro);
+                const delPage = pad(newSum.page || newSum.folio);
+                const delEntry = pad(newSum.entry || newSum.numero);
+
+                await supabase.from('baptisms').delete()
+                    .eq('parish_id', targetParishId).eq('book_number', delBook).eq('folio', delPage).eq('number', delEntry);
+                
+                try {
+                    const { data: paramsData } = await supabase.from('parish_parameters')
+                        .select('bautizos_params').eq('parish_id', targetParishId).maybeSingle();
+
+                    if (paramsData && paramsData.bautizos_params) {
+                        const cloudParams = paramsData.bautizos_params;
+                        
+                        const previosSupletorios = calculatePreviousConsecutive(
+                            cloudParams.suplementarioNumero,
+                            cloudParams.suplementarioFolio,
+                            cloudParams.suplementarioLibro,
+                            cloudParams.suplementarioPartidas || 2,
+                            cloudParams.suplementarioReiniciar || false
+                        );
+
+                        if (parseInt(delEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
+                            const newParamsObj = { 
+                                ...cloudParams, 
+                                // Inyectando con ceros exactos (pad)
+                                suplementarioNumero: pad(previosSupletorios.numero),
+                                suplementarioFolio: pad(previosSupletorios.folio),
+                                suplementarioLibro: pad(previosSupletorios.libro)
+                            };
+
+                            await supabase.from('parish_parameters').update({ bautizos_params: newParamsObj }).eq('parish_id', targetParishId);
+                        }
+                    }
+                } catch (err) { console.error("Error revirtiendo el consecutivo en la nube:", err); }
+            }
+
+            await supabase.from('decretos').delete().eq('id', selectedDecreeId);
+
+            toast({ title: "Eliminado", description: "Decreto removido y consecutivos restaurados remotamente.", className: "bg-green-50 text-green-900 border-green-200" });
+            navigate('/chancery/decree-correction/view');
+        } catch (e) { 
+            console.error(e);
+            toast({ title: "Error", description: "Fallo al restaurar y eliminar.", variant: "destructive" }); 
+        } finally { 
+            setIsSubmitting(false); setShowDeleteModal(false); 
+        }
     };
 
     const handleDelete = async () => {
