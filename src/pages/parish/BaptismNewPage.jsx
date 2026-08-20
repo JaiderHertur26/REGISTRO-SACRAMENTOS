@@ -177,7 +177,6 @@ const BaptismNewPage = () => {
 
                     <form onSubmit={handleSubmit} className="bg-white rounded-[2.5rem] shadow-2xl shadow-blue-900/5 border border-gray-100 overflow-hidden relative">
                         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#D4AF37] to-[#4B7BA7]"></div>
-                        
                         <div className="p-12 space-y-10">
                             
                             <section>

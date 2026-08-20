@@ -5,19 +5,19 @@ import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Save, ArrowLeft, FileText, UserPlus, Loader2, ShieldCheck, BookOpen, Calendar, User, Fingerprint, PenTool } from 'lucide-react';
+import { Save, ArrowLeft, FileText, UserPlus, Loader2, ShieldCheck, BookOpen, Calendar, User, Fingerprint, Users, PenTool, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 import { supabase } from '@/lib/supabaseClient';
 import CityAutocomplete from '@/components/CityAutocomplete'; 
-import { calculateNextConsecutive } from '@/services/sacramentParametersService'; // 🚀 MOTOR MATEMÁTICO INYECTADO
 
 const BaptismRepositionNewPage = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
     
+    // 🚀 AHORA SÍ: SOLO USAMOS EL CEREBRO GLOBAL
     const { getParrocoActual, getMisDatosList, getCiudadesList, getParrocos } = useAppData();
     
     const [activeTab, setActiveTab] = useState("bautismo");
@@ -25,6 +25,7 @@ const BaptismRepositionNewPage = () => {
     const [conceptos, setConceptos] = useState([]);
     const [cloudParams, setCloudParams] = useState({});
     
+    // 🚀 ESTADOS LIMPIOS PARA LAS LISTAS
     const [ciudades, setCiudades] = useState([]);
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
     
@@ -61,6 +62,7 @@ const BaptismRepositionNewPage = () => {
                     if (data) setConceptos(data.filter(c => c.tipo === 'porReposicion' || c.concepto?.toLowerCase().includes('reposici')));
                 }
 
+                // 🚀 CARGA PURA COMO EN BAPTISM CELEBRATED PAGE
                 const listaCruda = getCiudadesList(user.parishId) || [];
                 setCiudades(listaCruda.map(c => (c.nombre || '').toUpperCase()));
 
@@ -70,7 +72,11 @@ const BaptismRepositionNewPage = () => {
                 const priest = getParrocoActual(user.parishId);
                 if (priest) {
                     const name = `${priest.nombre} ${priest.apellido || ''}`.trim().toUpperCase();
-                    setFormData(prev => ({ ...prev, ministerFaith: name, minister: name })); 
+                    setFormData(prev => ({ 
+                        ...prev, 
+                        ministerFaith: name, 
+                        minister: name 
+                    })); 
                 }
 
             } catch (error) {
@@ -88,6 +94,7 @@ const BaptismRepositionNewPage = () => {
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
 
+    // 🚀 MANEJADOR DEL CITYAUTOCOMPLETE
     const handleCityChange = (data) => {
         let value = data?.target?.value || data?.nombre || data || "";
         setFormData(prev => ({ ...prev, placeOfBirth: String(value).toUpperCase() }));
@@ -99,7 +106,7 @@ const BaptismRepositionNewPage = () => {
     };
 
     const handleSubmit = async (e) => {
-        e?.preventDefault?.();
+        e.preventDefault();
         if (!decreeData.numeroDecreto || !formData.firstName || !formData.lastName || !decreeData.conceptoAnulacionId) {
             toast({ title: "Faltan Datos", description: "Complete los campos obligatorios.", variant: "destructive" });
             return;
@@ -164,34 +171,14 @@ const BaptismRepositionNewPage = () => {
             payloadDecree.newPartidaId = newBap.id;
             await supabase.from('decretos').insert([{ parish_id: user.parishId, tipo: 'reposicion', payload: payloadDecree }]);
 
-            // 🚀 INCREMENTAR CONSECUTIVOS USANDO EL MOTOR MATEMÁTICO CANÓNICO
-            const p = cloudParams || {};
-            const nextSup = calculateNextConsecutive(
-                supletorioNumero,
-                supletorioFolio,
-                supletorioLibro,
-                p.suplementarioPartidas || 2,
-                p.suplementarioReiniciar || false
-            );
-
-            await supabase.from('parish_parameters').upsert({ 
-                parish_id: user.parishId, 
-                bautizos_params: { 
-                    ...p, 
-                    suplementarioNumero: nextSup.numero,
-                    suplementarioFolio: nextSup.folio,
-                    suplementarioLibro: nextSup.libro
-                } 
-            }, { onConflict: 'parish_id' });
+            const newParams = { ...cloudParams, suplementarioNumero: Number(supletorioNumero) + 1 };
+            await supabase.from('parish_parameters').upsert({ parish_id: user.parishId, bautizos_params: newParams }, { onConflict: 'parish_id' });
 
             toast({ title: "Reposición Exitosa", description: "La partida supletoria ha sido creada en la Nube.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/parroquia/decretos/reposicion');
 
-        } catch (error) { 
-            toast({ title: "Error en Proceso", description: error.message, variant: "destructive" }); 
-        } finally { 
-            setIsSubmitting(false); 
-        }
+        } catch (error) { toast({ title: "Error en Proceso", description: error.message, variant: "destructive" }); } 
+        finally { setIsSubmitting(false); }
     };
 
     const inputClass = "h-11 w-full px-4 py-2 text-sm text-gray-900 font-bold border border-gray-200 rounded-xl focus:ring-4 focus:ring-[#4B7BA7]/5 focus:border-[#4B7BA7] outline-none transition-all bg-gray-50/50 focus:bg-white uppercase shadow-sm";
@@ -232,7 +219,7 @@ const BaptismRepositionNewPage = () => {
                     </TabsList>
 
                     <TabsContent value="bautismo" className="focus:outline-none">
-                        <div className="bg-white rounded-[2.5rem] shadow-2xl border border-gray-100 overflow-hidden relative animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <form onSubmit={handleSubmit} className="bg-white rounded-[2.5rem] shadow-2xl border border-gray-100 overflow-hidden relative animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#4B7BA7] via-[#D4AF37] to-[#4B7BA7]"></div>
 
                             <div className="p-12 space-y-10">
@@ -287,6 +274,7 @@ const BaptismRepositionNewPage = () => {
                                         <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="birthDate" value={formData.birthDate} onChange={handleChange} className={inputClass} /></div>
                                         <div>
                                             <label className={labelClass}>Lugar de Nacimiento</label>
+                                            {/* 🚀 EL CITYAUTOCOMPLETE ESTÁ AQUÍ LISTO */}
                                             <CityAutocomplete name="placeOfBirth" value={formData.placeOfBirth} onChange={handleCityChange} cities={ciudades} className={inputClass} />
                                         </div>
                                     </div>
@@ -327,12 +315,12 @@ const BaptismRepositionNewPage = () => {
 
                                 <div className="flex justify-end gap-4 border-t border-gray-100 pt-12">
                                     <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] hover:bg-gray-50 transition-all">Descartar</Button>
-                                    <Button onClick={handleSubmit} disabled={isSubmitting} className="bg-gradient-to-r from-[#4B7BA7] to-[#2C3E50] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                                    <Button type="submit" disabled={isSubmitting} className="bg-gradient-to-r from-[#4B7BA7] to-[#2C3E50] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
                                         {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Save className="w-5 h-5 mr-3" />} Emitir Decreto Permanente
                                     </Button>
                                 </div>
                             </div>
-                        </div>
+                        </form>
                     </TabsContent>
                 </Tabs>
             </div>
