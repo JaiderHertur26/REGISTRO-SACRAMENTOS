@@ -1,35 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { 
     Upload, FileJson, AlertCircle, CheckCircle, 
-    Save, Info, Loader2, ArrowRight, RefreshCcw 
+    Save, Info, Loader2, RefreshCcw, Database, ServerCrash
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/context/AuthContext'; 
 import { useAppData } from '@/context/AppDataContext'; 
 import { supabase } from '@/lib/supabaseClient'; 
-import { generateUUID } from '@/utils/supabaseHelpers'; 
+import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
 import Table from '@/components/ui/Table';
 
-const DecreeJsonImporter = ({ sacramentType = 'bautismo' }) => {
+const DecreeJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth(); 
-    const { getMisDatosList, getConceptosAnulacion } = useAppData(); 
+    const { getMisDatosList } = useAppData(); 
     
     const [file, setFile] = useState(null);
     const [records, setRecords] = useState([]);
     const [validationStats, setValidationStats] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [importComplete, setImportComplete] = useState(false);
+    const [progress, setProgress] = useState({ current: 0, total: 0 });
+
+    // Referencia oculta para el input de archivo
+    const fileInputRef = useRef(null);
+
+    const pad = (num) => String(num || '').trim().padStart(4, '0');
 
     const handleFileChange = (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
 
         const fileName = selectedFile.name.toUpperCase();
-        if (!fileName.includes('ANULACION')) {
-            toast({ title: "Nombre incorrecto", description: "El archivo debe contener 'ANULACION' en su nombre.", variant: "destructive" });
-            return;
+        if (!fileName.includes('ANULACION') && !fileName.includes('DECRETO')) {
+            toast({ title: "Archivo Sospechoso", description: "El nombre del archivo debería sugerir que contiene anulaciones o decretos.", variant: "destructive" });
         }
 
         const reader = new FileReader();
@@ -38,21 +43,31 @@ const DecreeJsonImporter = ({ sacramentType = 'bautismo' }) => {
                 const json = JSON.parse(e.target.result);
                 const data = Array.isArray(json) ? json : (json.data || []);
                 
-                if (data.length === 0) throw new Error("El archivo está vacío.");
+                if (data.length === 0) throw new Error("El archivo JSON está vacío.");
 
                 const processed = data.map((item, index) => {
-                    const isReposicion = String(item.codiconcep) === '005';
-                    // Validación básica
+                    // Lógica de detección: En los sistemas legacy, 005 o 001 suelen ser Reposición
+                    const cod = String(item.codiconcep || item.codigo || '').trim();
+                    const isReposicion = cod === '005' || cod === '001'; 
+                    
                     const hasNewData = item.newlib && item.newfol && item.newnum;
                     const hasOrigData = item.libro && item.folio && item.numero;
                     const hasDecree = item.decreto && item.fecha;
+
+                    let errorMsg = "";
+                    if (!hasDecree) errorMsg = "Falta No. Decreto o Fecha";
+                    else if (!hasNewData) errorMsg = "Falta ubicación supletoria (nueva)";
+                    else if (!isReposicion && !hasOrigData) errorMsg = "Corrección sin ubicación original";
 
                     return {
                         ...item,
                         id: index,
                         isReposicion,
-                        isValid: isReposicion ? (hasNewData && hasDecree) : (hasNewData && hasOrigData && hasDecree),
-                        error: !hasDecree ? "Falta No. Decreto/Fecha" : !hasNewData ? "Falta ubicación nueva" : ""
+                        // Normalizamos los localizadores
+                        sNewL: pad(item.newlib), sNewF: pad(item.newfol), sNewN: pad(item.newnum),
+                        sOldL: pad(item.libro), sOldF: pad(item.folio), sOldN: pad(item.numero),
+                        isValid: errorMsg === "",
+                        error: errorMsg
                     };
                 });
 
@@ -61,120 +76,160 @@ const DecreeJsonImporter = ({ sacramentType = 'bautismo' }) => {
                     total: processed.length,
                     valid: processed.filter(r => r.isValid).length,
                     invalid: processed.filter(r => !r.isValid).length,
-                    reposiciones: processed.filter(r => r.isReposicion).length,
-                    correcciones: processed.filter(r => !r.isReposicion).length
+                    reposiciones: processed.filter(r => r.isValid && r.isReposicion).length,
+                    correcciones: processed.filter(r => r.isValid && !r.isReposicion).length
                 });
                 setFile(selectedFile);
+                setImportComplete(false);
+                setProgress({ current: 0, total: processed.filter(r => r.isValid).length });
             } catch (error) {
-                toast({ title: "Error de lectura", description: error.message, variant: "destructive" });
+                toast({ title: "Error de lectura", description: "El archivo no tiene un formato JSON válido.", variant: "destructive" });
             }
         };
         reader.readAsText(selectedFile);
     };
 
+    // 🚀 EL MOTOR DE INYECCIÓN MASIVA A LA NUBE
     const handleImport = async () => {
-        if (!records.length) return;
+        const validRecords = records.filter(r => r.isValid);
+        if (!validRecords.length) return;
+        
         setIsProcessing(true);
-        const parishId = user?.parishId;
+        const parishId = user?.parishId || user?.parish_id;
+        const targetDioceseId = user?.dioceseId || user?.diocese_id;
 
         try {
+            // 1. OBTENER CONTEXTO GENERAL (Parroquia, Diócesis, Conceptos, Bautismos)
             const parishInfo = getMisDatosList(parishId)[0] || {};
             const parishLabel = `${parishInfo.nombre || 'PARROQUIA'} - ${parishInfo.ciudad || ''}`.toUpperCase();
-            const catalogoConceptos = getConceptosAnulacion(parishId);
 
-            // Descargar base actual para cruce rápido
-            const { data: allBaptisms } = await supabase.from('baptisms').select('id, book_number, page_number, entry_number, raw_data').eq('parish_id', parishId);
+            // Traemos todos los bautismos de la parroquia para cruzarlos en memoria (Súper rápido)
+            const { data: allBaptisms, error: bapError } = await supabase
+                .from('baptisms')
+                .select('id, book_number, folio, number, raw_data, nombres, apellidos, da_fe')
+                .eq('parish_id', parishId);
+            
+            if (bapError) throw bapError;
 
-            let correctionsHistory = JSON.parse(localStorage.getItem(`baptismCorrections_${parishId}`) || '[]');
-            let repositionHistory = JSON.parse(localStorage.getItem(`decreeReplacementBaptism_${parishId}`) || '[]');
-            let count = 0;
+            // Traemos el catálogo de conceptos de la Diócesis
+            const { data: catalogoConceptos } = await supabase
+                .from('conceptos_anulacion')
+                .select('id, codigo, concepto')
+                .eq('diocese_id', targetDioceseId);
 
-            for (const item of records.filter(r => r.isValid)) {
-                const sNewL = String(item.newlib).padStart(4, '0');
-                const sNewF = String(item.newfol).padStart(4, '0');
-                const sNewN = String(item.newnum).padStart(4, '0');
-                
-                const newRec = allBaptisms.find(b => b.book_number === sNewL && b.page_number === sNewF && b.entry_number === sNewN);
-                if (!newRec) continue;
+            let successCount = 0;
+            let errorCount = 0;
 
-                const conceptoObj = catalogoConceptos.find(c => String(c.codigo) === String(item.codiconcep));
-                const conceptoText = conceptoObj ? conceptoObj.concepto.toUpperCase() : "SOLICITUD DE PARTE";
+            // 2. CICLO DE PROCESAMIENTO UNO A UNO (Para garantizar integridad referencial)
+            for (let i = 0; i < validRecords.length; i++) {
+                const item = validRecords[i];
+                setProgress({ current: i + 1, total: validRecords.length });
 
-                if (item.isReposicion) {
-                    // --- MODO REPOSICIÓN (005) ---
-                    const noteRepo = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${item.decreto} DE FECHA ${item.fecha}, DEBIDO A LA ${conceptoText} DEL ORIGINAL.`;
+                try {
+                    // Mapeo del Concepto (Cruce entre código viejo y UUID nuevo)
+                    const conceptoObj = catalogoConceptos?.find(c => String(c.codigo) === String(item.codiconcep));
+                    const conceptoId = conceptoObj ? conceptoObj.id : null;
+                    const conceptoText = conceptoObj ? conceptoObj.concepto.toUpperCase() : "SOLICITUD DE PARTE";
+                    const fechaTexto = convertDateToSpanishText(item.fecha).replace(/^EL\s+/i, '').toUpperCase();
+
+                    // Buscar Partida Nueva (Supletoria)
+                    const newRec = allBaptisms.find(b => b.book_number === item.sNewL && b.folio === item.sNewF && b.number === item.sNewN);
                     
-                    const newRaw = { 
-                        ...newRec.raw_data, 
-                        isSupplementary: true, 
-                        creadoPorDecreto: true, 
-                        replacementDecreeRef: item.decreto,
-                        notaMarginal: noteRepo 
-                    };
-
-                    await supabase.from('baptisms').update({ raw_data: newRaw }).eq('id', newRec.id);
-
-                    repositionHistory.push({
-                        id: generateUUID(),
-                        decreeNumber: item.decreto,
-                        decreeDate: item.fecha,
-                        conceptoAnulacionId: item.codiconcep,
-                        targetName: `${newRaw.nombres || newRaw.firstName || ''} ${newRaw.apellidos || newRaw.lastName || ''}`.trim().toUpperCase(),
-                        newPartidaId: newRec.id,
-                        newPartidaSummary: { book: sNewL, page: sNewF, entry: sNewN },
-                        type: 'replacement',
-                        createdAt: new Date().toISOString()
-                    });
-
-                } else {
-                    // --- MODO CORRECCIÓN (OTROS) ---
-                    const sOldL = String(item.libro).padStart(4, '0');
-                    const sOldF = String(item.folio).padStart(4, '0');
-                    const sOldN = String(item.numero).padStart(4, '0');
-
-                    const origRec = allBaptisms.find(b => b.book_number === sOldL && b.page_number === sOldF && b.entry_number === sOldN);
-                    
-                    if (origRec) {
-                        const noteAnulada = `PARTIDA ANULADA POR DECRETO NO. ${item.decreto} DEL ${item.fecha}. VER SUPLETORIO L.${sNewL} F.${sNewF} N.${sNewN}`;
-                        const noteNueva = `ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NO. ${item.decreto} DEL ${item.fecha}. ANULA LA PARTIDA L.${sOldL} F.${sOldF} N.${sOldN}`;
-
-                        // Update Original
-                        const origRaw = { ...origRec.raw_data, isAnnulled: true, status: 'anulada', notaMarginal: noteAnulada };
-                        await supabase.from('baptisms').update({ status: 'anulada', raw_data: origRaw }).eq('id', origRec.id);
-
-                        // Update Nueva
-                        const newRaw = { ...newRec.raw_data, isSupplementary: true, creadoPorDecreto: true, correctionDecreeRef: item.decreto, notaMarginal: noteNueva };
-                        await supabase.from('baptisms').update({ raw_data: newRaw }).eq('id', newRec.id);
-
-                        correctionsHistory.push({
-                            id: generateUUID(),
-                            decreeNumber: item.decreto,
-                            decreeDate: item.fecha,
-                            conceptoAnulacionId: item.codiconcep,
-                            originalPartidaId: origRec.id,
-                            newPartidaId: newRec.id,
-                            targetName: `${origRaw.nombres || origRaw.firstName || ''} ${origRaw.apellidos || origRaw.lastName || ''}`.trim().toUpperCase(),
-                            parroquia: parishLabel,
-                            originalPartidaSummary: { ...origRaw, book: sOldL, page: sOldF, entry: sOldN },
-                            newPartidaSummary: { ...newRaw, book: sNewL, page: sNewF, entry: sNewN },
-                            type: 'correction',
-                            createdAt: new Date().toISOString()
-                        });
+                    if (!newRec) {
+                        item.error = "Partida supletoria no encontrada en la Nube";
+                        item.isValid = false;
+                        errorCount++;
+                        continue;
                     }
+
+                    const targetName = `${newRec.nombres || ''} ${newRec.apellidos || ''}`.trim().toUpperCase();
+                    const ministroDaFe = (newRec.da_fe || newRec.raw_data?.daFe || 'EL PÁRROCO').toUpperCase();
+
+                    if (item.isReposicion) {
+                        // ==========================================
+                        // 🟢 LÓGICA DE REPOSICIÓN
+                        // ==========================================
+                        const noteRepo = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${item.decreto.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
+                        
+                        const newRaw = { 
+                            ...newRec.raw_data, 
+                            isSupplementary: true, 
+                            creadoPorDecreto: true, 
+                            replacementDecreeRef: item.decreto,
+                            notaMarginal: noteRepo 
+                        };
+
+                        // A. Actualizar Partida
+                        await supabase.from('baptisms').update({ raw_data: newRaw, nota_marginal: noteRepo }).eq('id', newRec.id);
+
+                        // B. Crear Decreto
+                        const payloadDecree = {
+                            decreeNumber: item.decreto, numeroDecreto: item.decreto, decreeDate: item.fecha,
+                            conceptoAnulacionId: conceptoId, causa: conceptoText, targetName: targetName,
+                            newPartidaId: newRec.id,
+                            datosNuevaPartida: { ...newRaw, book: item.sNewL, page: item.sNewF, entry: item.sNewN },
+                            newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos }
+                        };
+                        
+                        await supabase.from('decretos').insert([{ parish_id: parishId, tipo: 'reposicion', payload: payloadDecree }]);
+
+                    } else {
+                        // ==========================================
+                        // 🔵 LÓGICA DE CORRECCIÓN (REQUIERE ORIGINAL)
+                        // ==========================================
+                        const origRec = allBaptisms.find(b => b.book_number === item.sOldL && b.folio === item.sOldF && b.number === item.sOldN);
+                        
+                        if (!origRec) {
+                            item.error = "Partida original no encontrada en la Nube";
+                            item.isValid = false;
+                            errorCount++;
+                            continue;
+                        }
+
+                        const noteAnulada = `PARTIDA ANULADA POR DECRETO NO. ${item.decreto.toUpperCase()} DE FECHA ${fechaTexto}. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-${item.sNewL} F-${item.sNewF} N-${item.sNewN}.`;
+                        const noteNueva = `ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NO. ${item.decreto.toUpperCase()} DE FECHA ${fechaTexto} Y ANULA LA PARTIDA DEL LIBRO: ${item.sOldL}, FOLIO: ${item.sOldF}, NÚMERO: ${item.sOldN}. DA FE: ${ministroDaFe}.`;
+
+                        // A. Actualizar Partida Original (ANULAR)
+                        const origRaw = { ...origRec.raw_data, isAnnulled: true, anulado: true, status: 'anulada', notaMarginal: noteAnulada };
+                        await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada, raw_data: origRaw }).eq('id', origRec.id);
+
+                        // B. Actualizar Partida Supletoria
+                        const newRaw = { ...newRec.raw_data, isSupplementary: true, creadoPorDecreto: true, correctionDecreeRef: item.decreto, notaMarginal: noteNueva };
+                        await supabase.from('baptisms').update({ nota_marginal: noteNueva, raw_data: newRaw }).eq('id', newRec.id);
+
+                        // C. Crear Decreto
+                        const payloadDecree = {
+                            decreeNumber: item.decreto, decreeDate: item.fecha, conceptoAnulacionId: conceptoId,
+                            targetName: `${origRec.nombres || ''} ${origRec.apellidos || ''}`.trim().toUpperCase(),
+                            newTargetName: targetName, parroquia: parishLabel,
+                            originalPartidaId: origRec.id, newPartidaId: newRec.id,
+                            originalPartidaSummary: { book: item.sOldL, page: item.sOldF, entry: item.sOldN, nombres: origRec.nombres, apellidos: origRec.apellidos },
+                            newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos }
+                        };
+
+                        await supabase.from('decretos').insert([{ parish_id: parishId, tipo: 'correccion', payload: payloadDecree }]);
+                    }
+
+                    successCount++;
+                } catch (err) {
+                    item.error = "Fallo en transacción DB";
+                    item.isValid = false;
+                    errorCount++;
                 }
-                count++;
             }
 
-            // Guardar ambos historiales
-            localStorage.setItem(`baptismCorrections_${parishId}`, JSON.stringify(correctionsHistory));
-            localStorage.setItem(`decreeReplacementBaptism_${parishId}`, JSON.stringify(repositionHistory));
-            
-            window.dispatchEvent(new Event('storage'));
+            // 3. ACTUALIZAR ESTADO DE LA INTERFAZ
+            setRecords([...records]); // Forzamos re-render para mostrar los errores si los hubo
             setImportComplete(true);
-            toast({ title: "Proceso Exitoso", description: `Se aplicaron ${count} decretos (Reposiciones y Correcciones) en la Nube.`, className: "bg-green-50 text-green-900" });
+
+            if (errorCount === 0) {
+                toast({ title: "Inyección Exitosa", description: `Se procesaron ${successCount} decretos perfectamente en la Nube.`, className: "bg-green-50 text-green-900 border-green-200" });
+            } else {
+                toast({ title: "Proceso Parcial", description: `Se inyectaron ${successCount} decretos. Hubo ${errorCount} errores. Revise la tabla.`, variant: "destructive" });
+            }
 
         } catch (error) {
-            toast({ title: "Error", description: error.message, variant: "destructive" });
+            toast({ title: "Error Crítico", description: error.message, variant: "destructive" });
         } finally {
             setIsProcessing(false);
         }
@@ -184,55 +239,93 @@ const DecreeJsonImporter = ({ sacramentType = 'bautismo' }) => {
         { 
             header: 'Tipo', 
             render: r => r.isReposicion ? 
-                <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold">REPOSICIÓN</span> : 
-                <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold">CORRECCIÓN</span> 
+                <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-[9px] font-black tracking-widest border border-amber-200">REPOSICIÓN</span> : 
+                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-[9px] font-black tracking-widest border border-blue-200">CORRECCIÓN</span> 
         },
-        { header: 'No. Decreto', accessor: 'decreto' },
-        { header: 'Ubicación Nueva (Destino)', render: r => <span className="font-mono text-blue-600 font-bold">{r.newlib}/{r.newfol}/{r.newnum}</span> },
-        { header: 'Original (Afectada)', render: r => r.isReposicion ? <span className="text-gray-400 italic">No aplica</span> : <span className="font-mono">{r.libro}/{r.folio}/{r.numero}</span> },
-        { header: 'Estado', render: r => r.isValid ? <CheckCircle className="w-4 h-4 text-green-500"/> : <AlertCircle className="w-4 h-4 text-red-500" title={r.error}/> }
+        { header: 'No. Decreto', render: r => <span className="font-mono font-bold text-slate-700">{r.decreto}</span> },
+        { header: 'Ubicación Supletoria', render: r => <span className="font-mono text-[#4B7BA7] font-bold bg-blue-50 px-2 py-1 rounded">L:{r.sNewL} F:{r.sNewF} N:{r.sNewN}</span> },
+        { header: 'Original (Afectada)', render: r => r.isReposicion ? <span className="text-slate-400 italic text-xs">No aplica</span> : <span className="font-mono text-red-500 font-bold bg-red-50 px-2 py-1 rounded">L:{r.sOldL} F:{r.sOldF} N:{r.sOldN}</span> },
+        { 
+            header: 'Validación en Nube', 
+            render: r => r.isValid ? 
+                <div className="flex items-center gap-1 text-green-600"><CheckCircle className="w-4 h-4"/><span className="text-[10px] font-bold">LISTO</span></div> : 
+                <div className="flex items-center gap-1 text-red-500"><ServerCrash className="w-4 h-4"/><span className="text-[9px] font-bold truncate max-w-[120px]" title={r.error}>{r.error}</span></div> 
+        }
     ];
 
     return (
-        <div className="bg-white border rounded-3xl p-8 space-y-8 shadow-sm">
-            <div className="flex items-center gap-4 border-b pb-6">
-                <div className="bg-[#4B7BA7] p-3 rounded-2xl text-white shadow-lg shadow-blue-900/20">
-                    <RefreshCcw className="w-6 h-6" />
+        <div className="bg-white border border-slate-200 rounded-[2.5rem] p-8 md:p-10 space-y-10 shadow-sm">
+            
+            {/* Cabecera */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-100 pb-8">
+                <div className="flex items-center gap-5">
+                    <div className="bg-gradient-to-br from-[#4B7BA7] to-[#2C3E50] p-4 rounded-2xl text-white shadow-lg shadow-blue-900/20">
+                        <Database className="w-8 h-8" />
+                    </div>
+                    <div>
+                        <h2 className="text-3xl font-black text-slate-900 tracking-tight font-serif">Motor de Inyección Masiva</h2>
+                        <p className="text-slate-500 text-xs font-medium uppercase tracking-widest mt-1">Sincronización de Decretos Históricos</p>
+                    </div>
                 </div>
-                <div>
-                    <h2 className="text-2xl font-black text-gray-900 tracking-tight">Importador Inteligente de Decretos</h2>
-                    <p className="text-gray-500 text-sm font-medium uppercase tracking-widest text-[10px]">Cruce masivo de anulaciones y reposiciones</p>
-                </div>
+                
+                <Button 
+                    variant="outline" 
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isProcessing}
+                    className="rounded-xl border-slate-200 text-slate-600 font-bold uppercase text-[10px] tracking-widest hover:bg-slate-50 h-12 px-6"
+                >
+                    <RefreshCcw className="w-4 h-4 mr-2" /> Cargar Nuevo Archivo
+                </Button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Zona de Carga */}
-                <div className="lg:col-span-1">
-                    <label className="flex flex-col items-center justify-center w-full h-56 border-2 border-dashed border-gray-200 rounded-[2rem] cursor-pointer bg-gray-50 hover:bg-blue-50 hover:border-blue-300 transition-all group">
-                        <div className="flex flex-col items-center justify-center text-center p-6">
-                            {isProcessing ? <Loader2 className="w-12 h-12 mb-4 text-[#4B7BA7] animate-spin" /> : <Upload className="w-12 h-12 mb-4 text-gray-300 group-hover:text-blue-500 transition-colors" />}
-                            <p className="text-sm font-black text-gray-700 uppercase tracking-widest">{isProcessing ? 'Sincronizando...' : 'Subir ANULACION.json'}</p>
-                            <p className="text-[10px] text-gray-400 mt-2 font-medium">Detecta automáticamente códigos 005 (Reposición)</p>
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-10">
+                {/* Zona de Carga / Drag & Drop */}
+                <div className="xl:col-span-1">
+                    <label className="flex flex-col items-center justify-center w-full h-[280px] border-2 border-dashed border-slate-200 rounded-[2rem] cursor-pointer bg-slate-50 hover:bg-blue-50 hover:border-[#4B7BA7]/40 transition-all duration-300 group relative overflow-hidden">
+                        
+                        {isProcessing && (
+                            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+                                <Loader2 className="w-12 h-12 text-[#4B7BA7] animate-spin mb-4" />
+                                <span className="font-black text-[#4B7BA7] uppercase tracking-widest text-[10px]">
+                                    Procesando {progress.current} de {progress.total}
+                                </span>
+                                <div className="w-1/2 bg-slate-200 h-1.5 rounded-full mt-3 overflow-hidden">
+                                    <div className="bg-[#4B7BA7] h-full transition-all duration-300" style={{ width: `${(progress.current / progress.total) * 100}%` }}></div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex flex-col items-center justify-center text-center p-8">
+                            <Upload className="w-14 h-14 mb-5 text-slate-300 group-hover:text-[#4B7BA7] transition-colors" />
+                            <p className="text-sm font-black text-slate-700 uppercase tracking-widest">
+                                {file ? file.name : 'Subir Archivo JSON'}
+                            </p>
+                            <p className="text-[10px] text-slate-400 mt-3 font-medium leading-relaxed max-w-[200px]">
+                                El sistema cruzará la información con Supabase automáticamente.
+                            </p>
                         </div>
-                        <input type="file" className="hidden" accept=".json" onChange={handleFileChange} disabled={isProcessing} />
+                        <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileChange} disabled={isProcessing} />
                     </label>
                 </div>
 
-                {/* Estadísticas */}
-                <div className="lg:col-span-2 space-y-6">
+                {/* Estadísticas y Panel de Acción */}
+                <div className="xl:col-span-2 space-y-8 flex flex-col justify-center">
                     {validationStats ? (
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <StatCard label="Total" val={validationStats.total} color="gray" />
-                            <StatCard label="Válidos" val={validationStats.valid} color="green" />
+                            <StatCard label="Total Leídos" val={validationStats.total} color="slate" />
+                            <StatCard label="Aptos p/ Inyección" val={validationStats.valid} color="green" />
                             <StatCard label="Reposiciones" val={validationStats.reposiciones} color="amber" />
                             <StatCard label="Correcciones" val={validationStats.correcciones} color="blue" />
                         </div>
                     ) : (
-                        <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 flex items-start gap-4">
-                            <Info className="w-6 h-6 text-blue-500 shrink-0 mt-1" />
-                            <p className="text-sm text-blue-700 leading-relaxed">
-                                <strong>Instrucciones:</strong> El archivo debe contener los campos de ubicación original y nueva. Si el código de concepto es <strong>005</strong>, el sistema entenderá que es una <strong>Reposición</strong> y solo buscará la partida nueva para inyectar la nota técnica.
-                            </p>
+                        <div className="bg-blue-50/50 p-8 rounded-[2rem] border border-blue-100 flex items-start gap-5">
+                            <Info className="w-8 h-8 text-blue-500 shrink-0" />
+                            <div className="space-y-2">
+                                <h4 className="font-black text-blue-900 uppercase text-xs tracking-widest">Inteligencia de Cruce</h4>
+                                <p className="text-xs text-blue-800/80 leading-relaxed font-medium">
+                                    El motor leerá los códigos de concepto heredados (ej: 005) y buscará las partidas originales y supletorias directamente en la nube. Las notas marginales se redactarán y sellarán de forma oficial.
+                                </p>
+                            </div>
                         </div>
                     )}
 
@@ -240,10 +333,13 @@ const DecreeJsonImporter = ({ sacramentType = 'bautismo' }) => {
                         <Button 
                             onClick={handleImport} 
                             disabled={isProcessing || importComplete}
-                            className="w-full py-8 rounded-2xl bg-[#4B7BA7] hover:bg-[#3A6286] text-white font-black uppercase tracking-[0.2em] text-xs shadow-xl shadow-blue-900/10 transition-all transform active:scale-95"
+                            className="w-full h-16 rounded-2xl bg-gradient-to-r from-[#4B7BA7] to-[#2C3E50] hover:scale-[1.01] text-white font-black uppercase tracking-[0.2em] text-[11px] shadow-xl shadow-blue-900/10 transition-all active:scale-95"
                         >
-                            {isProcessing ? <Loader2 className="w-5 h-5 mr-3 animate-spin" /> : <Save className="w-5 h-5 mr-3" />}
-                            Procesar {validationStats.valid} Decretos en la Nube
+                            {importComplete ? (
+                                <><CheckCircle className="w-5 h-5 mr-3 text-green-400" /> Inyección Finalizada</>
+                            ) : (
+                                <><Database className="w-5 h-5 mr-3" /> Iniciar Inyección de {validationStats.valid} Decretos</>
+                            )}
                         </Button>
                     )}
                 </div>
@@ -251,17 +347,22 @@ const DecreeJsonImporter = ({ sacramentType = 'bautismo' }) => {
 
             {/* Tabla de Vista Previa */}
             {records.length > 0 && (
-                <div className="border border-gray-100 rounded-3xl overflow-hidden bg-gray-50/50">
-                    <div className="px-6 py-4 border-b border-gray-100 bg-white flex items-center gap-2">
-                        <FileJson className="w-4 h-4 text-blue-500" />
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Vista previa de transacciones</span>
-                    </div>
-                    <Table columns={columns} data={records.slice(0, 10)} className="bg-transparent" />
-                    {records.length > 10 && (
-                        <div className="p-4 text-center text-[10px] font-bold text-gray-400 uppercase italic">
-                            ... y otros {records.length - 10} decretos más
+                <div className="border border-slate-100 rounded-[2rem] overflow-hidden bg-slate-50/50 shadow-inner">
+                    <div className="px-8 py-5 border-b border-slate-100 bg-white flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                            <FileJson className="w-5 h-5 text-[#4B7BA7]" />
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Simulación de Ejecución</span>
                         </div>
-                    )}
+                        {validationStats?.invalid > 0 && (
+                            <span className="bg-red-50 text-red-600 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest border border-red-100">
+                                {validationStats.invalid} Errores Detectados
+                            </span>
+                        )}
+                    </div>
+                    
+                    <div className="max-h-[400px] overflow-auto custom-scrollbar">
+                        <Table columns={columns} data={records} className="bg-transparent" />
+                    </div>
                 </div>
             )}
         </div>
@@ -271,15 +372,15 @@ const DecreeJsonImporter = ({ sacramentType = 'bautismo' }) => {
 // Componente Interno para los contadores
 const StatCard = ({ label, val, color }) => {
     const colors = {
-        gray: "bg-gray-50 border-gray-200 text-gray-700",
-        green: "bg-green-50 border-green-200 text-green-700",
+        slate: "bg-slate-50 border-slate-200 text-slate-700",
+        green: "bg-emerald-50 border-emerald-200 text-emerald-700",
         amber: "bg-amber-50 border-amber-200 text-amber-700",
         blue: "bg-blue-50 border-blue-200 text-blue-700"
     };
     return (
-        <div className={`p-4 rounded-2xl border ${colors[color]} text-center shadow-sm`}>
-            <span className="block text-2xl font-black">{val}</span>
-            <span className="text-[9px] font-black uppercase tracking-widest">{label}</span>
+        <div className={`p-6 rounded-[2rem] border ${colors[color]} text-center shadow-sm flex flex-col justify-center items-center h-32`}>
+            <span className="block text-4xl font-black mb-2">{val}</span>
+            <span className="text-[9px] font-black uppercase tracking-widest opacity-80">{label}</span>
         </div>
     );
 };
