@@ -15,7 +15,7 @@ import Table from '@/components/ui/Table';
 const DecreeJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth(); 
-    const { getMisDatosList, getParrocoActual, getParrocos } = useAppData(); 
+    const { getMisDatosList, getParrocoActual } = useAppData(); 
     
     const [file, setFile] = useState(null);
     const [records, setRecords] = useState([]);
@@ -160,25 +160,6 @@ const DecreeJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
-    // 🚀 MÁQUINA DEL TIEMPO: BUSCADOR HISTÓRICO EXACTO
-    const getHistoricalPriest = (dateString, list, fallback) => {
-        if (!dateString || !list || list.length === 0) return fallback;
-        const dStr = dateString.includes('T') ? dateString : `${dateString}T12:00:00`;
-        const searchDate = new Date(dStr);
-        if (isNaN(searchDate.getTime())) return fallback;
-
-        const found = list.find(s => {
-            if (!s.fechaIngreso && !s.fechaNombramiento) return false;
-            const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
-            const inicio = new Date(iStr);
-            const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
-            return searchDate >= inicio && searchDate <= fin;
-        });
-
-        if (found) return `${found.nombre} ${found.apellido || ''}`.trim().toUpperCase();
-        return fallback;
-    };
-
     const handleImport = async () => {
         const validRecords = records.filter(r => r.isValid);
         if (!validRecords.length) return;
@@ -191,7 +172,6 @@ const DecreeJsonImporter = () => {
             const parishInfo = getMisDatosList(parishId)[0] || {};
             const parishLabel = `${parishInfo.nombre || 'PARROQUIA'} - ${parishInfo.ciudad || ''}`.toUpperCase();
 
-            const listaSacerdotes = getParrocos(parishId) || [];
             const currentPriestObj = getParrocoActual(parishId);
             const defaultPriest = currentPriestObj 
                 ? `PBRO. ${currentPriestObj.nombre} ${currentPriestObj.apellido || ''}`.trim().toUpperCase() 
@@ -231,18 +211,17 @@ const DecreeJsonImporter = () => {
                     const targetName = `${newRec.nombres || ''} ${newRec.apellidos || ''}`.trim().toUpperCase();
 
                     // =========================================================================
-                    // 🧠 1. DEFINICIÓN DEL SACERDOTE HISTÓRICO EXACTO (DA FE DEL DECRETO)
+                    // 🧠 CLONACIÓN EXACTA: Si "Ministro" funciona, "Da Fe" usará la misma fuente
                     // =========================================================================
-                    let rawDaFe = getHistoricalPriest(item.fecha_clean, listaSacerdotes, null);
+                    let rawDaFe = (rawNew.ministro || newRec.ministro || '').toUpperCase();
 
-                    // Si no lo encuentra por fecha, busca en la metadata heredada
+                    // Si por algún motivo el ministro estuviera vacío, usa las alternativas de respaldo
                     if (!rawDaFe) {
                         const dbDafe = newRec.da_fe || rawNew?.daFe || rawNew?.dafe;
                         if (dbDafe && isNaN(Number(String(dbDafe).trim()))) rawDaFe = String(dbDafe).trim().toUpperCase();
                         else if (item.dafe_clean && isNaN(Number(String(item.dafe_clean).trim()))) rawDaFe = String(item.dafe_clean).trim().toUpperCase();
                     }
 
-                    // Último recurso: El actual
                     if (!rawDaFe) rawDaFe = defaultPriest;
 
                     // Limpieza quirúrgica para evitar "PBRO. PBRO."
@@ -284,7 +263,7 @@ const DecreeJsonImporter = () => {
                             conceptoAnulacionId: conceptoId, causa: conceptoText, targetName: targetName,
                             observaciones: item.observaciones_clean || '', newPartidaId: newRec.id,
                             ...pdfData,
-                            datosNuevaPartida: { ...newUpdateData, book: item.sNewL, page: item.sNewF, entry: item.sNewN },
+                            datosNuevaPartida: { ...newUpdateData, book: item.sNewL, page: item.sNewF, entry: item.sNewN, daFe: validDaFe },
                             newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos, daFe: validDaFe }
                         };
                         
@@ -301,7 +280,7 @@ const DecreeJsonImporter = () => {
                             libroAnulada: item.sOldL, folioAnulada: item.sOldF, numeroAnulada: item.sOldN, ministro: validDaFe
                         });
 
-                        // 🚀 AQUÍ SE INYECTA EL SACERDOTE HISTÓRICO EN LA PARTIDA ORIGINAL
+                        // 🚀 Inyectamos el Sacerdote Histórico en la Partida Original
                         const origUpdate = { 
                             ...rawOrig, isAnnulled: true, anulado: true, status: 'anulada', 
                             notaMarginal: noteAnulada, daFe: validDaFe, dafe: validDaFe, ministerFaith: validDaFe 
@@ -310,7 +289,7 @@ const DecreeJsonImporter = () => {
                             status: 'anulada', nota_marginal: noteAnulada, raw_data: origUpdate, da_fe: validDaFe 
                         }).eq('id', origRec.id);
 
-                        // 🚀 AQUÍ SE INYECTA EN LA PARTIDA NUEVA (SUPLETORIA)
+                        // 🚀 Inyectamos el Sacerdote Histórico en la Partida Nueva
                         const newUpdate = { 
                             ...rawNew, isSupplementary: true, creadoPorDecreto: true, 
                             correctionDecreeRef: item.decreto_clean, notaMarginal: noteNueva, 
@@ -320,7 +299,7 @@ const DecreeJsonImporter = () => {
                             nota_marginal: noteNueva, raw_data: newUpdate, da_fe: validDaFe 
                         }).eq('id', newRec.id);
 
-                        // 🚀 AQUÍ SE INYECTA EN EL DECRETO (Sincronización Total 3/3)
+                        // 🚀 Inyectamos el Sacerdote Histórico en el Decreto Oficial
                         const payloadDecree = {
                             decreeNumber: item.decreto_clean, decreeDate: item.fecha_clean, conceptoAnulacionId: conceptoId,
                             targetName: `${origRec.nombres || ''} ${origRec.apellidos || ''}`.trim().toUpperCase(),
@@ -328,8 +307,8 @@ const DecreeJsonImporter = () => {
                             observaciones: item.observaciones_clean || '',
                             ...pdfData,
                             originalPartidaId: origRec.id, newPartidaId: newRec.id,
-                            originalPartidaSummary: { book: item.sOldL, page: item.sOldF, entry: item.sOldN, nombres: origRec.nombres, apellidos: origRec.apellidos, daFe: validDaFe },
-                            newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos, daFe: validDaFe }
+                            originalPartidaSummary: { book: item.sOldL, page: item.sOldF, entry: item.sOldN, nombres: origRec.nombres, apellidos: origRec.apellidos, daFe: validDaFe, dafe: validDaFe },
+                            newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos, daFe: validDaFe, dafe: validDaFe }
                         };
 
                         await supabase.from('decretos').insert([{ parish_id: parishId, tipo: 'correccion', payload: payloadDecree }]);
