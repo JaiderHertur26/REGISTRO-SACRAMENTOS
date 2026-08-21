@@ -12,15 +12,24 @@ import { supabase } from '@/lib/supabaseClient';
 import { marginalNotesEngine } from '@/utils/marginalNotesEngine'; 
 import { calculateNextConsecutive } from '@/services/sacramentParametersService';
 
+const cleanTitle = (nameStr) => {
+    if (!nameStr) return '';
+    return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|SACERDOTE\s*)/i, '').trim();
+};
+
 const BaptismCorrectionNewPage = () => {
   const { user } = useAuth();
-  const { getParrocoActual, getMisDatosList, createBaptismCorrection } = useAppData();
+  // 🚀 EXTRAEMOS getParrocos PARA VIAJAR EN EL TIEMPO
+  const { getParrocoActual, getMisDatosList, getParrocos } = useAppData();
   const { toast } = useToast();
   const navigate = useNavigate();
 
   const [isLoading, setIsLoading] = useState(false);
   const [cloudParams, setCloudParams] = useState({});
   const [conceptos, setConceptos] = useState([]);
+  
+  const [listaSacerdotes, setListaSacerdotes] = useState([]);
+  const [sacerdotePorDefecto, setSacerdotePorDefecto] = useState('');
 
   const [decreeData, setDecreeData] = useState({
     parroquia: '', numeroDeDecreto: '', fechaEmision: new Date().toISOString().split('T')[0],
@@ -40,7 +49,6 @@ const BaptismCorrectionNewPage = () => {
     padrinos: '', ministro: '', daFe: '', observaciones: ''
   });
 
-  // 🚀 INICIALIZACIÓN (100% NUBE)
   useEffect(() => {
     const initializeData = async () => {
       if (!user) return;
@@ -50,8 +58,16 @@ const BaptismCorrectionNewPage = () => {
           let parishLabel = misDatos?.length > 0 ? `${misDatos[0].nombre} - ${misDatos[0].ciudad}` : `${user.parishName} - ${user.city}`;
           setDecreeData(prev => ({ ...prev, parroquia: parishLabel }));
 
+          // 🚀 CARGAMOS LA LISTA HISTÓRICA DE PÁRROCOS
+          const parrocos = getParrocos(user.parishId) || [];
+          setListaSacerdotes(parrocos);
+
           const priest = getParrocoActual(user.parishId);
-          if (priest) setNewPartida(prev => ({ ...prev, daFe: `${priest.nombre} ${priest.apellido || ''}`.trim() }));
+          if (priest) {
+              const defPriest = `${priest.nombre} ${priest.apellido || ''}`.trim().toUpperCase();
+              setSacerdotePorDefecto(defPriest);
+              setNewPartida(prev => ({ ...prev, daFe: defPriest }));
+          }
 
           const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
           if (paramsData && paramsData.bautizos_params) setCloudParams(paramsData.bautizos_params);
@@ -70,7 +86,32 @@ const BaptismCorrectionNewPage = () => {
       } catch (error) { console.error("Error inicializando:", error); }
     };
     initializeData();
-  }, [user, getParrocoActual, getMisDatosList]);
+  }, [user, getParrocoActual, getMisDatosList, getParrocos]);
+
+  // 🚀 MÁQUINA DEL TIEMPO: VIGILA LA FECHA DEL DECRETO PARA ASIGNAR EL "DA FE" CORRECTO
+  useEffect(() => {
+      if (decreeData.fechaEmision && listaSacerdotes.length > 0) {
+          const dStr = decreeData.fechaEmision.includes('T') ? decreeData.fechaEmision : `${decreeData.fechaEmision}T12:00:00`;
+          const fechaSac = new Date(dStr);
+          
+          if (!isNaN(fechaSac.getTime())) {
+              const sacerdoteEpoca = listaSacerdotes.find(s => {
+                  if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                  const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                  const inicio = new Date(iStr);
+                  const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                  return fechaSac >= inicio && fechaSac <= fin;
+              });
+
+              if (sacerdoteEpoca) {
+                  const histPriest = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
+                  setNewPartida(prev => ({ ...prev, daFe: histPriest }));
+              } else {
+                  setNewPartida(prev => ({ ...prev, daFe: sacerdotePorDefecto }));
+              }
+          }
+      }
+  }, [decreeData.fechaEmision, listaSacerdotes, sacerdotePorDefecto]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -102,15 +143,9 @@ const BaptismCorrectionNewPage = () => {
     setShowSuggestions(false);
   };
 
-  // 🚀 AQUÍ ESTÁ LA LÍNEA QUE FALTABA
   const handleNewPartidaChangeRaw = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
   const handleNewPartidaChange = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
   const handleNewPartidaChangeUpper = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
-
-  const getSafeValue = (obj, ...keys) => {
-    for (const key of keys) { if (obj[key] !== undefined && obj[key] !== null) return obj[key]; }
-    return '';
-  };
 
   const handleSearch = async () => {
     const { Libro, folio, numero } = decreeData;
@@ -141,7 +176,8 @@ const BaptismCorrectionNewPage = () => {
             sexo: dbRecord.sexo || '', nombrePadre: dbRecord.nombre_padre || '', nombreMadre: dbRecord.nombre_madre || '',
             tipoUnionPadres: dbRecord.tipo_union_padres || '', abuelosPaternos: dbRecord.abuelos_paternos || '',
             abuelosMaternos: dbRecord.abuelos_maternos || '', padrinos: dbRecord.padrinos || '',
-            ministro: dbRecord.ministro || '', daFe: prev.daFe || dbRecord.da_fe || ''
+            ministro: dbRecord.ministro || '',
+            // No sobreescribimos daFe aquí para respetar la máquina del tiempo
           }));
         }
       } else { setSearchMessage({ type: 'error', text: "No se encontró ninguna partida en la nube." }); }
@@ -159,7 +195,6 @@ const BaptismCorrectionNewPage = () => {
     setIsLoading(true);
 
     try {
-        // 1. Evitar Duplicados
         const { data: existingDecree } = await supabase.from('decretos').select('id').eq('tipo', 'correccion')
             .eq('parish_id', user.parishId).contains('payload', { decreeNumber: decreeData.numeroDeDecreto }).maybeSingle();
 
@@ -172,7 +207,10 @@ const BaptismCorrectionNewPage = () => {
         const supletorioFolio = cloudParams.suplementarioFolio || 1;
         const supletorioNumero = cloudParams.suplementarioNumero || 1;
 
-        // 🧠 2. MOTOR DE NOTAS (Se asegura de pasar las variables con el nombre correcto)
+        // 🚀 LIMPIEZA DE PREFIJOS ANTES DE GUARDAR
+        let finalDaFe = cleanTitle(newPartida.daFe);
+        finalDaFe = finalDaFe !== 'EL PÁRROCO' ? `PBRO. ${finalDaFe}` : finalDaFe;
+
         const noteAnulada = marginalNotesEngine.forAnnulledCorrection(user?.parishId, {
             numeroDecreto: decreeData.numeroDeDecreto, fechaDecreto: decreeData.fechaEmision,
             libroNuevo: supletorioLibro, folioNuevo: supletorioFolio, numeroNuevo: supletorioNumero
@@ -180,17 +218,17 @@ const BaptismCorrectionNewPage = () => {
 
         const notaSupletoriaFinal = marginalNotesEngine.forNewCorrection(user?.parishId, {
             numeroDecreto: decreeData.numeroDeDecreto, fechaDecreto: decreeData.fechaEmision,
-            libroAnulada: decreeData.Libro, folioAnulada: decreeData.folio, numeroAnulada: decreeData.numero, ministro: newPartida.daFe
+            libroAnulada: decreeData.Libro, folioAnulada: decreeData.folio, numeroAnulada: decreeData.numero, ministro: finalDaFe
         });
 
         const partidaToSave = {
           ...newPartida,
+          daFe: finalDaFe, // Inyección Directa
           Libro: String(supletorioLibro).padStart(4, '0'), folio: String(supletorioFolio).padStart(4, '0'), numero: String(supletorioNumero).padStart(4, '0'),
           book_number: String(supletorioLibro).padStart(4, '0'), page_number: String(supletorioFolio).padStart(4, '0'), entry_number: String(supletorioNumero).padStart(4, '0'),
           anulado: false, estado: 'permanente', status: 'seated', notaMarginal: notaSupletoriaFinal
         };
 
-        // 🚀 EMPAQUE DEL PAYLOAD BLINDADO 
         const payloadDecree = {
           decreeNumber: decreeData.numeroDeDecreto, 
           decreeDate: decreeData.fechaEmision,
@@ -210,45 +248,49 @@ const BaptismCorrectionNewPage = () => {
           abuelosMaternos: newPartida.abuelosMaternos,
           padrinos: newPartida.padrinos,
           ministro: newPartida.ministro,
-          daFe: newPartida.daFe,
+          daFe: finalDaFe, // 🚀 MULTILLAVE PARA EL DECRETO
+          dafe: finalDaFe,
+          da_fe: finalDaFe,
+          ministerFaith: finalDaFe,
 
           originalPartidaId: foundRecord.id,
           originalPartidaSummary: { 
               book: decreeData.Libro, page: decreeData.folio, entry: decreeData.numero,
-              nombres: foundRecord.nombres || foundRecord.first_name || '', apellidos: foundRecord.apellidos || foundRecord.last_name || ''
+              nombres: foundRecord.nombres || foundRecord.first_name || '', apellidos: foundRecord.apellidos || foundRecord.last_name || '',
+              daFe: finalDaFe, dafe: finalDaFe
           },
           newPartidaSummary: { 
               book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero,
-              nombres: newPartida.nombres, apellidos: newPartida.apellidos
+              nombres: newPartida.nombres, apellidos: newPartida.apellidos,
+              daFe: finalDaFe, dafe: finalDaFe
           }
         };
 
-        // 3. Marcar original como anulada en Supabase
+        // 3. Marcar original como anulada en Supabase (Inyectamos el daFe histórico)
         await supabase.from('baptisms').update({ 
-            status: 'anulada', nota_marginal: noteAnulada, 
-            raw_data: { ...foundRecord, notaMarginal: noteAnulada, anulado: true, status: 'anulada' } 
+            status: 'anulada', nota_marginal: noteAnulada, da_fe: finalDaFe,
+            raw_data: { ...foundRecord, notaMarginal: noteAnulada, anulado: true, status: 'anulada', daFe: finalDaFe, dafe: finalDaFe } 
         }).eq('id', foundRecord.id);
 
-        // 4. Calcular e incrementar consecutivos correctamente con el motor
-const siguientesSupletorios = calculateNextConsecutive(
-    cloudParams.suplementarioNumero,
-    cloudParams.suplementarioFolio,
-    cloudParams.suplementarioLibro,
-    cloudParams.suplementarioPartidas,
-    cloudParams.suplementarioReiniciar
-);
+        const siguientesSupletorios = calculateNextConsecutive(
+            cloudParams.suplementarioNumero,
+            cloudParams.suplementarioFolio,
+            cloudParams.suplementarioLibro,
+            cloudParams.suplementarioPartidas,
+            cloudParams.suplementarioReiniciar
+        );
 
-const newParams = { 
-    ...cloudParams, 
-    suplementarioNumero: siguientesSupletorios.numero,
-    suplementarioFolio: siguientesSupletorios.folio,
-    suplementarioLibro: siguientesSupletorios.libro
-};
+        const newParams = { 
+            ...cloudParams, 
+            suplementarioNumero: siguientesSupletorios.numero,
+            suplementarioFolio: siguientesSupletorios.folio,
+            suplementarioLibro: siguientesSupletorios.libro
+        };
 
-await supabase.from('parish_parameters').upsert({ 
-    parish_id: user.parishId || targetParish, // Usa targetParish si estás en la vista de Cancillería
-    bautizos_params: newParams 
-}, { onConflict: 'parish_id' });
+        await supabase.from('parish_parameters').upsert({ 
+            parish_id: user.parishId,
+            bautizos_params: newParams 
+        }, { onConflict: 'parish_id' });
 
         // 5. Crear Nueva Partida Supletoria
         const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{
@@ -258,7 +300,7 @@ await supabase.from('parish_parameters').upsert({
             fecha_nacimiento: newPartida.fechaNacimiento || null, lugar_nacimiento: newPartida.lugarNacimiento, lugar_bautismo: newPartida.lugarBautismo,
             nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre, tipo_union_padres: newPartida.tipoUnionPadres, 
             abuelos_paternos: newPartida.abuelosPaternos, abuelos_maternos: newPartida.abuelosMaternos, padrinos: newPartida.padrinos,
-            ministro: newPartida.ministro, da_fe: newPartida.daFe, status: 'seated', nota_marginal: notaSupletoriaFinal,
+            ministro: newPartida.ministro, da_fe: finalDaFe, status: 'seated', nota_marginal: notaSupletoriaFinal,
             raw_data: partidaToSave
         }]).select('id').single();
 
