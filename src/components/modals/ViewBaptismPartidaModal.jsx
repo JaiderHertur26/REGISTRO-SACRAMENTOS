@@ -1,21 +1,216 @@
 import React, { useRef } from 'react';
 import { 
     X, Printer, BookOpen, Fingerprint, 
-    ShieldCheck, CheckCircle2, AlertCircle
+    ShieldCheck, CheckCircle2, AlertCircle, Info,
+    User, Users, MapPin, PenTool, AlertOctagon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import BaptismPrintTemplate from '@/components/BaptismPrintTemplate';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import { useAppData } from '@/context/AppDataContext'; // 🚀 Necesario para acceder a los sacerdotes
+
+// --- COMPONENTE: PANEL DE DETALLES EXTENDIDO (INSPECCIÓN PARROQUIAL) ---
+const InfoBox = ({ data, parishId, getParrocos }) => {
+    if (!data) return null;
+    
+    const isReplacement = data.isSupplementary || data.tipoIdentidad === 'id_creada_reposicion';
+
+    // Limpieza de Ministro
+    const getResolvedMinistro = () => {
+        let min = data.ministro;
+        if (!min || !isNaN(Number(String(min).trim()))) return '---';
+        min = String(min).replace(/^(PBRO\.?\s*|PADRE\s*|SACERDOTE\s*)/i, '').trim();
+        return `PBRO. ${min}`;
+    };
+
+    // 🚀 RESOLUCIÓN INTELIGENTE DEL PÁRROCO QUE DA FE (MÁQUINA DEL TIEMPO)
+    const getResolvedDaFe = () => {
+        let rawDaFe = data.daFe || data.dafe || data.da_fe;
+        
+        // Si está vacío, es número (viejo sistema) o dice encargado
+        if (!rawDaFe || rawDaFe === '---' || rawDaFe.includes('ENCARGADO') || !isNaN(Number(String(rawDaFe).trim()))) {
+            
+            // 1. Clonar desde Ministro si es válido
+            let ministroRaw = data.ministro;
+            if (ministroRaw && isNaN(Number(String(ministroRaw).trim()))) {
+                rawDaFe = ministroRaw.toUpperCase();
+            } 
+            // 2. Máquina del Tiempo
+            else if (parishId && getParrocos) {
+                const sacerdotes = getParrocos(parishId) || [];
+                if (data.fechaSacramento) {
+                    const fechaSac = new Date(data.fechaSacramento.includes('T') ? data.fechaSacramento : `${data.fechaSacramento}T12:00:00`);
+                    const sacerdoteEpoca = sacerdotes.find(s => {
+                        if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                        const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                        const inicio = new Date(iStr);
+                        const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                        return fechaSac >= inicio && fechaSac <= fin;
+                    });
+                    if (sacerdoteEpoca) rawDaFe = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
+                }
+                
+                // 3. Fallback: Actual
+                if (!rawDaFe || rawDaFe === '---' || !isNaN(Number(String(rawDaFe).trim()))) {
+                    const actual = sacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
+                    if (actual) rawDaFe = `${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase();
+                }
+            }
+        }
+        
+        if (!rawDaFe || !isNaN(Number(String(rawDaFe).trim()))) rawDaFe = 'EL PÁRROCO';
+        rawDaFe = String(rawDaFe).replace(/^(PBRO\.?\s*|PADRE\s*|SACERDOTE\s*)/i, '').trim();
+        return rawDaFe !== 'EL PÁRROCO' ? `PBRO. ${rawDaFe}` : rawDaFe;
+    };
+
+    return (
+        <div className="mt-8 border border-slate-200/80 rounded-[2.5rem] overflow-hidden shadow-2xl bg-white animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className="bg-slate-900 px-8 py-5 flex justify-between items-center">
+                <h3 className="text-white font-black text-xs uppercase tracking-[0.2em] flex items-center gap-3">
+                   <Info className="w-4 h-4 text-[#D4AF37]" /> Inspección de Registro Parroquial
+                </h3>
+                {isReplacement && (
+                    <span className="bg-amber-400 text-slate-900 text-[9px] font-black uppercase px-3 py-1 rounded-full flex items-center gap-1 shadow-sm">
+                        <AlertOctagon className="w-3 h-3"/> Acta por Decreto
+                    </span>
+                )}
+            </div>
+
+            <div className="p-8 space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-center bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100">
+                    <div className="space-y-1">
+                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block">Localización Física</span>
+                        <span className="text-base font-black text-[#4B7BA7] font-mono bg-white px-4 py-2 rounded-xl border border-blue-100 inline-block shadow-sm">
+                            L:{data.Libro} • F:{data.folio} • N:{data.numero}
+                        </span>
+                    </div>
+                    <div className="md:col-span-2 space-y-1">
+                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block">Bautizado (Apellidos y Nombres)</span>
+                        <span className="text-xl font-black text-slate-900 uppercase tracking-tight block">
+                            {data.apellidos} {data.nombres}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <DetailItem icon={MapPin} label="Lugar Nacimiento" value={data.lugarNacimiento} />
+                    <DetailItem icon={User} label="Fecha Nacimiento" value={data.fechaNacimiento} />
+                    <DetailItem icon={MapPin} label="Lugar Bautismo" value={data.lugarBautismo} />
+                    <DetailItem icon={User} label="Fecha Bautismo" value={data.fechaSacramento} />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-blue-50/20 p-6 rounded-[2rem] border border-blue-100/50 space-y-4">
+                        <h4 className="text-[10px] font-black text-blue-900 uppercase tracking-widest flex items-center gap-2">
+                            <Users className="w-3.5 h-3.5 text-blue-600" /> Línea Paterna
+                        </h4>
+                        <DetailItem label="Padre" value={data.nombrePadre} />
+                        <DetailItem label="Abuelos Paternos" value={data.abuelosPaternos} isItalic />
+                    </div>
+                    <div className="bg-pink-50/20 p-6 rounded-[2rem] border border-pink-100/50 space-y-4">
+                        <h4 className="text-[10px] font-black text-pink-900 uppercase tracking-widest flex items-center gap-2">
+                            <Users className="w-3.5 h-3.5 text-pink-600" /> Línea Materna
+                        </h4>
+                        <DetailItem label="Madre" value={data.nombreMadre} />
+                        <DetailItem label="Abuelos Maternos" value={data.abuelosMaternos} isItalic />
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100">
+                    <DetailItem icon={Users} label="Padrinos" value={data.padrinos} />
+                    <DetailItem icon={PenTool} label="Ministro Celebrante" value={getResolvedMinistro()} />
+                    <div className="space-y-1">
+                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block flex items-center gap-1">
+                            <ShieldCheck className="w-3 h-3 text-[#D4AF37]" /> Párroco que Da Fe
+                        </span>
+                        <span className="text-xs font-black text-[#4B7BA7] uppercase bg-white px-3 py-1.5 rounded-xl border border-blue-100 inline-block shadow-sm">
+                            {getResolvedDaFe()}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="p-6 rounded-[2rem] border bg-amber-50/30 border-amber-200/60 shadow-sm">
+                    <h4 className="text-[10px] font-black text-amber-800 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
+                        <BookOpen className="w-3.5 h-3.5 text-amber-600" /> Nota Marginal
+                    </h4>
+                    <p className="text-xs font-bold text-slate-700 leading-relaxed font-mono uppercase italic">
+                        "{data.notaMarginal || 'SIN NOTAS MARGINALES ADICIONALES HASTA LA FECHA.'}"
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const DetailItem = ({ icon: Icon, label, value, isItalic = false }) => (
+    <div className="space-y-1 text-left">
+        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+            {Icon && <Icon className="w-3 h-3 text-slate-400" />} {label}
+        </span>
+        <span className={`text-xs font-bold text-slate-800 uppercase block ${isItalic ? 'italic font-medium text-slate-500' : ''}`}>
+            {value || '---'}
+        </span>
+    </div>
+);
+
+const Badge = ({ color, icon: Icon, label }) => {
+    const colors = {
+        red: "bg-red-50 text-red-700 border-red-100",
+        amber: "bg-amber-50 text-amber-700 border-amber-100",
+        green: "bg-green-50 text-green-700 border-green-100"
+    };
+    return (
+        <div className={cn("px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter border flex items-center gap-1.5 shadow-sm", colors[color])}>
+            <Icon className="w-3 h-3" /> {label}
+        </div>
+    );
+};
+
+const InfoCard = ({ label, val, icon: Icon }) => (
+    <div className="bg-white/80 backdrop-blur-sm p-5 rounded-[2rem] border border-white shadow-sm flex items-center gap-4">
+        <div className="bg-blue-50 p-2.5 rounded-xl text-[#4B7BA7]"><Icon className="w-4 h-4"/></div>
+        <div className="text-left">
+            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-0.5">{label}</span>
+            <span className="text-xs font-black text-gray-800 uppercase tracking-tight">{val}</span>
+        </div>
+    </div>
+);
+
 
 const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) => {
     const componenteImpresionRef = useRef();
+    const { getParrocos } = useAppData(); // 🚀 Importamos getParrocos
 
     if (!isOpen || !partida) return null;
 
-    // =========================================================================
-    // 🧠 LÓGICA DE ESTADOS (Vinculada a BD_BautizosPage)
-    // =========================================================================
+    const parishId = partida.parishId || partida.parish_id || auxiliaryData?.entity_id || auxiliaryData?.id;
+
+    // 🚀 OBTENEMOS EL "DA FE" HISTÓRICO PARA INYECTARLO AL PDF
+    let rawDaFe = partida.daFe || partida.dafe || partida.da_fe;
+    if (!rawDaFe || rawDaFe === '---' || rawDaFe.includes('ENCARGADO') || !isNaN(Number(String(rawDaFe).trim()))) {
+        let ministroRaw = partida.ministro;
+        if (ministroRaw && isNaN(Number(String(ministroRaw).trim()))) {
+            rawDaFe = ministroRaw.toUpperCase();
+        } else if (parishId && getParrocos) {
+            const sacerdotes = getParrocos(parishId) || [];
+            if (partida.fechaSacramento) {
+                const fechaSac = new Date(partida.fechaSacramento.includes('T') ? partida.fechaSacramento : `${partida.fechaSacramento}T12:00:00`);
+                const sacerdoteEpoca = sacerdotes.find(s => {
+                    if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                    const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                    const inicio = new Date(iStr);
+                    const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                    return fechaSac >= inicio && fechaSac <= fin;
+                });
+                if (sacerdoteEpoca) rawDaFe = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
+            }
+        }
+    }
+    
+    // Inyectamos el Sacerdote Histórico calculado temporalmente al objeto partida para que el PDF lo lea
+    const partidaParaImprimir = { ...partida, daFe: rawDaFe };
+
     const notaVisual = partida.notaMarginal && partida.notaMarginal !== "---" 
         ? partida.notaMarginal 
         : "REGISTRO SIN NOTAS MARGINALES ADICIONALES (CERTIFICACIÓN ESTÁNDAR).";
@@ -23,9 +218,6 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
     const estaAnulada = partida.tipoIdentidad === 'id_anulada_correccion' || partida.estado === 'anulada';
     const esReposicion = partida.tipoIdentidad === 'id_creada_reposicion';
 
-    // =========================================================================
-    // 🖨️ MOTOR DE IMPRESIÓN (Calidad Documental)
-    // =========================================================================
     const ejecutarImpresion = () => {
         const contenido = componenteImpresionRef.current;
         if (!contenido) return;
@@ -38,13 +230,10 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
         doc.open();
         doc.write('<html><head><title>Impresión Oficial - Sistema Parroquial</title>');
         
-        // Inyectamos estilos para que la tipografía Courier se mantenga
         const estilos = document.querySelectorAll('style, link[rel="stylesheet"]');
         estilos.forEach(s => doc.write(s.outerHTML));
         
-        // 🚀 MODIFICACIÓN CRUCIAL AQUÍ: Forzamos la impresión de fondos (las líneas de cuaderno)
         doc.write('</head><body style="margin:0; padding:0; background:white; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">');
-        
         doc.write(contenido.innerHTML);
         doc.write('</body></html>');
         doc.close();
@@ -126,9 +315,8 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
 
                                     {/* Componente de Impresión Final */}
                                     <div ref={componenteImpresionRef} className="print-root">
-                                        {/* 🚀 Llama a nuestro componente ya actualizado con el Tipo de Unión */}
                                         <BaptismPrintTemplate 
-                                            data={partida} 
+                                            data={partidaParaImprimir} // 🚀 Pasamos el objeto con el Sacerdote Histórico Inyectado
                                             parroquiaInfo={auxiliaryData} 
                                         />
                                     </div>
@@ -170,29 +358,5 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
         </AnimatePresence>
     );
 };
-
-// --- COMPONENTES AUXILIARES ---
-const Badge = ({ color, icon: Icon, label }) => {
-    const colors = {
-        red: "bg-red-50 text-red-700 border-red-100",
-        amber: "bg-amber-50 text-amber-700 border-amber-100",
-        green: "bg-green-50 text-green-700 border-green-100"
-    };
-    return (
-        <div className={cn("px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter border flex items-center gap-1.5 shadow-sm", colors[color])}>
-            <Icon className="w-3 h-3" /> {label}
-        </div>
-    );
-};
-
-const InfoCard = ({ label, val, icon: Icon }) => (
-    <div className="bg-white/80 backdrop-blur-sm p-5 rounded-[2rem] border border-white shadow-sm flex items-center gap-4">
-        <div className="bg-blue-50 p-2.5 rounded-xl text-[#4B7BA7]"><Icon className="w-4 h-4"/></div>
-        <div className="text-left">
-            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-0.5">{label}</span>
-            <span className="text-xs font-black text-gray-800 uppercase tracking-tight">{val}</span>
-        </div>
-    </div>
-);
 
 export default ViewBaptismPartidaModal;
