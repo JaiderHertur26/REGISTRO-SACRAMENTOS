@@ -212,7 +212,7 @@ const DecreeJsonImporter = () => {
                     const targetName = `${newRec.nombres || ''} ${newRec.apellidos || ''}`.trim().toUpperCase();
 
                     // =========================================================================
-                    // 🧠 MÁQUINA DEL TIEMPO REFINADA (SIN "PBRO. PBRO.")
+                    // 🧠 MÁQUINA DEL TIEMPO REFINADA
                     // =========================================================================
                     let rawDaFe = "";
                     
@@ -238,11 +238,10 @@ const DecreeJsonImporter = () => {
 
                     if (!rawDaFe) rawDaFe = defaultPriest;
 
-                    // 🧹 Limpieza quirúrgica de prefijos para evitar duplicaciones
+                    // Limpieza quirúrgica de prefijos para evitar duplicaciones
                     rawDaFe = rawDaFe.replace(/^(PBRO\.?\s*|PADRE\s*|SACERDOTE\s*)/i, '').trim();
                     const validDaFe = rawDaFe !== 'EL PÁRROCO' ? `PBRO. ${rawDaFe}` : rawDaFe;
 
-                    // 🚀 EXTRACCIÓN DE DATOS COMPLETOS PARA EL PDF DEL DECRETO
                     const pdfData = {
                         fechaSacramento: rawNew.fechaSacramento || rawNew.fecbau || newRec.celebration_date || '',
                         sexo: parseSex(rawNew.sexo || rawNew.sex),
@@ -255,7 +254,7 @@ const DecreeJsonImporter = () => {
                         abuelosMaternos: rawNew.abuelosMaternos || rawNew.abuemat || newRec.abuelos_maternos || '',
                         padrinos: rawNew.padrinos || newRec.padrinos || '',
                         ministro: (rawNew.ministro || newRec.ministro || '').toUpperCase(),
-                        daFe: validDaFe // 🚀 Inyectado para que el PDF del Decreto lo lea correctamente
+                        daFe: validDaFe 
                     };
 
                     if (item.isReposicion) {
@@ -273,7 +272,7 @@ const DecreeJsonImporter = () => {
                             conceptoAnulacionId: conceptoId, causa: conceptoText, targetName: targetName,
                             observaciones: item.observaciones_clean || '', newPartidaId: newRec.id,
                             ...pdfData,
-                            daFe: validDaFe, // Por redundancia de seguridad para el PDF
+                            daFe: validDaFe, 
                             datosNuevaPartida: { ...newUpdateData, book: item.sNewL, page: item.sNewF, entry: item.sNewN, daFe: validDaFe },
                             newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos, daFe: validDaFe }
                         };
@@ -291,11 +290,22 @@ const DecreeJsonImporter = () => {
                             libroAnulada: item.sOldL, folioAnulada: item.sOldF, numeroAnulada: item.sOldN, ministro: validDaFe
                         });
 
-                        const origUpdate = { ...rawOrig, isAnnulled: true, anulado: true, status: 'anulada', notaMarginal: noteAnulada };
-                        await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada, raw_data: origUpdate }).eq('id', origRec.id);
+                        // 🚀 AQUÍ APLICAMOS validDaFe DIRECTAMENTE AL REGISTRO ORIGINAL AFECTADO
+                        const origUpdate = { 
+                            ...rawOrig, isAnnulled: true, anulado: true, status: 'anulada', 
+                            notaMarginal: noteAnulada, daFe: validDaFe 
+                        };
+                        await supabase.from('baptisms').update({ 
+                            status: 'anulada', nota_marginal: noteAnulada, raw_data: origUpdate, da_fe: validDaFe 
+                        }).eq('id', origRec.id);
 
-                        const newUpdate = { ...rawNew, isSupplementary: true, creadoPorDecreto: true, correctionDecreeRef: item.decreto_clean, notaMarginal: noteNueva, daFe: validDaFe };
-                        await supabase.from('baptisms').update({ nota_marginal: noteNueva, raw_data: newUpdate, da_fe: validDaFe }).eq('id', newRec.id);
+                        const newUpdate = { 
+                            ...rawNew, isSupplementary: true, creadoPorDecreto: true, 
+                            correctionDecreeRef: item.decreto_clean, notaMarginal: noteNueva, daFe: validDaFe 
+                        };
+                        await supabase.from('baptisms').update({ 
+                            nota_marginal: noteNueva, raw_data: newUpdate, da_fe: validDaFe 
+                        }).eq('id', newRec.id);
 
                         const payloadDecree = {
                             decreeNumber: item.decreto_clean, decreeDate: item.fecha_clean, conceptoAnulacionId: conceptoId,
@@ -303,9 +313,9 @@ const DecreeJsonImporter = () => {
                             newTargetName: targetName, parroquia: parishLabel,
                             observaciones: item.observaciones_clean || '',
                             ...pdfData,
-                            daFe: validDaFe, // Por redundancia de seguridad para el PDF
+                            daFe: validDaFe, // 🚀 SELLA EL DECRETO CON EL PÁRROCO HISTÓRICO
                             originalPartidaId: origRec.id, newPartidaId: newRec.id,
-                            originalPartidaSummary: { book: item.sOldL, page: item.sOldF, entry: item.sOldN, nombres: origRec.nombres, apellidos: origRec.apellidos },
+                            originalPartidaSummary: { book: item.sOldL, page: item.sOldF, entry: item.sOldN, nombres: origRec.nombres, apellidos: origRec.apellidos, daFe: validDaFe },
                             newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos, daFe: validDaFe }
                         };
 
