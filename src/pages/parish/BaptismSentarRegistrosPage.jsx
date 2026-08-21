@@ -24,8 +24,10 @@ const BaptismSentarRegistrosPage = () => {
         getMisDatosList, 
         purificarRegistroBautismo,
         getBaptismParameters,
-        saveBaptismParameters
+        saveBaptismParameters,
+        getParrocos // 🚀 Extraemos la lista de sacerdotes
     } = useAppData();
+    
     const { toast } = useToast();
     const navigate = useNavigate();
 
@@ -57,7 +59,6 @@ const BaptismSentarRegistrosPage = () => {
             setResolvedParishId(pId);
             setNombreParroquia(user.parishName || user.parish_name || 'PARROQUIA PADRE MISERICORDIOSO');
         };
-
         resolveParish();
     }, [user]);
 
@@ -73,6 +74,7 @@ const BaptismSentarRegistrosPage = () => {
                 .order('created_at', { ascending: false });
 
             let recordsMapped = [];
+            const sacerdotes = getParrocos(resolvedParishId) || []; // 🚀 Máquina del tiempo
             
             if (!tempError && tempData && tempData.length > 0) {
                 const cloudPending = tempData.map(pb => {
@@ -84,13 +86,42 @@ const BaptismSentarRegistrosPage = () => {
 
                 recordsMapped = cloudPending.map(r => {
                     const purificado = purificarRegistroBautismo(r);
+                    let fechaSac = r.fechaSacramento || r.sacramentDate || purificado.fechaSacramento;
+
+                    // 🚀 MÁQUINA DEL TIEMPO PARA CORRECCIÓN DE EXCEL Y VIEJOS DBF
+                    let historicalPriest = null;
+                    if (fechaSac && sacerdotes.length > 0) {
+                        const fDate = new Date(fechaSac.includes('T') ? fechaSac : `${fechaSac}T12:00:00`);
+                        const sEpoca = sacerdotes.find(s => {
+                            if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                            const inicio = new Date((s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`);
+                            const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                            return fDate >= inicio && fDate <= fin;
+                        });
+                        if (sEpoca) historicalPriest = `${sEpoca.nombre} ${sEpoca.apellido || ''}`.trim().toUpperCase();
+                    }
+
+                    // Corrección Ministro
+                    let rawMin = purificado.ministro || r.ministro;
+                    if (!rawMin || !isNaN(Number(String(rawMin).trim()))) {
+                        rawMin = historicalPriest || '';
+                    }
+
+                    // Corrección Da Fe (Clona del ministro o busca el histórico)
+                    let rawDaFe = purificado.daFe || r.daFe || r.dafe || r.da_fe;
+                    if (!rawDaFe || !isNaN(Number(String(rawDaFe).trim()))) {
+                        rawDaFe = rawMin || historicalPriest || '';
+                    }
+
                     return {
                         ...purificado,
                         numeroRegistro: r.numeroRegistro || r.inscripcionNumero || purificado.numeroRegistro || '---',
                         direccion: r.direccion || purificado.direccion || '---',
                         nuip: r.nuip || purificado.nuip || '---',
                         oficinaRegistro: r.oficinaRegistro || purificado.oficinaRegistro || '---',
-                        fechaSacramento: r.fechaSacramento || r.sacramentDate || purificado.fechaSacramento 
+                        fechaSacramento: fechaSac,
+                        ministro: rawMin,
+                        daFe: rawDaFe // 🚀 Inyectado con su valor histórico o clonado
                     };
                 });
             }
@@ -141,7 +172,6 @@ const BaptismSentarRegistrosPage = () => {
             let pPorFolio = parseInt(p[`${prefix}Partidas`], 10) || 2;
             let restart = p[`${prefix}RestartNumber`];
 
-            // Pasamos el contador por el motor matemático las veces que sea necesario (por si es un lote)
             for (let i = 0; i < count; i++) {
                 const siguiente = calculateNextConsecutive(cNumero, cFolio, cLibro, pPorFolio, restart);
                 cNumero = parseInt(siguiente.numero, 10);
@@ -181,7 +211,6 @@ const BaptismSentarRegistrosPage = () => {
 
         setIsSaving(true);
         try {
-            // 🚀 LIMPIEZA: Enviamos el registro entero para no perder ni un solo campo.
             const result = await seatBaptism(currentBaptism.id, resolvedParishId, currentBaptism);
             if (result.success) {
                 await incrementParameters(1, 'ordinario'); 
@@ -221,6 +250,9 @@ const BaptismSentarRegistrosPage = () => {
 
         setIsSaving(true);
         try {
+            // El backend ahora recibirá los registros de "pending_baptisms" que ya modificamos visualmente. 
+            // Para asegurarnos de que la Nube guarde la corrección, los guardamos individualmente
+            // o a través del batch modificado.
             const result = await seatMultipleBaptisms(selectedIds, resolvedParishId);
             if (result.success) {
                 await incrementParameters(selectedIds.length, 'ordinario'); 

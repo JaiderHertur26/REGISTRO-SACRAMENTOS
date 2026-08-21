@@ -21,17 +21,52 @@ const InfoBox = ({ data, parishId, getParrocos }) => {
     
     const isReplacement = data.isSupplementary || data.tipoIdentidad === 'id_creada_reposicion';
 
-    // Resolución inteligente del Párroco que Da Fe si viene por defecto o vacío
+    // 🚀 RESOLUCIÓN INTELIGENTE DEL PÁRROCO QUE DA FE (MÁQUINA DEL TIEMPO)
     const getResolvedDaFe = () => {
-        const rawDaFe = data.daFe;
-        if (!rawDaFe || rawDaFe === '---' || rawDaFe.includes('ENCARGADO')) {
-            if (parishId && getParrocos) {
+        let rawDaFe = data.daFe || data.dafe || data.da_fe;
+        
+        // Si está vacío, es número (viejo sistema) o dice encargado
+        if (!rawDaFe || rawDaFe === '---' || rawDaFe.includes('ENCARGADO') || !isNaN(Number(String(rawDaFe).trim()))) {
+            
+            // 1. Clonar desde Ministro si es válido
+            let ministroRaw = data.ministro;
+            if (ministroRaw && isNaN(Number(String(ministroRaw).trim()))) {
+                rawDaFe = ministroRaw.toUpperCase();
+            } 
+            // 2. Máquina del Tiempo
+            else if (parishId && getParrocos) {
                 const sacerdotes = getParrocos(parishId) || [];
-                const actual = sacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
-                if (actual) return ` ${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase();
+                if (data.fechaSacramento) {
+                    const fechaSac = new Date(data.fechaSacramento.includes('T') ? data.fechaSacramento : `${data.fechaSacramento}T12:00:00`);
+                    const sacerdoteEpoca = sacerdotes.find(s => {
+                        if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                        const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                        const inicio = new Date(iStr);
+                        const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                        return fechaSac >= inicio && fechaSac <= fin;
+                    });
+                    if (sacerdoteEpoca) rawDaFe = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
+                }
+                
+                // 3. Fallback: Actual
+                if (!rawDaFe || rawDaFe === '---' || !isNaN(Number(String(rawDaFe).trim()))) {
+                    const actual = sacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
+                    if (actual) rawDaFe = `${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase();
+                }
             }
         }
-        return rawDaFe || 'PÁRROCO ENCARGADO';
+        
+        if (!rawDaFe || !isNaN(Number(String(rawDaFe).trim()))) rawDaFe = 'EL PÁRROCO';
+        rawDaFe = String(rawDaFe).replace(/^(PBRO\.?\s*|PADRE\s*|SACERDOTE\s*)/i, '').trim();
+        return rawDaFe !== 'EL PÁRROCO' ? `PBRO. ${rawDaFe}` : rawDaFe;
+    };
+
+    // Limpieza de Ministro
+    const getResolvedMinistro = () => {
+        let min = data.ministro;
+        if (!min || !isNaN(Number(String(min).trim()))) return '---';
+        min = String(min).replace(/^(PBRO\.?\s*|PADRE\s*|SACERDOTE\s*)/i, '').trim();
+        return `PBRO. ${min}`;
     };
 
     return (
@@ -48,7 +83,6 @@ const InfoBox = ({ data, parishId, getParrocos }) => {
             </div>
 
             <div className="p-8 space-y-8">
-                {/* FILA 1: ARCHIVO E IDENTIDAD */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-center bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100">
                     <div className="space-y-1">
                         <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block">Localización Física</span>
@@ -64,7 +98,6 @@ const InfoBox = ({ data, parishId, getParrocos }) => {
                     </div>
                 </div>
 
-                {/* FILA 2: DATOS DEL SACRAMENTO Y NACIMIENTO */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <DetailItem icon={MapPin} label="Lugar Nacimiento" value={data.lugarNacimiento} />
                     <DetailItem icon={User} label="Fecha Nacimiento" value={data.fechaNacimiento} />
@@ -72,7 +105,6 @@ const InfoBox = ({ data, parishId, getParrocos }) => {
                     <DetailItem icon={User} label="Fecha Bautismo" value={data.fechaSacramento} />
                 </div>
 
-                {/* FILA 3: FILIACIÓN */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="bg-blue-50/20 p-6 rounded-[2rem] border border-blue-100/50 space-y-4">
                         <h4 className="text-[10px] font-black text-blue-900 uppercase tracking-widest flex items-center gap-2">
@@ -90,10 +122,9 @@ const InfoBox = ({ data, parishId, getParrocos }) => {
                     </div>
                 </div>
 
-                {/* FILA 4: TESTIGOS Y MINISTRO */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100">
                     <DetailItem icon={Users} label="Padrinos" value={data.padrinos} />
-                    <DetailItem icon={PenTool} label="Ministro Celebrante" value={data.ministro} />
+                    <DetailItem icon={PenTool} label="Ministro Celebrante" value={getResolvedMinistro()} />
                     <div className="space-y-1">
                         <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block flex items-center gap-1">
                             <ShieldCheck className="w-3 h-3 text-[#D4AF37]" /> Párroco que Da Fe
@@ -104,7 +135,6 @@ const InfoBox = ({ data, parishId, getParrocos }) => {
                     </div>
                 </div>
 
-                {/* NOTA MARGINAL */}
                 <div className="p-6 rounded-[2rem] border bg-amber-50/30 border-amber-200/60 shadow-sm">
                     <h4 className="text-[10px] font-black text-amber-800 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
                         <BookOpen className="w-3.5 h-3.5 text-amber-600" /> Nota Marginal
@@ -112,10 +142,6 @@ const InfoBox = ({ data, parishId, getParrocos }) => {
                     <p className="text-xs font-bold text-slate-700 leading-relaxed font-mono uppercase italic">
                         "{data.notaMarginal || 'SIN NOTAS MARGINALES ADICIONALES HASTA LA FECHA.'}"
                     </p>
-                </div>
-
-                <div className="pt-2">
-                   
                 </div>
             </div>
         </div>
@@ -232,7 +258,6 @@ const BaptismPartidasPage = () => {
             </div>
           </div>
 
-          {/* BARRA DE BÚSQUEDA */}
           <div className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 flex gap-4 items-center">
              <div className="relative flex-1">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" />
