@@ -1,8 +1,16 @@
 import React, { forwardRef } from 'react';
+import { useAppData } from '@/context/AppDataContext';
 import { cn } from '@/lib/utils';
 
+// 🚀 FUNCIÓN LIMPIADORA DE TÍTULOS
+const cleanTitle = (nameStr) => {
+    if (!nameStr) return '';
+    return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|SACERDOTE\s*)/i, '').trim();
+};
+
 const VistaImprimibleDocumento = forwardRef(({ aviso, documento, partida, emisorInfo, receptorInfo }, ref) => {
-    
+    const { getParrocos } = useAppData(); // 🚀 CEREBRO GLOBAL
+
     // --- LÓGICA DE RESOLUCIÓN DE DATOS (SSOT) ---
     const resolveValue = (val) => String(val || '').toUpperCase().trim();
 
@@ -22,6 +30,38 @@ const VistaImprimibleDocumento = forwardRef(({ aviso, documento, partida, emisor
     const doc = documento || {};
     const emisor = emisorInfo || {};
     const receptor = receptorInfo || {};
+
+    // 🚀 MÁQUINA DEL TIEMPO: FIRMA DEL PÁRROCO EN LA FECHA DE LA NOTIFICACIÓN
+    let finalDaFe = 'PÁRROCO ENCARGADO';
+    const parishId = emisor.id || doc.parishId;
+    const fechaDocumento = aviso?.createdAt || doc.createdAt || doc.fechaCreacion || new Date().toISOString();
+
+    if (parishId && getParrocos) {
+        const sacerdotes = getParrocos(parishId) || [];
+        const dStr = fechaDocumento.includes('T') ? fechaDocumento : `${fechaDocumento}T12:00:00`;
+        const fechaEmision = new Date(dStr);
+        
+        if (!isNaN(fechaEmision.getTime())) {
+            const sacerdoteEpoca = sacerdotes.find(s => {
+                if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                const inicio = new Date(iStr);
+                const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                return fechaEmision >= inicio && fechaEmision <= fin;
+            });
+
+            if (sacerdoteEpoca) {
+                finalDaFe = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim();
+            } else {
+                const actual = sacerdotes.find(p => String(p.estado || p.Estado) === '1');
+                if (actual) finalDaFe = `${actual.nombre || ''} ${actual.apellido || ''}`.trim();
+            }
+        }
+    }
+
+    // 🚀 LIMPIEZA DE TÍTULO PARA EL SELLO
+    finalDaFe = cleanTitle(finalDaFe);
+    finalDaFe = finalDaFe !== 'PÁRROCO ENCARGADO' && finalDaFe ? `PBRO. ${finalDaFe}` : finalDaFe;
 
     // Datos del Matrimonio
     const marriageParish = resolverNombre(doc.matrimonio?.parroquia || doc.marriageParish, 'parishes');
@@ -55,7 +95,7 @@ const VistaImprimibleDocumento = forwardRef(({ aviso, documento, partida, emisor
                     </div>
                     <div className="text-right">
                         <span className="text-[9px] font-black text-gray-400 block uppercase">Fecha de Emisión</span>
-                        <span className="font-bold text-sm">{new Date().toLocaleDateString('es-ES').toUpperCase()}</span>
+                        <span className="font-bold text-sm">{new Date(fechaDocumento).toLocaleDateString('es-ES').toUpperCase()}</span>
                     </div>
                 </div>
             </div>
@@ -112,14 +152,15 @@ const VistaImprimibleDocumento = forwardRef(({ aviso, documento, partida, emisor
 
                 {/* NOTA FINAL */}
                 <div className="pt-4 italic text-[11px] text-gray-500 uppercase leading-tight">
-                    Dado en {resolveValue(emisor.ciudad)}, a los {new Date().getDate()} días del mes de {new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(new Date()).toUpperCase()} del año {new Date().getFullYear()}.
+                    Dado en {resolveValue(emisor.ciudad)}, a los {new Date(fechaDocumento).getDate()} días del mes de {new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(new Date(fechaDocumento)).toUpperCase()} del año {new Date(fechaDocumento).getFullYear()}.
                 </div>
             </div>
 
-            {/* ESPACIO DE FIRMA */}
+            {/* ESPACIO DE FIRMA (INYECCIÓN DE MÁQUINA DEL TIEMPO) */}
             <div className="mt-20 flex flex-col items-center">
                 <div className="w-72 border-b-2 border-black mb-2"></div>
-                <span className="text-[11px] font-black uppercase tracking-widest">Párroco / Encargado</span>
+                <span className="text-[12px] font-black uppercase tracking-widest text-black">{finalDaFe}</span>
+                <span className="text-[10px] font-bold text-gray-600 uppercase tracking-widest mt-0.5">Párroco / Encargado</span>
                 <div className="h-20 w-20 border-2 border-dashed border-gray-200 rounded-full mt-4 flex items-center justify-center text-[8px] font-bold text-gray-300 uppercase text-center p-2">
                     Sello Parroquial
                 </div>

@@ -1,9 +1,49 @@
 import React, { forwardRef } from 'react';
+import { useAppData } from '@/context/AppDataContext';
+
+// 🚀 FUNCIÓN LIMPIADORA
+const cleanTitle = (nameStr) => {
+    if (!nameStr) return '';
+    return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|SACERDOTE\s*)/i, '').trim();
+};
 
 const VistaImprimibleDocumentoRespaldo = forwardRef(({ documento, emisorInfo, receptorInfo }, ref) => {
+    const { getParrocos } = useAppData(); // 🚀 CEREBRO GLOBAL
+
     if (!documento) return null;
 
     const resolveValue = (val) => String(val || '').toUpperCase().trim();
+    
+    // 🚀 MÁQUINA DEL TIEMPO: FIRMA DEL PÁRROCO
+    let finalDaFe = 'PÁRROCO ENCARGADO';
+    const parishId = emisorInfo?.id || documento.parishId;
+    const fechaDocumento = documento.createdAt || documento.fechaCreacion || new Date().toISOString();
+
+    if (parishId && getParrocos) {
+        const sacerdotes = getParrocos(parishId) || [];
+        const dStr = fechaDocumento.includes('T') ? fechaDocumento : `${fechaDocumento}T12:00:00`;
+        const fechaEmision = new Date(dStr);
+        
+        if (!isNaN(fechaEmision.getTime())) {
+            const sacerdoteEpoca = sacerdotes.find(s => {
+                if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                const inicio = new Date(iStr);
+                const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                return fechaEmision >= inicio && fechaEmision <= fin;
+            });
+
+            if (sacerdoteEpoca) {
+                finalDaFe = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim();
+            } else {
+                const actual = sacerdotes.find(p => String(p.estado || p.Estado) === '1');
+                if (actual) finalDaFe = `${actual.nombre || ''} ${actual.apellido || ''}`.trim();
+            }
+        }
+    }
+
+    finalDaFe = cleanTitle(finalDaFe);
+    finalDaFe = finalDaFe !== 'PÁRROCO ENCARGADO' && finalDaFe ? `PBRO. ${finalDaFe}` : finalDaFe;
 
     return (
         <div ref={ref} className="print-area bg-white text-black p-[0.75in] min-h-[11in] w-full mx-auto relative overflow-hidden" 
@@ -62,9 +102,15 @@ const VistaImprimibleDocumentoRespaldo = forwardRef(({ documento, emisorInfo, re
                     </p>
                 </div>
 
-                <div className="text-[9px] font-bold text-gray-400 uppercase pt-4">
-                    Registrado por: {resolveValue(documento.createdBy)}<br/>
-                    Fecha Registro: {new Date(documento.createdAt).toLocaleString('es-ES').toUpperCase()}
+                <div className="text-[9px] font-bold text-gray-400 uppercase pt-4 flex justify-between border-t border-gray-300 mt-4">
+                    <div>
+                        Registrado por el usuario: {resolveValue(documento.createdBy)}<br/>
+                        Fecha Registro de Sistema: {new Date(fechaDocumento).toLocaleString('es-ES').toUpperCase()}
+                    </div>
+                    <div className="text-right text-gray-800">
+                        <span className="block mb-1">AUTORIZADO POR (DA FE):</span>
+                        <span className="font-black text-black">{finalDaFe}</span>
+                    </div>
                 </div>
             </div>
 

@@ -4,9 +4,9 @@ import Modal from '@/components/ui/Modal';
 import { Button } from '@/components/ui/button';
 import { Printer, ExternalLink, X, FileText, CheckCircle } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
-import VistaImprimibleDocumento from '@/components/VistaImprimibleDocumento';
+import VistaImprimibleDocumentoRespaldo from '@/components/VistaImprimibleDocumentoRespaldo';
+import { useAppData } from '@/context/AppDataContext'; // 🚀 IMPORTADO PARA TIEMPO
 
-// Funciones de utilidad
 const formatearFecha = (fecha) => {
     if (!fecha) return '';
     try {
@@ -28,10 +28,8 @@ const formatearFecha = (fecha) => {
     }
 };
 
-// TRADUCTOR DE UUIDs A NOMBRES REALES
 const resolverNombreCatalogo = (idOrName, keyCatalogo) => {
     if (!idOrName || typeof idOrName !== 'string') return idOrName || '';
-    // Si tiene 36 caracteres y guiones, es un UUID
     if (idOrName.length === 36 && idOrName.includes('-')) {
         try {
             const items = JSON.parse(localStorage.getItem(keyCatalogo) || '[]');
@@ -56,7 +54,9 @@ const reemplazarVariablesNotificacion = (texto, datos) => {
         '[LIBRO_MAT]': datos.libroMatrimonio,
         '[FOLIO_MAT]': datos.folioMatrimonio,
         '[NUMERO_MAT]': datos.numeroMatrimonio,
-        '[FECHA_EXPEDICION]': datos.fechaExpedicion
+        '[FECHA_EXPEDICION]': datos.fechaExpedicion,
+        '[MINISTRO]': datos.ministro, // 🚀 AÑADIDO
+        '[DA_FE]': datos.ministro    // 🚀 AÑADIDO
     };
     for (const [variable, valor] of Object.entries(map)) {
         if (valor !== undefined && valor !== null && valor !== '') {
@@ -69,6 +69,7 @@ const reemplazarVariablesNotificacion = (texto, datos) => {
 const ModalVerDocumento = ({ isOpen, onClose, documento, emisorInfo, receptorInfo }) => {
     const navigate = useNavigate();
     const { toast } = useToast();
+    const { getParrocos } = useAppData(); // 🚀 CEREBRO TEMPORAL
     const printRef = useRef(null);
 
     if (!isOpen || !documento) return null;
@@ -99,12 +100,10 @@ const ModalVerDocumento = ({ isOpen, onClose, documento, emisorInfo, receptorInf
 
     const isInterno = !documento.receiverParishId || documento.receiverParishId === documento.parishId;
 
-    // Extracción Dual
     const marriageDate = documento.matrimonio?.fecha || documento.marriageDate;
     const rawMarriageParish = documento.matrimonio?.parroquia?.nombre || documento.matrimonio?.parroquia || documento.marriageParish;
     const rawMarriageDiocese = documento.matrimonio?.diocesis?.nombre || documento.matrimonio?.diocesis || documento.marriageDiocese;
     
-    // APLICAMOS EL TRADUCTOR DE CÓDIGOS
     const marriageParish = resolverNombreCatalogo(rawMarriageParish, 'parishes');
     const marriageDiocese = resolverNombreCatalogo(rawMarriageDiocese, 'dioceses');
 
@@ -112,12 +111,36 @@ const ModalVerDocumento = ({ isOpen, onClose, documento, emisorInfo, receptorInf
     const marriageBook = documento.matrimonio?.libro || documento.marriageBook;
     const marriageFolio = documento.matrimonio?.folio || documento.marriageFolio;
     const marriageNumber = documento.matrimonio?.numero || documento.marriageNumber;
-    const fechaCreacion = documento.fechaCreacion || documento.createdAt;
+    const fechaCreacion = documento.fechaCreacion || documento.createdAt || new Date().toISOString();
+
+    // 🚀 LÓGICA TEMPORAL PARA EL TEXTO
+    let finalDaFe = 'EL PÁRROCO';
+    const parishId = emisorInfo?.id || documento.parishId;
+    if (parishId && getParrocos) {
+        const sacerdotes = getParrocos(parishId) || [];
+        const dStr = fechaCreacion.includes('T') ? fechaCreacion : `${fechaCreacion}T12:00:00`;
+        const fechaDoc = new Date(dStr);
+        if (!isNaN(fechaDoc.getTime())) {
+            const sacerdoteEpoca = sacerdotes.find(s => {
+                if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                const inicio = new Date(iStr);
+                const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                return fechaDoc >= inicio && fechaDoc <= fin;
+            });
+            if (sacerdoteEpoca) {
+                finalDaFe = `PBRO. ${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
+            } else {
+                const actual = sacerdotes.find(p => String(p.estado || p.Estado) === '1');
+                if (actual) finalDaFe = `PBRO. ${actual.nombre || ''} ${actual.apellido || ''}`.trim().toUpperCase();
+            }
+        }
+    }
 
     const getTextoNotaMarginal = () => {
         if (!documento.marginNoteText) return "No se registró el texto de la nota marginal al generar este documento.";
         const datosParaReemplazo = {
-            fechaNotificacion: formatearFecha(fechaCreacion || new Date()),
+            fechaNotificacion: formatearFecha(fechaCreacion),
             fechaMatrimonio: formatearFecha(marriageDate),
             parroquiaMatrimonio: marriageParish?.toUpperCase(),
             diocesisMatrimonio: marriageDiocese?.toUpperCase(),
@@ -125,7 +148,8 @@ const ModalVerDocumento = ({ isOpen, onClose, documento, emisorInfo, receptorInf
             libroMatrimonio: marriageBook,
             folioMatrimonio: marriageFolio,
             numeroMatrimonio: marriageNumber,
-            fechaExpedicion: formatearFecha(new Date())
+            fechaExpedicion: formatearFecha(new Date()),
+            ministro: finalDaFe // 🚀 INYECTADO
         };
         return reemplazarVariablesNotificacion(documento.marginNoteText, datosParaReemplazo);
     };
@@ -137,13 +161,12 @@ const ModalVerDocumento = ({ isOpen, onClose, documento, emisorInfo, receptorInf
                 <div>
                     <h4 className="font-bold text-gray-900">Documento Guardado</h4>
                     <p className="text-xs mt-1 text-gray-600">
-                        Generado el {new Date(fechaCreacion || Date.now()).toLocaleString()} por {documento.createdBy || 'Sistema'}
+                        Generado el {new Date(fechaCreacion).toLocaleString()} por {documento.createdBy || 'Sistema'}
                     </p>
                 </div>
             </div>
 
             <div className="space-y-6 no-print">
-                {/* SECCIÓN 1: DATOS DEL DOCUMENTO */}
                 <section>
                     <h3 className="text-md font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3 flex items-center gap-2">
                         <FileText className="w-4 h-4 text-blue-600"/> 1. Información de Envío
@@ -159,7 +182,6 @@ const ModalVerDocumento = ({ isOpen, onClose, documento, emisorInfo, receptorInf
                     </div>
                 </section>
 
-                {/* SECCIÓN 2: PARTIDA BAUTISMO */}
                 <section>
                     <h3 className="text-md font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
                         2. Identificación del Bautizado(a)
@@ -183,7 +205,6 @@ const ModalVerDocumento = ({ isOpen, onClose, documento, emisorInfo, receptorInf
                     </div>
                 </section>
 
-                {/* SECCIÓN 3: DATOS MATRIMONIO */}
                 <section>
                     <h3 className="text-md font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
                         3. Datos de la Celebración del Matrimonio
@@ -207,7 +228,6 @@ const ModalVerDocumento = ({ isOpen, onClose, documento, emisorInfo, receptorInf
                     </div>
                 </section>
 
-                {/* SECCIÓN 4: NOTA MARGINAL */}
                 <section>
                     <h3 className="text-md font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
                         4. Nota Marginal Generada
@@ -220,7 +240,6 @@ const ModalVerDocumento = ({ isOpen, onClose, documento, emisorInfo, receptorInf
                 </section>
             </div>
 
-            {/* ACTIONS FOOTER */}
             <div className="mt-8 pt-4 border-t border-gray-200 flex flex-wrap justify-between items-center bg-gray-50 -mx-6 px-6 -mb-6 pb-6 gap-3 no-print">
                 <div className="flex gap-2">
                     <Button variant="outline" onClick={handlePrint} className="flex items-center gap-2 border-gray-300 text-gray-700 bg-white shadow-sm hover:bg-gray-50">
@@ -238,13 +257,14 @@ const ModalVerDocumento = ({ isOpen, onClose, documento, emisorInfo, receptorInf
                 </Button>
             </div>
 
-            {/* AREA EXCLUSIVA DE IMPRESIÓN */}
-            <div ref={printRef}>
-                <VistaImprimibleDocumento 
-                    documento={documento}
-                    emisorInfo={emisorInfo}
-                    receptorInfo={receptorInfo}
-                />
+            <div style={{ display: 'none' }}>
+                <div ref={printRef} className="print-section">
+                    <VistaImprimibleDocumentoRespaldo 
+                        documento={documento}
+                        emisorInfo={emisorInfo}
+                        receptorInfo={receptorInfo}
+                    />
+                </div>
             </div>
         </Modal>
     );

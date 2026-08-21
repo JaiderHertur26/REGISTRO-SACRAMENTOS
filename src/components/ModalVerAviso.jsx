@@ -5,9 +5,71 @@ import { CheckCircle2, Printer, X, FileText, Trash2 } from 'lucide-react';
 import { useReactToPrint } from 'react-to-print';
 import VistaImprimibleDocumento from './VistaImprimibleDocumento';
 import { obtenerParroquiaEmisoraInfo } from '@/utils/matrimonialNotificationAvisoHelpers';
+import { useAppData } from '@/context/AppDataContext'; // 🚀 IMPORTADO PARA LA MÁQUINA DEL TIEMPO
+
+// --- FUNCIONES DE FORMATEO Y TRADUCCIÓN ---
+const formatearFecha = (fecha) => {
+    if (!fecha) return '';
+    try {
+        const datePart = typeof fecha === 'string' && fecha.includes('T') ? fecha.split('T')[0] : fecha;
+        if (typeof datePart === 'string' && datePart.includes('-')) {
+            const [year, month, day] = datePart.split('-');
+            const date = new Date(year, parseInt(month) - 1, day);
+            if (!isNaN(date.getTime())) {
+                return new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }).format(date);
+            }
+        }
+        const dateObj = new Date(fecha);
+        if (!isNaN(dateObj.getTime())) {
+            return new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }).format(dateObj);
+        }
+        return fecha;
+    } catch (e) {
+        return fecha;
+    }
+};
+
+const resolverNombreCatalogo = (idOrName, keyCatalogo) => {
+    if (!idOrName || typeof idOrName !== 'string') return idOrName || '';
+    if (idOrName.length === 36 && idOrName.includes('-')) {
+        try {
+            const items = JSON.parse(localStorage.getItem(keyCatalogo) || '[]');
+            const encontrado = items.find(i => i.id === idOrName);
+            return encontrado ? (encontrado.name || encontrado.nombre || idOrName) : idOrName;
+        } catch(e) {
+            return idOrName;
+        }
+    }
+    return idOrName;
+};
+
+const reemplazarVariablesNotificacion = (texto, datos) => {
+    if (!texto) return '';
+    let resultado = texto;
+    const map = {
+        '[FECHA_NOTIFICACION]': datos.fechaNotificacion,
+        '[FECHA_MATRIMONIO]': datos.fechaMatrimonio,
+        '[PARROQUIA_MATRIMONIO]': datos.parroquiaMatrimonio,
+        '[DIOCESIS_MATRIMONIO]': datos.diocesisMatrimonio,
+        '[NOMBRE_CONYUGE]': datos.nombreConyuge,
+        '[LIBRO_MAT]': datos.libroMatrimonio,
+        '[FOLIO_MAT]': datos.folioMatrimonio,
+        '[NUMERO_MAT]': datos.numeroMatrimonio,
+        '[FECHA_EXPEDICION]': datos.fechaExpedicion,
+        '[MINISTRO]': datos.ministro, // 🚀 AÑADIDO
+        '[DA_FE]': datos.ministro    // 🚀 AÑADIDO
+    };
+    for (const [variable, valor] of Object.entries(map)) {
+        if (valor !== undefined && valor !== null && valor !== '') {
+            resultado = resultado.split(variable).join(valor);
+        }
+    }
+    return resultado;
+};
 
 const ModalVerAviso = ({ isOpen, onClose, aviso, documento, partida, onMarkAsViewed, onDeleteAviso, receptorInfo }) => {
     const printRef = useRef();
+    const { getParrocos } = useAppData(); // 🚀 CEREBRO TEMPORAL
 
     const handlePrint = useReactToPrint({
         content: () => printRef.current,
@@ -19,10 +81,68 @@ const ModalVerAviso = ({ isOpen, onClose, aviso, documento, partida, onMarkAsVie
     const isPending = aviso.status === 'pendiente';
     const emisorInfo = obtenerParroquiaEmisoraInfo(documento.parishId);
 
+    // 🚀 EXTRACCIÓN Y TRADUCCIÓN DE DATOS PARA LA NOTA
+    const marriageDate = documento.matrimonio?.fecha || documento.marriageDate;
+    const rawMarriageParish = documento.matrimonio?.parroquia?.nombre || documento.matrimonio?.parroquia || documento.marriageParish;
+    const rawMarriageDiocese = documento.matrimonio?.diocesis?.nombre || documento.matrimonio?.diocesis || documento.marriageDiocese;
+    
+    const marriageParish = resolverNombreCatalogo(rawMarriageParish, 'parishes');
+    const marriageDiocese = resolverNombreCatalogo(rawMarriageDiocese, 'dioceses');
+
+    const spouseName = documento.matrimonio?.conyuge?.nombre || documento.spouseName;
+    const marriageBook = documento.matrimonio?.libro || documento.marriageBook;
+    const marriageFolio = documento.matrimonio?.folio || documento.marriageFolio;
+    const marriageNumber = documento.matrimonio?.numero || documento.marriageNumber;
+    const fechaCreacion = documento.fechaCreacion || documento.createdAt || aviso.createdAt || new Date().toISOString();
+
+    // 🚀 MÁQUINA DEL TIEMPO: BUSCAR AL PÁRROCO EMISOR EN LA FECHA DE CREACIÓN
+    let finalDaFe = 'EL PÁRROCO';
+    const parishId = emisorInfo?.id || documento.parishId;
+    
+    if (parishId && getParrocos) {
+        const sacerdotes = getParrocos(parishId) || [];
+        const dStr = fechaCreacion.includes('T') ? fechaCreacion : `${fechaCreacion}T12:00:00`;
+        const fechaDoc = new Date(dStr);
+        
+        if (!isNaN(fechaDoc.getTime())) {
+            const sacerdoteEpoca = sacerdotes.find(s => {
+                if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                const inicio = new Date(iStr);
+                const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                return fechaDoc >= inicio && fechaDoc <= fin;
+            });
+            if (sacerdoteEpoca) {
+                finalDaFe = `PBRO. ${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
+            } else {
+                const actual = sacerdotes.find(p => String(p.estado || p.Estado) === '1');
+                if (actual) finalDaFe = `PBRO. ${actual.nombre || ''} ${actual.apellido || ''}`.trim().toUpperCase();
+            }
+        }
+    }
+
+    // 🚀 GENERADOR DEL TEXTO DE LA NOTA MARGINAL CON VARIABLES
+    const getTextoNotaMarginal = () => {
+        if (!documento.marginNoteText) return "No se registró el texto de la nota marginal al generar este documento.";
+        const datosParaReemplazo = {
+            fechaNotificacion: formatearFecha(fechaCreacion),
+            fechaMatrimonio: formatearFecha(marriageDate),
+            parroquiaMatrimonio: marriageParish?.toUpperCase(),
+            diocesisMatrimonio: marriageDiocese?.toUpperCase(),
+            nombreConyuge: spouseName?.toUpperCase(),
+            libroMatrimonio: marriageBook,
+            folioMatrimonio: marriageFolio,
+            numeroMatrimonio: marriageNumber,
+            fechaExpedicion: formatearFecha(new Date()),
+            ministro: finalDaFe // 🚀 INYECTADO
+        };
+        return reemplazarVariablesNotificacion(documento.marginNoteText, datosParaReemplazo);
+    };
+
     const DataRow = ({ label, value, highlight = false }) => (
         <div className={`flex justify-between py-2 border-b border-gray-100 last:border-0 ${highlight ? 'font-semibold text-blue-900 bg-blue-50 px-2 rounded -mx-2' : 'text-gray-700'}`}>
             <span className="text-gray-500 text-sm">{label}</span>
-            <span className="text-sm text-right">{value || '-'}</span>
+            <span className="text-sm text-right font-medium">{value || '-'}</span>
         </div>
     );
 
@@ -88,17 +208,17 @@ const ModalVerAviso = ({ isOpen, onClose, aviso, documento, partida, onMarkAsVie
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
                         <div>
-                            <DataRow label="Cónyuge" value={documento.spouseName} />
-                            <DataRow label="Fecha Matrimonio" value={documento.marriageDate} />
-                            <DataRow label="Lugar de Celebración" value={`${documento.marriageParish}, ${documento.marriageDiocese}`} />
+                            <DataRow label="Cónyuge" value={spouseName} />
+                            <DataRow label="Fecha Matrimonio" value={formatearFecha(marriageDate)} />
+                            <DataRow label="Lugar de Celebración" value={[marriageParish, marriageDiocese].filter(Boolean).join(', ')} />
                         </div>
                         <div>
                             <div className="mt-2 pt-2 border-t border-gray-100">
                                 <span className="block text-xs font-semibold text-gray-500 mb-1">Registro Matrimonial:</span>
                                 <div className="grid grid-cols-3 gap-2">
-                                    <div className="bg-white p-1 border border-gray-200 rounded text-center text-xs"><span className="text-gray-400 block">Libro</span> {documento.marriageBook || '-'}</div>
-                                    <div className="bg-white p-1 border border-gray-200 rounded text-center text-xs"><span className="text-gray-400 block">Folio</span> {documento.marriageFolio || '-'}</div>
-                                    <div className="bg-white p-1 border border-gray-200 rounded text-center text-xs"><span className="text-gray-400 block">Número</span> {documento.marriageNumber || '-'}</div>
+                                    <div className="bg-white p-1 border border-gray-200 rounded text-center text-xs"><span className="text-gray-400 block">Libro</span> {marriageBook || '-'}</div>
+                                    <div className="bg-white p-1 border border-gray-200 rounded text-center text-xs"><span className="text-gray-400 block">Folio</span> {marriageFolio || '-'}</div>
+                                    <div className="bg-white p-1 border border-gray-200 rounded text-center text-xs"><span className="text-gray-400 block">Número</span> {marriageNumber || '-'}</div>
                                 </div>
                             </div>
                         </div>
@@ -111,8 +231,8 @@ const ModalVerAviso = ({ isOpen, onClose, aviso, documento, partida, onMarkAsVie
                         4. Nota Marginal a Asentar
                     </h3>
                     <div className="bg-[#fffdf0] border border-[#e6debc] p-4 rounded-lg">
-                        <p className="text-sm font-mono text-gray-800 leading-relaxed text-justify">
-                            {documento.marginNoteText || "ESTA PARTIDA CORRESPONDE A PERSONA CASADA/O. DECRETO DE NOTIFICACION MATRIMONIAL [NUMERO_DECRETO] DE [FECHA_DECRETO]. MATRIMONIO CELEBRADO [FECHA_MATRIMONIO]. EXPEDIDO EL DIA [FECHA_EXPEDICION]."}
+                        <p className="text-sm font-mono text-gray-800 leading-relaxed text-justify uppercase whitespace-pre-wrap">
+                            {getTextoNotaMarginal()}
                         </p>
                     </div>
                 </section>
