@@ -128,6 +128,13 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
   const newPage = String(newPartidaSummary.page || newPartidaSummary.page_number || newPartidaSummary.folio || '---').padStart(4, '0');
   const newEntry = String(newPartidaSummary.entry || newPartidaSummary.entry_number || newPartidaSummary.numero || '---').padStart(4, '0');
 
+  // 🚀 LIMPIEZA INTELIGENTE PARA EL MINISTRO
+  let rawMinistro = getVal('ministro').toUpperCase();
+  if (rawMinistro) {
+      rawMinistro = rawMinistro.replace(/^(PBRO\.?\s*|PADRE\s*|SACERDOTE\s*)/i, '').trim();
+      rawMinistro = rawMinistro !== 'EL PÁRROCO' ? `PBRO. ${rawMinistro}` : rawMinistro;
+  }
+
   const baptismRecord = {
     fechaSacramento: getVal('fechaSacramento'), 
     nombres: getVal('nombres') || getVal('firstName'),
@@ -141,8 +148,7 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
     abuelosPaternos: getVal('abuelosPaternos'),
     abuelosMaternos: getVal('abuelosMaternos'),
     padrinos: getVal('padrinos'),
-    ministro: getVal('ministro'),
-    // 🚀 LA MAGIA ESTÁ AQUÍ: Lee el DA FE inyectado por el importador masivo
+    ministro: rawMinistro,
     daFe: getVal('daFe') || getVal('dafe') || getVal('ministerFaith') || nombreDaFeFinal
   };
 
