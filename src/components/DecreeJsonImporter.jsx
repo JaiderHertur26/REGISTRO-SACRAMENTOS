@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { 
     Upload, FileJson, AlertCircle, CheckCircle, 
-    Save, Info, Loader2, RefreshCcw, Database, ServerCrash
+    Database, ServerCrash, HelpCircle, X
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/context/AuthContext'; 
@@ -22,20 +22,24 @@ const DecreeJsonImporter = () => {
     const [isProcessing, setIsProcessing] = useState(false);
     const [importComplete, setImportComplete] = useState(false);
     const [progress, setProgress] = useState({ current: 0, total: 0 });
+    const [showHelp, setShowHelp] = useState(false);
 
-    // Referencia oculta para el input de archivo
     const fileInputRef = useRef(null);
-
     const pad = (num) => String(num || '').trim().padStart(4, '0');
+
+    // 🚀 LECTURA MULTI-FORMATO EXACTA PARA EL DBF HEREDADO
+    const extractField = (item, possibleKeys) => {
+        for (let key of possibleKeys) {
+            // Buscamos tanto en minúsculas como en mayúsculas por si el JSON exportó literal
+            if (item[key] !== undefined && item[key] !== null && String(item[key]).trim() !== '') return String(item[key]).trim();
+            if (item[key.toUpperCase()] !== undefined && item[key.toUpperCase()] !== null && String(item[key.toUpperCase()]).trim() !== '') return String(item[key.toUpperCase()]).trim();
+        }
+        return null;
+    };
 
     const handleFileChange = (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
-
-        const fileName = selectedFile.name.toUpperCase();
-        if (!fileName.includes('ANULACION') && !fileName.includes('DECRETO')) {
-            toast({ title: "Archivo Sospechoso", description: "El nombre del archivo debería sugerir que contiene anulaciones o decretos.", variant: "destructive" });
-        }
 
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -46,28 +50,41 @@ const DecreeJsonImporter = () => {
                 if (data.length === 0) throw new Error("El archivo JSON está vacío.");
 
                 const processed = data.map((item, index) => {
-                    // Lógica de detección: En los sistemas legacy, 005 o 001 suelen ser Reposición
-                    const cod = String(item.codiconcep || item.codigo || '').trim();
-                    const isReposicion = cod === '005' || cod === '001'; 
+                    // Mapeo exacto basado en la estructura de tu tabla .dbf
+                    const decreto = extractField(item, ['decreto']);
+                    const fecha = extractField(item, ['fecha']);
+                    const codConcepto = extractField(item, ['codiconcep', 'codigo']);
                     
-                    const hasNewData = item.newlib && item.newfol && item.newnum;
-                    const hasOrigData = item.libro && item.folio && item.numero;
-                    const hasDecree = item.decreto && item.fecha;
+                    const oldLib = extractField(item, ['libro']);
+                    const oldFol = extractField(item, ['folio']);
+                    const oldNum = extractField(item, ['numero']);
+                    
+                    const newLib = extractField(item, ['newlib']);
+                    const newFol = extractField(item, ['newfol']);
+                    const newNum = extractField(item, ['newnum']);
+
+                    const observaciones = extractField(item, ['observacio', 'observaciones']);
+                    const dafeLegacy = extractField(item, ['dafe', 'ministro']);
+
+                    // Si el código es 005 o 001, lo tratamos como Reposición
+                    const isReposicion = ['005', '001'].includes(codConcepto); 
+                    
+                    const hasNewData = newLib && newFol && newNum;
+                    const hasOrigData = oldLib && oldFol && oldNum;
+                    const hasDecree = decreto && fecha;
 
                     let errorMsg = "";
-                    if (!hasDecree) errorMsg = "Falta No. Decreto o Fecha";
-                    else if (!hasNewData) errorMsg = "Falta ubicación supletoria (nueva)";
-                    else if (!isReposicion && !hasOrigData) errorMsg = "Corrección sin ubicación original";
+                    if (!hasDecree) errorMsg = "Falta No. Decreto o Fecha.";
+                    else if (!hasNewData) errorMsg = "Falta ubicación supletoria (NEWLIB/NEWFOL).";
+                    else if (!isReposicion && !hasOrigData) errorMsg = "Corrección requiere ubicación original.";
 
                     return {
-                        ...item,
-                        id: index,
-                        isReposicion,
-                        // Normalizamos los localizadores
-                        sNewL: pad(item.newlib), sNewF: pad(item.newfol), sNewN: pad(item.newnum),
-                        sOldL: pad(item.libro), sOldF: pad(item.folio), sOldN: pad(item.numero),
-                        isValid: errorMsg === "",
-                        error: errorMsg
+                        ...item, id: index, isReposicion,
+                        decreto_clean: decreto, fecha_clean: fecha, cod_clean: codConcepto,
+                        observaciones_clean: observaciones, dafe_clean: dafeLegacy,
+                        sNewL: pad(newLib), sNewF: pad(newFol), sNewN: pad(newNum),
+                        sOldL: pad(oldLib), sOldF: pad(oldFol), sOldN: pad(oldNum),
+                        isValid: errorMsg === "", error: errorMsg
                     };
                 });
 
@@ -83,7 +100,7 @@ const DecreeJsonImporter = () => {
                 setImportComplete(false);
                 setProgress({ current: 0, total: processed.filter(r => r.isValid).length });
             } catch (error) {
-                toast({ title: "Error de lectura", description: "El archivo no tiene un formato JSON válido.", variant: "destructive" });
+                toast({ title: "Error de lectura", description: "El archivo no tiene el formato JSON válido.", variant: "destructive" });
             }
         };
         reader.readAsText(selectedFile);
@@ -99,11 +116,10 @@ const DecreeJsonImporter = () => {
         const targetDioceseId = user?.dioceseId || user?.diocese_id;
 
         try {
-            // 1. OBTENER CONTEXTO GENERAL (Parroquia, Diócesis, Conceptos, Bautismos)
             const parishInfo = getMisDatosList(parishId)[0] || {};
             const parishLabel = `${parishInfo.nombre || 'PARROQUIA'} - ${parishInfo.ciudad || ''}`.toUpperCase();
 
-            // Traemos todos los bautismos de la parroquia para cruzarlos en memoria (Súper rápido)
+            // Descarga de Bautismos para cruce en Memoria RAM
             const { data: allBaptisms, error: bapError } = await supabase
                 .from('baptisms')
                 .select('id, book_number, folio, number, raw_data, nombres, apellidos, da_fe')
@@ -111,7 +127,7 @@ const DecreeJsonImporter = () => {
             
             if (bapError) throw bapError;
 
-            // Traemos el catálogo de conceptos de la Diócesis
+            // Descarga de Conceptos Oficiales
             const { data: catalogoConceptos } = await supabase
                 .from('conceptos_anulacion')
                 .select('id, codigo, concepto')
@@ -120,53 +136,46 @@ const DecreeJsonImporter = () => {
             let successCount = 0;
             let errorCount = 0;
 
-            // 2. CICLO DE PROCESAMIENTO UNO A UNO (Para garantizar integridad referencial)
             for (let i = 0; i < validRecords.length; i++) {
                 const item = validRecords[i];
                 setProgress({ current: i + 1, total: validRecords.length });
 
                 try {
-                    // Mapeo del Concepto (Cruce entre código viejo y UUID nuevo)
-                    const conceptoObj = catalogoConceptos?.find(c => String(c.codigo) === String(item.codiconcep));
+                    const conceptoObj = catalogoConceptos?.find(c => String(c.codigo) === item.cod_clean);
                     const conceptoId = conceptoObj ? conceptoObj.id : null;
                     const conceptoText = conceptoObj ? conceptoObj.concepto.toUpperCase() : "SOLICITUD DE PARTE";
-                    const fechaTexto = convertDateToSpanishText(item.fecha).replace(/^EL\s+/i, '').toUpperCase();
+                    const fechaTexto = convertDateToSpanishText(item.fecha_clean).replace(/^EL\s+/i, '').toUpperCase();
 
-                    // Buscar Partida Nueva (Supletoria)
                     const newRec = allBaptisms.find(b => b.book_number === item.sNewL && b.folio === item.sNewF && b.number === item.sNewN);
                     
                     if (!newRec) {
-                        item.error = "Partida supletoria no encontrada en la Nube";
+                        item.error = "Partida supletoria (nueva) no encontrada en la Nube.";
                         item.isValid = false;
                         errorCount++;
                         continue;
                     }
 
                     const targetName = `${newRec.nombres || ''} ${newRec.apellidos || ''}`.trim().toUpperCase();
-                    const ministroDaFe = (newRec.da_fe || newRec.raw_data?.daFe || 'EL PÁRROCO').toUpperCase();
+                    // Usamos el Ministro que firmó en el sistema viejo si existe, sino el actual
+                    const ministroDaFe = (item.dafe_clean || newRec.da_fe || newRec.raw_data?.daFe || 'EL PÁRROCO').toUpperCase();
 
                     if (item.isReposicion) {
                         // ==========================================
                         // 🟢 LÓGICA DE REPOSICIÓN
                         // ==========================================
-                        const noteRepo = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${item.decreto.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
+                        const noteRepo = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
                         
                         const newRaw = { 
-                            ...newRec.raw_data, 
-                            isSupplementary: true, 
-                            creadoPorDecreto: true, 
-                            replacementDecreeRef: item.decreto,
-                            notaMarginal: noteRepo 
+                            ...newRec.raw_data, isSupplementary: true, creadoPorDecreto: true, 
+                            replacementDecreeRef: item.decreto_clean, notaMarginal: noteRepo 
                         };
 
-                        // A. Actualizar Partida
                         await supabase.from('baptisms').update({ raw_data: newRaw, nota_marginal: noteRepo }).eq('id', newRec.id);
 
-                        // B. Crear Decreto
                         const payloadDecree = {
-                            decreeNumber: item.decreto, numeroDecreto: item.decreto, decreeDate: item.fecha,
+                            decreeNumber: item.decreto_clean, numeroDecreto: item.decreto_clean, decreeDate: item.fecha_clean,
                             conceptoAnulacionId: conceptoId, causa: conceptoText, targetName: targetName,
-                            newPartidaId: newRec.id,
+                            observaciones: item.observaciones_clean || '', newPartidaId: newRec.id,
                             datosNuevaPartida: { ...newRaw, book: item.sNewL, page: item.sNewF, entry: item.sNewN },
                             newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos }
                         };
@@ -180,28 +189,26 @@ const DecreeJsonImporter = () => {
                         const origRec = allBaptisms.find(b => b.book_number === item.sOldL && b.folio === item.sOldF && b.number === item.sOldN);
                         
                         if (!origRec) {
-                            item.error = "Partida original no encontrada en la Nube";
+                            item.error = "Partida original (afectada) no encontrada en la Nube.";
                             item.isValid = false;
                             errorCount++;
                             continue;
                         }
 
-                        const noteAnulada = `PARTIDA ANULADA POR DECRETO NO. ${item.decreto.toUpperCase()} DE FECHA ${fechaTexto}. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-${item.sNewL} F-${item.sNewF} N-${item.sNewN}.`;
-                        const noteNueva = `ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NO. ${item.decreto.toUpperCase()} DE FECHA ${fechaTexto} Y ANULA LA PARTIDA DEL LIBRO: ${item.sOldL}, FOLIO: ${item.sOldF}, NÚMERO: ${item.sOldN}. DA FE: ${ministroDaFe}.`;
+                        const noteAnulada = `PARTIDA ANULADA POR DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto}. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-${item.sNewL} F-${item.sNewF} N-${item.sNewN}.`;
+                        const noteNueva = `ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto} Y ANULA LA PARTIDA DEL LIBRO: ${item.sOldL}, FOLIO: ${item.sOldF}, NÚMERO: ${item.sOldN}. DA FE: ${ministroDaFe}.`;
 
-                        // A. Actualizar Partida Original (ANULAR)
                         const origRaw = { ...origRec.raw_data, isAnnulled: true, anulado: true, status: 'anulada', notaMarginal: noteAnulada };
                         await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada, raw_data: origRaw }).eq('id', origRec.id);
 
-                        // B. Actualizar Partida Supletoria
-                        const newRaw = { ...newRec.raw_data, isSupplementary: true, creadoPorDecreto: true, correctionDecreeRef: item.decreto, notaMarginal: noteNueva };
+                        const newRaw = { ...newRec.raw_data, isSupplementary: true, creadoPorDecreto: true, correctionDecreeRef: item.decreto_clean, notaMarginal: noteNueva };
                         await supabase.from('baptisms').update({ nota_marginal: noteNueva, raw_data: newRaw }).eq('id', newRec.id);
 
-                        // C. Crear Decreto
                         const payloadDecree = {
-                            decreeNumber: item.decreto, decreeDate: item.fecha, conceptoAnulacionId: conceptoId,
+                            decreeNumber: item.decreto_clean, decreeDate: item.fecha_clean, conceptoAnulacionId: conceptoId,
                             targetName: `${origRec.nombres || ''} ${origRec.apellidos || ''}`.trim().toUpperCase(),
                             newTargetName: targetName, parroquia: parishLabel,
+                            observaciones: item.observaciones_clean || '',
                             originalPartidaId: origRec.id, newPartidaId: newRec.id,
                             originalPartidaSummary: { book: item.sOldL, page: item.sOldF, entry: item.sOldN, nombres: origRec.nombres, apellidos: origRec.apellidos },
                             newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos }
@@ -209,23 +216,21 @@ const DecreeJsonImporter = () => {
 
                         await supabase.from('decretos').insert([{ parish_id: parishId, tipo: 'correccion', payload: payloadDecree }]);
                     }
-
                     successCount++;
                 } catch (err) {
-                    item.error = "Fallo en transacción DB";
+                    item.error = "Fallo interno en la inyección";
                     item.isValid = false;
                     errorCount++;
                 }
             }
 
-            // 3. ACTUALIZAR ESTADO DE LA INTERFAZ
-            setRecords([...records]); // Forzamos re-render para mostrar los errores si los hubo
+            setRecords([...records]);
             setImportComplete(true);
 
             if (errorCount === 0) {
                 toast({ title: "Inyección Exitosa", description: `Se procesaron ${successCount} decretos perfectamente en la Nube.`, className: "bg-green-50 text-green-900 border-green-200" });
             } else {
-                toast({ title: "Proceso Parcial", description: `Se inyectaron ${successCount} decretos. Hubo ${errorCount} errores. Revise la tabla.`, variant: "destructive" });
+                toast({ title: "Proceso Parcial", description: `Se inyectaron ${successCount} decretos. Hubo ${errorCount} errores de cruce en Nube.`, variant: "destructive" });
             }
 
         } catch (error) {
@@ -242,21 +247,20 @@ const DecreeJsonImporter = () => {
                 <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-[9px] font-black tracking-widest border border-amber-200">REPOSICIÓN</span> : 
                 <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-[9px] font-black tracking-widest border border-blue-200">CORRECCIÓN</span> 
         },
-        { header: 'No. Decreto', render: r => <span className="font-mono font-bold text-slate-700">{r.decreto}</span> },
-        { header: 'Ubicación Supletoria', render: r => <span className="font-mono text-[#4B7BA7] font-bold bg-blue-50 px-2 py-1 rounded">L:{r.sNewL} F:{r.sNewF} N:{r.sNewN}</span> },
-        { header: 'Original (Afectada)', render: r => r.isReposicion ? <span className="text-slate-400 italic text-xs">No aplica</span> : <span className="font-mono text-red-500 font-bold bg-red-50 px-2 py-1 rounded">L:{r.sOldL} F:{r.sOldF} N:{r.sOldN}</span> },
+        { header: 'No. Decreto', render: r => <span className="font-mono font-bold text-slate-700">{r.decreto_clean || '---'}</span> },
+        { header: 'Ubicación Supletoria', render: r => <span className="font-mono text-[#4B7BA7] font-bold bg-blue-50 px-2 py-1 rounded">L:{r.sNewL || '-'} F:{r.sNewF || '-'} N:{r.sNewN || '-'}</span> },
+        { header: 'Original (Afectada)', render: r => r.isReposicion ? <span className="text-slate-400 italic text-xs">No aplica</span> : <span className="font-mono text-red-500 font-bold bg-red-50 px-2 py-1 rounded">L:{r.sOldL || '-'} F:{r.sOldF || '-'} N:{r.sOldN || '-'}</span> },
         { 
             header: 'Validación en Nube', 
             render: r => r.isValid ? 
-                <div className="flex items-center gap-1 text-green-600"><CheckCircle className="w-4 h-4"/><span className="text-[10px] font-bold">LISTO</span></div> : 
-                <div className="flex items-center gap-1 text-red-500"><ServerCrash className="w-4 h-4"/><span className="text-[9px] font-bold truncate max-w-[120px]" title={r.error}>{r.error}</span></div> 
+                <div className="flex items-center gap-1 text-green-600"><CheckCircle className="w-4 h-4"/><span className="text-[10px] font-bold">APTO</span></div> : 
+                <div className="flex items-center gap-1 text-red-500"><ServerCrash className="w-4 h-4"/><span className="text-[9px] font-bold truncate max-w-[150px]" title={r.error}>{r.error}</span></div> 
         }
     ];
 
     return (
-        <div className="bg-white border border-slate-200 rounded-[2.5rem] p-8 md:p-10 space-y-10 shadow-sm">
+        <div className="bg-white border border-slate-200 rounded-[2.5rem] p-8 md:p-10 space-y-10 shadow-sm relative">
             
-            {/* Cabecera */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-100 pb-8">
                 <div className="flex items-center gap-5">
                     <div className="bg-gradient-to-br from-[#4B7BA7] to-[#2C3E50] p-4 rounded-2xl text-white shadow-lg shadow-blue-900/20">
@@ -270,16 +274,57 @@ const DecreeJsonImporter = () => {
                 
                 <Button 
                     variant="outline" 
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isProcessing}
-                    className="rounded-xl border-slate-200 text-slate-600 font-bold uppercase text-[10px] tracking-widest hover:bg-slate-50 h-12 px-6"
+                    onClick={() => setShowHelp(true)}
+                    className="rounded-xl border-blue-200 text-blue-600 font-bold uppercase text-[10px] tracking-widest hover:bg-blue-50 h-12 px-6"
                 >
-                    <RefreshCcw className="w-4 h-4 mr-2" /> Cargar Nuevo Archivo
+                    <HelpCircle className="w-4 h-4 mr-2" /> Ver Formato JSON Esperado
                 </Button>
             </div>
 
+            {/* Modal de Ayuda JSON con las columnas reales de su DBF */}
+            {showHelp && (
+                <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm rounded-[2.5rem] p-10 flex flex-col animate-in fade-in zoom-in-95 duration-200">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-xl font-black text-slate-800 uppercase tracking-widest">Estructura del Archivo JSON (ANULACIO.DBF)</h3>
+                        <Button variant="ghost" onClick={() => setShowHelp(false)} className="rounded-full p-2"><X className="w-6 h-6" /></Button>
+                    </div>
+                    <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+                        Exporta tu tabla de transacciones de anulaciones a JSON. El sistema buscará las columnas oficiales de tu base de datos anterior:
+                    </p>
+                    <div className="bg-slate-900 text-green-400 p-6 rounded-2xl font-mono text-sm overflow-auto flex-1 shadow-inner">
+                        <pre>
+{`{
+  "data": [
+    {
+      "DECRETO": "015-2023",
+      "FECHA": "2023-05-10",
+      "CODICONCEP": "002",
+      
+      // Partida Original (Afectada)
+      "LIBRO": "0001",
+      "FOLIO": "0504",
+      "NUMERO": "1007",
+      
+      // Partida Nueva (Supletoria)
+      "NEWLIB": "0004",
+      "NEWFOL": "0026",
+      "NEWNUM": "0026",
+
+      // Opcionales que el sistema leerá si existen
+      "OBSERVACIO": "Anotaciones adicionales...",
+      "DAFE": "PBRO. JUAN PEREZ"
+    }
+  ]
+}`}
+                        </pre>
+                    </div>
+                    <div className="mt-6 flex justify-end">
+                        <Button onClick={() => setShowHelp(false)} className="bg-slate-800 text-white font-bold uppercase text-xs px-8 py-6 rounded-xl">Entendido</Button>
+                    </div>
+                </div>
+            )}
+
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-10">
-                {/* Zona de Carga / Drag & Drop */}
                 <div className="xl:col-span-1">
                     <label className="flex flex-col items-center justify-center w-full h-[280px] border-2 border-dashed border-slate-200 rounded-[2rem] cursor-pointer bg-slate-50 hover:bg-blue-50 hover:border-[#4B7BA7]/40 transition-all duration-300 group relative overflow-hidden">
                         
@@ -301,51 +346,58 @@ const DecreeJsonImporter = () => {
                                 {file ? file.name : 'Subir Archivo JSON'}
                             </p>
                             <p className="text-[10px] text-slate-400 mt-3 font-medium leading-relaxed max-w-[200px]">
-                                El sistema cruzará la información con Supabase automáticamente.
+                                Selecciona el archivo JSON con la exportación de tu tabla ANULACIO.
                             </p>
                         </div>
                         <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileChange} disabled={isProcessing} />
                     </label>
                 </div>
 
-                {/* Estadísticas y Panel de Acción */}
                 <div className="xl:col-span-2 space-y-8 flex flex-col justify-center">
                     {validationStats ? (
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <StatCard label="Total Leídos" val={validationStats.total} color="slate" />
-                            <StatCard label="Aptos p/ Inyección" val={validationStats.valid} color="green" />
-                            <StatCard label="Reposiciones" val={validationStats.reposiciones} color="amber" />
-                            <StatCard label="Correcciones" val={validationStats.correcciones} color="blue" />
+                            <StatCard label="Aptos Inyección" val={validationStats.valid} color="green" />
+                            <StatCard label="Errores" val={validationStats.invalid} color="red" />
+                            <StatCard label="Decretos Válidos" val={validationStats.reposiciones + validationStats.correcciones} color="blue" />
                         </div>
                     ) : (
-                        <div className="bg-blue-50/50 p-8 rounded-[2rem] border border-blue-100 flex items-start gap-5">
-                            <Info className="w-8 h-8 text-blue-500 shrink-0" />
+                        <div className="bg-blue-50/50 p-8 rounded-[2rem] border border-blue-100 flex items-start gap-5 h-full">
+                            <AlertCircle className="w-8 h-8 text-blue-500 shrink-0" />
                             <div className="space-y-2">
-                                <h4 className="font-black text-blue-900 uppercase text-xs tracking-widest">Inteligencia de Cruce</h4>
+                                <h4 className="font-black text-blue-900 uppercase text-xs tracking-widest">Protección de Datos Activa</h4>
                                 <p className="text-xs text-blue-800/80 leading-relaxed font-medium">
-                                    El motor leerá los códigos de concepto heredados (ej: 005) y buscará las partidas originales y supletorias directamente en la nube. Las notas marginales se redactarán y sellarán de forma oficial.
+                                    El motor simulará la inyección primero. Si los folios originales o supletorios declarados en tu archivo JSON no existen actualmente en la base de datos de la Nube, el sistema bloqueará ese registro específico para evitar corrupciones.
                                 </p>
                             </div>
                         </div>
                     )}
 
                     {validationStats && validationStats.valid > 0 && (
-                        <Button 
-                            onClick={handleImport} 
-                            disabled={isProcessing || importComplete}
-                            className="w-full h-16 rounded-2xl bg-gradient-to-r from-[#4B7BA7] to-[#2C3E50] hover:scale-[1.01] text-white font-black uppercase tracking-[0.2em] text-[11px] shadow-xl shadow-blue-900/10 transition-all active:scale-95"
-                        >
-                            {importComplete ? (
-                                <><CheckCircle className="w-5 h-5 mr-3 text-green-400" /> Inyección Finalizada</>
-                            ) : (
-                                <><Database className="w-5 h-5 mr-3" /> Iniciar Inyección de {validationStats.valid} Decretos</>
-                            )}
-                        </Button>
+                        <div className="flex gap-4">
+                            <Button 
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isProcessing}
+                                className="h-16 px-8 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black uppercase tracking-widest text-[10px] transition-all"
+                            >
+                                Cambiar Archivo
+                            </Button>
+                            <Button 
+                                onClick={handleImport} 
+                                disabled={isProcessing || importComplete}
+                                className="flex-1 h-16 rounded-2xl bg-gradient-to-r from-[#4B7BA7] to-[#2C3E50] hover:scale-[1.01] text-white font-black uppercase tracking-[0.2em] text-[11px] shadow-xl shadow-blue-900/10 transition-all active:scale-95"
+                            >
+                                {importComplete ? (
+                                    <><CheckCircle className="w-5 h-5 mr-3 text-green-400" /> Inyección Finalizada</>
+                                ) : (
+                                    <><Database className="w-5 h-5 mr-3" /> Iniciar Inyección de {validationStats.valid} Decretos</>
+                                )}
+                            </Button>
+                        </div>
                     )}
                 </div>
             </div>
 
-            {/* Tabla de Vista Previa */}
             {records.length > 0 && (
                 <div className="border border-slate-100 rounded-[2rem] overflow-hidden bg-slate-50/50 shadow-inner">
                     <div className="px-8 py-5 border-b border-slate-100 bg-white flex justify-between items-center">
@@ -355,12 +407,12 @@ const DecreeJsonImporter = () => {
                         </div>
                         {validationStats?.invalid > 0 && (
                             <span className="bg-red-50 text-red-600 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest border border-red-100">
-                                {validationStats.invalid} Errores Detectados
+                                {validationStats.invalid} Errores de Estructura Detectados
                             </span>
                         )}
                     </div>
                     
-                    <div className="max-h-[400px] overflow-auto custom-scrollbar">
+                    <div className="max-h-[500px] overflow-auto custom-scrollbar">
                         <Table columns={columns} data={records} className="bg-transparent" />
                     </div>
                 </div>
@@ -369,13 +421,13 @@ const DecreeJsonImporter = () => {
     );
 };
 
-// Componente Interno para los contadores
 const StatCard = ({ label, val, color }) => {
     const colors = {
         slate: "bg-slate-50 border-slate-200 text-slate-700",
         green: "bg-emerald-50 border-emerald-200 text-emerald-700",
         amber: "bg-amber-50 border-amber-200 text-amber-700",
-        blue: "bg-blue-50 border-blue-200 text-blue-700"
+        blue: "bg-blue-50 border-blue-200 text-blue-700",
+        red: "bg-red-50 border-red-200 text-red-700"
     };
     return (
         <div className={`p-6 rounded-[2rem] border ${colors[color]} text-center shadow-sm flex flex-col justify-center items-center h-32`}>
