@@ -76,13 +76,16 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
 
     const getParentName = (record, type) => {
         const raw = record.raw_data || {};
+        let val = '';
         if (type === 'father') {
-            const val = record.nombre_padre || raw.nombre_padre || raw.nombrePadre || raw.padre || raw.fatherName || raw.father_name;
-            return val && String(val).trim() !== '' ? String(val).trim().toUpperCase() : '---';
+            val = record.nombre_padre || raw.nombre_padre || raw.nombrePadre || raw.padre || raw.fatherName || raw.father_name;
         } else {
-            const val = record.nombre_madre || raw.nombre_madre || raw.nombreMadre || raw.madre || raw.motherName || raw.mother_name;
-            return val && String(val).trim() !== '' ? String(val).trim().toUpperCase() : '---';
+            val = record.nombre_madre || raw.nombre_madre || raw.nombreMadre || raw.madre || raw.motherName || raw.mother_name;
         }
+        if (!val || String(val).trim() === '' || String(val).trim() === '---' || String(val).trim() === '-') {
+            return '---';
+        }
+        return String(val).trim().toUpperCase();
     };
 
     return (
@@ -154,15 +157,15 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     text-transform: uppercase;
                 }
 
-                /* TABLA PRINCIPAL CON BORDES NATIVOS POR CELDA (Cierra perfecto en cada hoja) */
+                /* TABLA PRINCIPAL CON ANCHO FIJO (Impide deformaciones y rupturas) */
                 .print-table {
                     width: 100%;
+                    table-layout: fixed; 
                     border-collapse: collapse;
                     border-spacing: 0;
                     font-family: 'Arial', sans-serif;
                     font-size: 8.5pt;
-                    border-top: 2px solid #000;
-                    border-bottom: 2px solid #000;
+                    border: 2px solid #000;
                 }
                 
                 .header-row th {
@@ -174,6 +177,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     text-align: center;
                     text-transform: uppercase;
                     font-size: 7.5pt;
+                    overflow: hidden;
                 }
                 
                 .print-table td {
@@ -181,16 +185,19 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     padding: 5px 6px;
                     vertical-align: middle;
                     line-height: 1.2;
+                    overflow: hidden;
+                    word-wrap: break-word;
                 }
                 
                 .print-table tbody tr:nth-child(even) td {
                     background-color: #fcfcfc !important;
                 }
 
-                .col-number { width: 5%; font-weight: bold; text-align: center; font-size: 8pt; }
-                .col-titular { width: 32%; }
-                .col-padres { width: 41%; font-size: 7.5pt; }
-                .col-ref { width: 7%; font-family: 'Courier New', Courier, monospace; font-size: 9pt; text-align: center; font-weight: bold; }
+                /* DISTRIBUCIÓN ESTRICTA DE COLUMNAS (Suma exacta = 100%) */
+                .col-number { width: 6%; font-weight: bold; text-align: center; font-size: 8pt; }
+                .col-titular { width: 34%; }
+                .col-padres { width: 42%; font-size: 7.5pt; }
+                .col-ref { width: 6%; font-family: 'Courier New', Courier, monospace; font-size: 8.5pt; text-align: center; font-weight: bold; white-space: nowrap; }
 
                 .text-bold { font-weight: 900; font-size: 9pt; color: #000; }
                 .text-muted { font-size: 8pt; color: #333; margin-top: 1px; }
