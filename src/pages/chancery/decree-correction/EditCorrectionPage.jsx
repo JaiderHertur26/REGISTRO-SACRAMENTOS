@@ -5,8 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Save, Loader2, Search, Trash2, ArrowLeft, History, BookOpen, Calendar, User, Fingerprint, PenTool, FileText, AlertCircle } from 'lucide-react';
+import { Save, Loader2, Search, Trash2, ArrowLeft, History, BookOpen, User, Fingerprint, PenTool, FileText, AlertCircle } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
@@ -20,9 +19,8 @@ const EditCorrectionPage = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const { toast } = useToast();
-    const { getMisDatosList, getCiudadesList, getParrocos, obtenerNotasAlMargen } = useAppData();
+    const { getCiudadesList, getParrocos } = useAppData();
 
-    const [activeTab, setActiveTab] = useState("bautismo");
     const [decrees, setDecrees] = useState([]);
     const [selectedDecreeId, setSelectedDecreeId] = useState("");
     
@@ -36,7 +34,12 @@ const EditCorrectionPage = () => {
     const [auxiliares, setAuxiliares] = useState({ ciudades: [], ministros: [] });
     const [chanceryNotesConfig, setChanceryNotesConfig] = useState(null);
 
-    const [decreeData, setDecreeData] = useState({ parroquia: '', decreeNumber: '', decreeDate: '', targetName: '', conceptoAnulacionId: '' });
+    // HOMOLOGADO CON PARROQUIA
+    const [decreeData, setDecreeData] = useState({ 
+        parroquia: '', numeroDeDecreto: '', fechaEmision: '', conceptoAnulacion: '', nombreBautizado: '', Libro: '', folio: '', numero: '' 
+    });
+    
+    // HOMOLOGADO CON PARROQUIA
     const [newPartida, setNewPartida] = useState({
         lugarBautismo: '', fechaSacramento: '', apellidos: '', nombres: '',
         fechaNacimiento: '', lugarNacimiento: '', sexo: 'MASCULINO', nombrePadre: '',
@@ -94,7 +97,7 @@ const EditCorrectionPage = () => {
                     setOriginalPayload(payload);
                     setSelectedDecreeId(decreeId);
 
-                    // 🧠 MAGIA HOMOLOGADA: Búsqueda Inteligente de la Partida Original
+                    // Búsqueda Inteligente de la Partida Original
                     const pad = (num) => String(num).padStart(4, '0');
                     let origDataRaw = {};
                     if (payload.originalPartidaSummary?.book || payload.originalPartidaSummary?.Libro) {
@@ -110,12 +113,14 @@ const EditCorrectionPage = () => {
                     }
 
                     const parishObj = parishesData?.find(p => p.id === parishId);
+                    
+                    // HOMOLOGADO CON PARROQUIA
                     setDecreeData({
                         parroquia: parishObj ? `${parishObj.name} - ${parishObj.city}` : 'Parroquia',
-                        decreeNumber: payload.decreeNumber || payload.numeroDecreto || '',
-                        decreeDate: payload.decreeDate || payload.fechaEmision || '',
-                        conceptoAnulacionId: payload.conceptoAnulacionId || payload.conceptoAnulacion || '',
-                        targetName: payload.targetName || payload.nombreBautizado || '',
+                        numeroDeDecreto: payload.decreeNumber || payload.numeroDecreto || '',
+                        fechaEmision: payload.decreeDate || payload.fechaEmision || '',
+                        conceptoAnulacion: payload.conceptoAnulacionId || payload.conceptoAnulacion || '',
+                        nombreBautizado: payload.targetName || payload.nombreBautizado || '',
                         Libro: payload.originalPartidaSummary?.book || payload.originalPartidaSummary?.Libro || '',
                         folio: payload.originalPartidaSummary?.page || payload.originalPartidaSummary?.folio || '',
                         numero: payload.originalPartidaSummary?.entry || payload.originalPartidaSummary?.numero || ''
@@ -130,22 +135,23 @@ const EditCorrectionPage = () => {
 
                     const bd = payload.datosNuevaPartida || payload.newPartidaSummary || {};
                     
+                    // HOMOLOGADO CON PARROQUIA
                     setNewPartida({
                         parishId: parishId,
-                        lugarBautismo: payload.lugarBautismo || bd.lugarBautismo || origDataRaw.lugarBautismo || origDataRaw.lugar_bautismo || '',
-                        fechaSacramento: payload.fechaSacramento || bd.fechaSacramento || origDataRaw.fechaSacramento || origDataRaw.celebration_date || '',
-                        apellidos: payload.apellidos || bd.apellidos || origDataRaw.apellidos || origDataRaw.lastName || '',
-                        nombres: payload.nombres || bd.nombres || origDataRaw.nombres || origDataRaw.firstName || '',
+                        lugarBautismo: payload.lugarBautismo || bd.lugarBautismo || origDataRaw.lugarBautismo || '',
+                        fechaSacramento: payload.fechaSacramento || bd.fechaSacramento || origDataRaw.fechaSacramento || '',
+                        apellidos: payload.apellidos || bd.apellidos || origDataRaw.apellidos || '',
+                        nombres: payload.nombres || bd.nombres || origDataRaw.nombres || '',
                         fechaNacimiento: payload.fechaNacimiento || bd.fechaNacimiento || origDataRaw.fechaNacimiento || '',
-                        lugarNacimiento: payload.lugarNacimiento || bd.lugarNacimiento || origDataRaw.lugarNacimiento || origDataRaw.lugarNacimientoDetalle || '',
+                        lugarNacimiento: payload.lugarNacimiento || bd.lugarNacimiento || origDataRaw.lugarNacimiento || '',
                         sexo: payload.sexo || bd.sexo || bd.sex || origDataRaw.sexo || 'MASCULINO',
-                        nombrePadre: payload.nombrePadre || bd.nombrePadre || origDataRaw.nombrePadre || origDataRaw.fatherName || '',
-                        nombreMadre: payload.nombreMadre || bd.nombreMadre || origDataRaw.nombreMadre || origDataRaw.motherName || '',
-                        tipoUnionPadres: payload.tipoUnionPadres || bd.tipoUnionPadres || origDataRaw.tipoUnionPadres || origDataRaw.tipohijo || 'MATRIMONIO CATÓLICO',
-                        abuelosPaternos: payload.abuelosPaternos || bd.abuelosPaternos || origDataRaw.abuelosPaternos || origDataRaw.paternalGrandparents || '',
-                        abuelosMaternos: payload.abuelosMaternos || bd.abuelosMaternos || origDataRaw.abuelosMaternos || origDataRaw.maternalGrandparents || '',
-                        padrinos: payload.padrinos || bd.padrinos || origDataRaw.padrinos || origDataRaw.godparents || '',
-                        ministro: payload.ministro || bd.ministro || origDataRaw.ministro || origDataRaw.minister || '',
+                        nombrePadre: payload.nombrePadre || bd.nombrePadre || origDataRaw.nombrePadre || '',
+                        nombreMadre: payload.nombreMadre || bd.nombreMadre || origDataRaw.nombreMadre || '',
+                        tipoUnionPadres: payload.tipoUnionPadres || bd.tipoUnionPadres || origDataRaw.tipoUnionPadres || 'MATRIMONIO CATÓLICO',
+                        abuelosPaternos: payload.abuelosPaternos || bd.abuelosPaternos || origDataRaw.abuelosPaternos || '',
+                        abuelosMaternos: payload.abuelosMaternos || bd.abuelosMaternos || origDataRaw.abuelosMaternos || '',
+                        padrinos: payload.padrinos || bd.padrinos || origDataRaw.padrinos || '',
+                        ministro: payload.ministro || bd.ministro || origDataRaw.ministro || '',
                         daFe: payload.daFe || bd.daFe || bd.ministerFaith || origDataRaw.daFe || '',
                         observaciones: payload.observaciones || '',
                         book_number: bd.book || bd.book_number || '',
@@ -165,7 +171,6 @@ const EditCorrectionPage = () => {
     const handleDecreeChange = (e) => setDecreeData(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
     const handleNewPartidaChangeUpper = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
     const handleNewPartidaChangeRaw = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
-    const handleNewPartidaChange = handleNewPartidaChangeUpper; 
     const handleCityChange = (data) => {
         let value = data?.target?.value || data?.nombre || data || "";
         setNewPartida(prev => ({ ...prev, lugarNacimiento: String(value).toUpperCase() }));
@@ -181,7 +186,6 @@ const EditCorrectionPage = () => {
             const targetParish = newPartida.parishId;
             const supSum = originalPayload?.newPartidaSummary;
             
-            // IGUAL QUE EN PARROQUIA: Mantenemos fijos los valores originales para no corromper la BD
             const currentBook = pad(supSum?.book || supSum?.Libro || newPartida.book_number);
             const currentPage = pad(supSum?.page || supSum?.folio || newPartida.page_number);
             const currentEntry = pad(supSum?.entry || supSum?.numero || newPartida.entry_number);
@@ -213,7 +217,7 @@ const EditCorrectionPage = () => {
                 oldRawData.isAnnulled = true;
                 oldRawData.annulmentDate = decreeData.fechaEmision;
                 oldRawData.annulmentDecree = decreeData.numeroDeDecreto;
-                oldRawData.conceptoAnulacionId = decreeData.conceptoAnulacionId || decreeData.conceptoAnulacion;
+                oldRawData.conceptoAnulacionId = decreeData.conceptoAnulacion;
                 oldRawData.tipoNotaAlMargen = "porCorreccion.anulada";
 
                 await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada, raw_data: oldRawData }).eq('id', foundRecord.id);
@@ -237,12 +241,13 @@ const EditCorrectionPage = () => {
                 }).eq('id', supData.id);
             }
 
-            // 3. Actualizar Decreto
+            // 3. Actualizar Decreto - Homologado
             const newPayload = {
                 ...originalPayload,
                 decreeNumber: decreeData.numeroDeDecreto, decreeDate: decreeData.fechaEmision,
-                conceptoAnulacionId: decreeData.conceptoAnulacionId || decreeData.conceptoAnulacion,
-                targetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(),
+                conceptoAnulacionId: decreeData.conceptoAnulacion,
+                observaciones: newPartida.observaciones,
+                targetName: `${newPartida.apellidos} ${newPartida.nombres}`.trim(),
                 ...newPartida,
                 datosNuevaPartida: { ...newPartida, book: currentBook, page: currentPage, entry: currentEntry },
                 newPartidaSummary: { book: currentBook, page: currentPage, entry: currentEntry, nombres: newPartida.nombres, apellidos: newPartida.apellidos }
@@ -263,7 +268,6 @@ const EditCorrectionPage = () => {
             const pad = (num) => num ? String(num).padStart(4, '0') : '0000';
             const targetParishId = newPartida.parishId;
             
-            // 💡 CALCO EXACTO DE PARROQUIA: Extraer de la memoria inmutable del decreto
             const newSum = originalPayload?.newPartidaSummary;
 
             if (foundRecord) {
@@ -299,7 +303,6 @@ const EditCorrectionPage = () => {
                         if (parseInt(delEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
                             const newParamsObj = { 
                                 ...cloudParams, 
-                                // Inyectando con ceros exactos (pad)
                                 suplementarioNumero: pad(previosSupletorios.numero),
                                 suplementarioFolio: pad(previosSupletorios.folio),
                                 suplementarioLibro: pad(previosSupletorios.libro)
@@ -323,7 +326,7 @@ const EditCorrectionPage = () => {
         }
     };
 
-    const filteredDecrees = decrees.filter(d => (d.decreeNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) || (d.targetName || '').toLowerCase().includes(searchTerm.toLowerCase()));
+    const filteredDecrees = decrees.filter(d => (d.decreeNumber || d.numeroDecreto || '').toLowerCase().includes(searchTerm.toLowerCase()) || (d.targetName || d.nombreBautizado || '').toLowerCase().includes(searchTerm.toLowerCase()));
     const inputClass = "h-11 w-full px-4 py-2 text-sm text-gray-900 font-bold border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 outline-none transition-all bg-gray-50/50 focus:bg-white uppercase shadow-sm";
     const labelClass = "block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1";
 
@@ -363,7 +366,7 @@ const EditCorrectionPage = () => {
                                 filteredDecrees.map((decree) => (
                                     <button key={decree.id} onClick={() => navigate(`/chancery/decree-correction/edit?id=${decree.id}`)} className={cn("w-full text-left p-4 rounded-2xl transition-all border group", selectedDecreeId === decree.id ? "bg-blue-50 border-blue-200 ring-1 ring-blue-300 shadow-sm" : "bg-white border-transparent hover:border-gray-200 text-gray-600")}>
                                         <div className="font-black text-gray-800 flex justify-between items-center"><span className={cn("font-mono text-sm tracking-tighter", selectedDecreeId === decree.id ? "text-blue-700" : "")}>{decree.decreeNumber || decree.numeroDecreto}</span></div>
-                                        <div className={cn("text-[10px] font-bold uppercase mt-1 truncate", selectedDecreeId === decree.id ? "text-blue-900" : "text-gray-400")}>{decree.targetName || decree.nombres}</div>
+                                        <div className={cn("text-[10px] font-bold uppercase mt-1 truncate", selectedDecreeId === decree.id ? "text-blue-900" : "text-gray-400")}>{decree.targetName || decree.nombreBautizado}</div>
                                         <div className={cn("text-[9px] mt-1 uppercase truncate", selectedDecreeId === decree.id ? "text-blue-500" : "text-gray-300")}>{decree.targetParishName}</div>
                                     </button>
                                 ))
@@ -386,11 +389,11 @@ const EditCorrectionPage = () => {
                                         <SectionHeader number="01" title="Decreto Maestro (Corrección)" icon={FileText} />
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                                             <div className="col-span-3"><label className={labelClass}>Parroquia Destino</label><input readOnly value={decreeData.parroquia} className={`${inputClass} bg-blue-50 border-blue-200 text-blue-700`} /></div>
-                                            <div><label className={labelClass}>Número de Decreto</label><input name="decreeNumber" value={decreeData.decreeNumber} onChange={handleDecreeChange} className={inputClass} /></div>
-                                            <div><label className={labelClass}>Fecha Emisión</label><input type="date" name="decreeDate" value={decreeData.decreeDate} onChange={handleDecreeChange} className={inputClass} /></div>
+                                            <div><label className={labelClass}>Número de Decreto</label><Input name="numeroDeDecreto" value={decreeData.numeroDeDecreto} onChange={handleDecreeChange} className={inputClass} /></div>
+                                            <div><label className={labelClass}>Fecha Emisión</label><Input type="date" name="fechaEmision" value={decreeData.fechaEmision} onChange={handleDecreeChange} className={inputClass} /></div>
                                             <div>
                                                 <label className={labelClass}>Concepto Anulación</label>
-                                                <select name="conceptoAnulacionId" value={decreeData.conceptoAnulacionId} onChange={handleDecreeChange} className={inputClass}>
+                                                <select name="conceptoAnulacion" value={decreeData.conceptoAnulacion} onChange={handleDecreeChange} className={inputClass}>
                                                     <option value="">SELECCIONE CONCEPTO...</option>
                                                     {conceptos.map(c => <option key={c.id} value={c.id}>{c.codigo} - {c.concepto}</option>)}
                                                 </select>
@@ -404,7 +407,7 @@ const EditCorrectionPage = () => {
                                             <h4 className="text-[10px] font-black text-red-600 uppercase tracking-widest">Partida Original Anulada (Lectura Remota)</h4>
                                         </div>
                                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                            <div className="md:col-span-2 space-y-1"><label className="text-[9px] font-bold text-gray-400 uppercase">Titular</label><Input value={originalPayload?.targetName || '---'} readOnly className="bg-white/50 border-red-100 text-gray-500 font-bold uppercase" /></div>
+                                            <div className="md:col-span-2 space-y-1"><label className="text-[9px] font-bold text-gray-400 uppercase">Titular</label><Input value={decreeData.nombreBautizado} readOnly className="bg-white/50 border-red-100 text-gray-500 font-bold uppercase" /></div>
                                             <div className="space-y-1"><label className="text-[9px] font-bold text-gray-400 uppercase">Libro</label><Input value={decreeData.Libro} readOnly className="bg-white/50 border-red-100 text-center font-mono text-gray-500" /></div>
                                             <div className="space-y-1 flex gap-2">
                                                 <div className="flex-1"><label className="text-[9px] font-bold text-gray-400 uppercase">Folio</label><Input value={decreeData.folio} readOnly className="bg-white/50 border-red-100 text-center font-mono text-gray-500" /></div>
@@ -425,8 +428,8 @@ const EditCorrectionPage = () => {
                                     <section>
                                         <SectionHeader number="03" title="Identidad Corregida" icon={User} />
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                            <div><label className={labelClass}>Apellidos</label><input name="apellidos" value={newPartida.apellidos} onChange={handleNewPartidaChangeUpper} className={inputClass} /></div>
-                                            <div><label className={labelClass}>Nombres</label><input name="nombres" value={newPartida.nombres} onChange={handleNewPartidaChangeUpper} className={inputClass} /></div>
+                                            <div><label className={labelClass}>Apellidos</label><Input name="apellidos" value={newPartida.apellidos} onChange={handleNewPartidaChangeUpper} className={inputClass} /></div>
+                                            <div><label className={labelClass}>Nombres</label><Input name="nombres" value={newPartida.nombres} onChange={handleNewPartidaChangeUpper} className={inputClass} /></div>
                                         </div>
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                                             <div>
@@ -435,15 +438,15 @@ const EditCorrectionPage = () => {
                                                     <option value="MASCULINO">MASCULINO</option><option value="FEMENINO">FEMENINO</option>
                                                 </select>
                                             </div>
-                                            <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="fechaNacimiento" value={newPartida.fechaNacimiento} onChange={handleNewPartidaChangeRaw} className={inputClass} /></div>
+                                            <div><label className={labelClass}>Fecha de Nacimiento</label><Input type="date" name="fechaNacimiento" value={newPartida.fechaNacimiento} onChange={handleNewPartidaChangeRaw} className={inputClass} /></div>
                                             <div>
                                                 <label className={labelClass}>Lugar de Nacimiento</label>
-                                                <CityAutocomplete name="placeOfBirth" value={newPartida.lugarNacimiento} onChange={handleCityChange} cities={auxiliares.ciudades} className={inputClass} />
+                                                <CityAutocomplete name="lugarNacimiento" value={newPartida.lugarNacimiento} onChange={handleCityChange} cities={auxiliares.ciudades} className={inputClass} />
                                             </div>
                                         </div>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mt-8">
-                                            <div><label className={labelClass}>Fecha Sacramento</label><input type="date" name="fechaSacramento" value={newPartida.fechaSacramento} onChange={handleNewPartidaChangeRaw} className={inputClass} /></div>
-                                            <div><label className={labelClass}>Lugar de Bautismo</label><input name="lugarBautismo" value={newPartida.lugarBautismo} onChange={handleNewPartidaChangeUpper} className={inputClass} /></div>
+                                            <div><label className={labelClass}>Fecha Sacramento</label><Input type="date" name="fechaSacramento" value={newPartida.fechaSacramento} onChange={handleNewPartidaChangeRaw} className={inputClass} /></div>
+                                            <div><label className={labelClass}>Lugar de Bautismo</label><Input name="lugarBautismo" value={newPartida.lugarBautismo} onChange={handleNewPartidaChangeUpper} className={inputClass} /></div>
                                         </div>
                                     </section>
 
@@ -458,12 +461,12 @@ const EditCorrectionPage = () => {
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-8">
                                             <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-5 shadow-sm">
                                                 <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Línea Paterna</p>
-                                                <input name="nombrePadre" placeholder="NOMBRE DEL PADRE" value={newPartida.nombrePadre} onChange={handleNewPartidaChangeUpper} className={inputClass} />
+                                                <Input name="nombrePadre" placeholder="NOMBRE DEL PADRE" value={newPartida.nombrePadre} onChange={handleNewPartidaChangeUpper} className={inputClass} />
                                                 <textarea name="abuelosPaternos" placeholder="ABUELOS PATERNOS" value={newPartida.abuelosPaternos} onChange={handleNewPartidaChangeUpper} className={`${inputClass} h-20 py-3 resize-none`} />
                                             </div>
                                             <div className="bg-pink-50/30 p-8 rounded-[2rem] border border-pink-100/50 space-y-5 shadow-sm">
                                                 <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Línea Materna</p>
-                                                <input name="nombreMadre" placeholder="NOMBRE DE LA MADRE" value={newPartida.nombreMadre} onChange={handleNewPartidaChangeUpper} className={inputClass} />
+                                                <Input name="nombreMadre" placeholder="NOMBRE DE LA MADRE" value={newPartida.nombreMadre} onChange={handleNewPartidaChangeUpper} className={inputClass} />
                                                 <textarea name="abuelosMaternos" placeholder="ABUELOS MATERNOS" value={newPartida.abuelosMaternos} onChange={handleNewPartidaChangeUpper} className={`${inputClass} h-20 py-3 resize-none`} />
                                             </div>
                                         </div>
@@ -475,7 +478,16 @@ const EditCorrectionPage = () => {
                                             <div><label className={labelClass}>Sacerdote Celebrante</label><input name="ministro" list="ministros-list" value={newPartida.ministro} onChange={handleNewPartidaChangeUpper} className={`${inputClass} border-l-8 border-l-blue-500`} /></div>
                                             <div><label className={labelClass}>Firma (Da Fe)</label><input name="daFe" required list="ministros-list" value={newPartida.daFe} onChange={handleNewPartidaChangeUpper} className={inputClass} /></div>
                                         </div>
-                                        <div><label className={labelClass}>Padrinos</label><input name="padrinos" value={newPartida.padrinos} onChange={handleNewPartidaChangeUpper} className={`${inputClass} py-5`} /></div>
+                                        <div><label className={labelClass}>Padrinos</label><Input name="padrinos" value={newPartida.padrinos} onChange={handleNewPartidaChangeUpper} className={`${inputClass} py-5`} /></div>
+                                    </section>
+
+                                    {/* NUEVA SECCIÓN DE OBSERVACIONES QUE FALTABA */}
+                                    <section>
+                                        <SectionHeader number="06" title="Observaciones" icon={FileText} />
+                                        <div className="space-y-2">
+                                            <label className={labelClass}>Observaciones del Decreto (Opcional)</label>
+                                            <textarea name="observaciones" value={newPartida.observaciones} onChange={handleNewPartidaChangeUpper} rows={4} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-500/20 uppercase font-bold text-gray-700 bg-amber-50" />
+                                        </div>
                                     </section>
 
                                     <div className="flex justify-between gap-4 border-t border-gray-100 pt-12">
