@@ -4,12 +4,11 @@ import { useAppData } from '@/context/AppDataContext';
 import { formatPersonData } from '@/utils/formatPersonData';
 
 const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber }, ref) => {
-    // 1. SALVAVIDAS ANTICRASHEO: Asegurar que el contexto no sea null al clonar para imprimir
-    const { user } = useAuth() || {};
+    const { user } = useAuth();
     const { getMisDatosList } = useAppData() || {};
     const dataSource = data || [];
 
-    // --- 1. EXTRACTOR DE IDENTIDAD ---
+    // --- 1. EXTRACTOR DE IDENTIDAD (Consistencia con el resto de la App) ---
     const getSafeParishId = () => {
         if (user?.parishId) return user.parishId;
         try { return JSON.parse(localStorage.getItem('user') || '{}').parishId; } catch (e) { return null; }
@@ -19,6 +18,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
     // --- 2. BUSCADOR DEFINITIVO DE MEMBRETE ---
     const getOfficialData = (field, fallback) => {
         try {
+            // Si pasaron info por props, tiene prioridad
             if (parroquiaInfo && parroquiaInfo[field]) return parroquiaInfo[field];
 
             if (!safeParishId) return fallback;
@@ -69,14 +69,18 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
         return String(val).trim().padStart(4, '0');
     };
 
-    // --- 5. ESTILOS CORREGIDOS PARA IMPRESIÓN MÚLTIPLES PÁGINAS ---
+    // --- ESTILOS ---
     const styles = {
         page: { 
-            padding: '0.5in', // Eliminamos width y minHeight fijos
+            width: '8.5in', 
+            minHeight: '11in',
+            padding: '0.6in 0.8in', 
             fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif', 
             color: '#000', 
             backgroundColor: 'white',
-            display: 'block' // FUNDAMENTAL: Quitar el display: flex para que la tabla no se desaparezca
+            boxSizing: 'border-box',
+            display: 'flex',
+            flexDirection: 'column'
         },
         header: { textAlign: 'center', fontWeight: 'bold', fontSize: '13px', marginBottom: '25px', lineHeight: '1.4' },
         title: { 
@@ -117,7 +121,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
     return (
         <div ref={ref} style={styles.page}>
             <style media="print">{`
-                @page { size: letter; margin: 0.4in; }
+                @page { size: letter; margin: 0; }
                 body { margin: 0; background: white; -webkit-print-color-adjust: exact; }
                 table { page-break-inside: auto; width: 100% !important; }
                 tr { page-break-inside: avoid; page-break-after: auto; }
@@ -147,13 +151,10 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                 </thead>
                 <tbody>
                     {sortedData.map((record, index) => {
-                        // Salvavidas por si formatPersonData falla
-                        const safeFormat = (val) => typeof formatPersonData === 'function' ? formatPersonData(val) : val;
-
-                        const apellidos = safeFormat(record.apellidos || record.lastName || '');
-                        const nombres = safeFormat(record.nombres || record.firstName || '');
-                        const padre = safeFormat(record.nombrePadre || record.fatherName || record.padre || '---');
-                        const madre = safeFormat(record.nombreMadre || record.motherName || record.madre || '---');
+                        const apellidos = formatPersonData(record.apellidos || record.lastName || '');
+                        const nombres = formatPersonData(record.nombres || record.firstName || '');
+                        const padre = formatPersonData(record.nombrePadre || record.fatherName || record.padre || '---');
+                        const madre = formatPersonData(record.nombreMadre || record.motherName || record.madre || '---');
                         
                         const isAnulada = record.status === 'anulada' || record.isAnnulled || record.estado === 'anulada';
 
@@ -185,7 +186,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                 </tbody>
             </table>
 
-            <div style={{ marginTop: '40px', paddingTop: '20px', textAlign: 'right', fontSize: '9px', color: '#999', fontStyle: 'italic' }}>
+            <div style={{ marginTop: 'auto', paddingTop: '20px', textAlign: 'right', fontSize: '9px', color: '#999', fontStyle: 'italic' }}>
                 Documento generado automáticamente por el Sistema SacramentumRegistry • {new Date().toLocaleDateString()}
             </div>
         </div>
