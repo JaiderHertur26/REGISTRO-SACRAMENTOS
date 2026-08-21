@@ -9,13 +9,12 @@ import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext'; 
 import { supabase } from '@/lib/supabaseClient'; 
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
-import { marginalNotesEngine } from '@/utils/marginalNotesEngine'; // 🚀 MOTOR OFICIAL DE NOTAS MARGINALES
+import { marginalNotesEngine } from '@/utils/marginalNotesEngine';
 import Table from '@/components/ui/Table';
 
 const DecreeJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth(); 
-    // 🚀 Extraemos getParrocoActual para resolver firmas heredadas
     const { getMisDatosList, getParrocoActual } = useAppData(); 
     
     const [file, setFile] = useState(null);
@@ -29,6 +28,24 @@ const DecreeJsonImporter = () => {
     const fileInputRef = useRef(null);
 
     const pad = (num) => String(num || '').trim().padStart(4, '0');
+
+    // 🚀 TRADUCTORES DE CÓDIGOS HEREDADOS (DBF a TEXTO FORMAL)
+    const parseSex = (val) => {
+        const v = String(val).trim();
+        if (v === '1') return 'MASCULINO';
+        if (v === '2') return 'FEMENINO';
+        return val || '';
+    };
+
+    const parseUnion = (val) => {
+        const v = String(val).trim();
+        if (v === '1') return 'MATRIMONIO CATÓLICO';
+        if (v === '2') return 'MATRIMONIO CIVIL';
+        if (v === '3') return 'UNIÓN LIBRE';
+        if (v === '4') return 'MADRE SOLTERA';
+        if (v === '5') return 'OTRO CASO';
+        return val || '';
+    };
 
     const extractField = (item, possibleKeys) => {
         for (let key of possibleKeys) {
@@ -156,7 +173,6 @@ const DecreeJsonImporter = () => {
             const parishInfo = getMisDatosList(parishId)[0] || {};
             const parishLabel = `${parishInfo.nombre || 'PARROQUIA'} - ${parishInfo.ciudad || ''}`.toUpperCase();
 
-            // Sacerdote actual por defecto para reescribir errores de "0006"
             const currentPriestObj = getParrocoActual(parishId);
             const defaultPriest = currentPriestObj 
                 ? `PBRO. ${currentPriestObj.nombre} ${currentPriestObj.apellido || ''}`.trim().toUpperCase() 
@@ -164,7 +180,7 @@ const DecreeJsonImporter = () => {
 
             const { data: allBaptisms, error: bapError } = await supabase
                 .from('baptisms')
-                .select('id, book_number, folio, number, raw_data, nombres, apellidos, da_fe')
+                .select('id, book_number, folio, number, raw_data, nombres, apellidos, da_fe, celebration_date, fecha_nacimiento, lugar_nacimiento, nombre_padre, nombre_madre, tipo_union_padres, abuelos_paternos, abuelos_maternos, padrinos, ministro')
                 .eq('parish_id', parishId);
             
             if (bapError) throw bapError;
@@ -195,49 +211,52 @@ const DecreeJsonImporter = () => {
 
                     const targetName = `${newRec.nombres || ''} ${newRec.apellidos || ''}`.trim().toUpperCase();
 
-                    // 🧠 INTELIGENCIA ANTINÚMEROS PARA LA FIRMA (Evita imprimir "DA FE: 0006")
+                    // 1. FIRMA INTELIGENTE
                     let validDaFe = defaultPriest;
                     const dbDafe = newRec.da_fe || rawNew?.daFe || rawNew?.dafe;
                     
-                    // Si el dato de Supabase no es numérico, lo usamos.
-                    if (dbDafe && isNaN(Number(String(dbDafe).trim()))) {
-                        validDaFe = String(dbDafe).trim().toUpperCase();
-                    } 
-                    // Si el dato del archivo JSON heredado no es numérico, lo usamos.
-                    else if (item.dafe_clean && isNaN(Number(String(item.dafe_clean).trim()))) {
-                        validDaFe = String(item.dafe_clean).trim().toUpperCase();
-                    }
-                    
-                    // Garantizamos formalidad
-                    if (!validDaFe.startsWith('PBRO') && validDaFe !== 'EL PÁRROCO') {
-                        validDaFe = `PBRO. ${validDaFe}`;
-                    }
+                    if (dbDafe && isNaN(Number(String(dbDafe).trim()))) validDaFe = String(dbDafe).trim().toUpperCase();
+                    else if (item.dafe_clean && isNaN(Number(String(item.dafe_clean).trim()))) validDaFe = String(item.dafe_clean).trim().toUpperCase();
+                    if (!validDaFe.startsWith('PBRO') && validDaFe !== 'EL PÁRROCO') validDaFe = `PBRO. ${validDaFe}`;
+
+                    // 🚀 2. EXTRACCIÓN DE DATOS COMPLETOS PARA EL PDF DEL DECRETO
+                    const pdfData = {
+                        fechaSacramento: rawNew.fechaSacramento || rawNew.fecbau || newRec.celebration_date || '',
+                        sexo: parseSex(rawNew.sexo || rawNew.sex),
+                        fechaNacimiento: rawNew.fechaNacimiento || rawNew.fecnac || newRec.fecha_nacimiento || '',
+                        lugarNacimiento: rawNew.lugarNacimiento || rawNew.lugarn || newRec.lugar_nacimiento || '',
+                        nombrePadre: rawNew.nombrePadre || rawNew.padre || newRec.nombre_padre || '',
+                        nombreMadre: rawNew.nombreMadre || rawNew.madre || newRec.nombre_madre || '',
+                        tipoUnionPadres: parseUnion(rawNew.tipoUnionPadres || rawNew.tipohijo || newRec.tipo_union_padres),
+                        abuelosPaternos: rawNew.abuelosPaternos || rawNew.abuepat || newRec.abuelos_paternos || '',
+                        abuelosMaternos: rawNew.abuelosMaternos || rawNew.abuemat || newRec.abuelos_maternos || '',
+                        padrinos: rawNew.padrinos || newRec.padrinos || '',
+                        ministro: (rawNew.ministro || newRec.ministro || '').toUpperCase(),
+                        daFe: validDaFe
+                    };
 
                     if (item.isReposicion) {
                         const noteRepo = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
                         
-                        const newRaw = { 
+                        const newUpdateData = { 
                             ...rawNew, isSupplementary: true, creadoPorDecreto: true, 
-                            replacementDecreeRef: item.decreto_clean, notaMarginal: noteRepo,
-                            daFe: validDaFe 
+                            replacementDecreeRef: item.decreto_clean, notaMarginal: noteRepo, daFe: validDaFe 
                         };
 
-                        await supabase.from('baptisms').update({ 
-                            raw_data: newRaw, nota_marginal: noteRepo, da_fe: validDaFe 
-                        }).eq('id', newRec.id);
+                        await supabase.from('baptisms').update({ raw_data: newUpdateData, nota_marginal: noteRepo, da_fe: validDaFe }).eq('id', newRec.id);
 
                         const payloadDecree = {
                             decreeNumber: item.decreto_clean, numeroDecreto: item.decreto_clean, decreeDate: item.fecha_clean,
                             conceptoAnulacionId: conceptoId, causa: conceptoText, targetName: targetName,
                             observaciones: item.observaciones_clean || '', newPartidaId: newRec.id,
-                            datosNuevaPartida: { ...newRaw, book: item.sNewL, page: item.sNewF, entry: item.sNewN },
+                            ...pdfData, // 🚀 INYECTAMOS LOS DATOS DEL PDF
+                            datosNuevaPartida: { ...newUpdateData, book: item.sNewL, page: item.sNewF, entry: item.sNewN },
                             newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos }
                         };
                         
                         await supabase.from('decretos').insert([{ parish_id: parishId, tipo: 'reposicion', payload: payloadDecree }]);
 
                     } else {
-                        // 🧠 USAMOS EL MOTOR MARGINAL OFICIAL PARA REDACCIÓN PERFECTA
                         const noteAnulada = marginalNotesEngine.forAnnulledCorrection(parishId, {
                             numeroDecreto: item.decreto_clean, fechaDecreto: item.fecha_clean,
                             libroNuevo: item.sNewL, folioNuevo: item.sNewF, numeroNuevo: item.sNewN
@@ -259,6 +278,7 @@ const DecreeJsonImporter = () => {
                             targetName: `${origRec.nombres || ''} ${origRec.apellidos || ''}`.trim().toUpperCase(),
                             newTargetName: targetName, parroquia: parishLabel,
                             observaciones: item.observaciones_clean || '',
+                            ...pdfData, // 🚀 INYECTAMOS LOS DATOS DEL PDF
                             originalPartidaId: origRec.id, newPartidaId: newRec.id,
                             originalPartidaSummary: { book: item.sOldL, page: item.sOldF, entry: item.sOldN, nombres: origRec.nombres, apellidos: origRec.apellidos },
                             newPartidaSummary: { book: item.sNewL, page: item.sNewF, entry: item.sNewN, nombres: newRec.nombres, apellidos: newRec.apellidos }
