@@ -5,12 +5,12 @@ import { useAppData } from '@/context/AppDataContext';
 import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import Table from '@/components/ui/Table';
-import { Search, Printer, Loader2, BookMarked } from 'lucide-react';
+import { Search, Printer, Loader2, BookMarked, BookOpen } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Modal } from '@/components/ui/Modal';
 import BaptismIndexPrintTemplate from '@/components/BaptismIndexPrintTemplate';
 import { Helmet } from 'react-helmet';
-import ReactToPrint from 'react-to-print'; // 🚀 IMPORTACIÓN DIRECTA DEL COMPONENTE
+import { useReactToPrint } from 'react-to-print'; // 🚀 CORREGIDO: Importación con llaves (Named Export)
 
 const BaptismIndexPage = () => {
     const { user } = useAuth();
@@ -22,13 +22,11 @@ const BaptismIndexPage = () => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
 
-    // Estados de impresión
     const [isBookModalOpen, setIsBookModalOpen] = useState(false);
     const [availableBooks, setAvailableBooks] = useState([]);
     const [selectedBook, setSelectedBook] = useState('');
     const [parishInfo, setParishInfo] = useState({});
 
-    // 🚀 REFERENCIA AL COMPONENTE QUE SE IMPRIMIRÁ
     const printRef = useRef(null);
 
     useEffect(() => {
@@ -97,12 +95,18 @@ const BaptismIndexPage = () => {
         setFilteredRecords(filtered);
     }, [searchTerm, records]);
 
-    // Filtrar los datos en vivo para la plantilla
     const dataToPrint = useMemo(() => {
         return selectedBook 
             ? records.filter(r => String(r.Libro) === String(selectedBook)) 
             : records;
     }, [records, selectedBook]);
+
+    // 🚀 LÓGICA DE IMPRESIÓN DIRECTA
+    const handlePrintAction = useReactToPrint({
+        content: () => printRef.current,
+        documentTitle: `Indice_Bautismos_Libro_${selectedBook || 'Todos'}`,
+        onAfterPrint: () => setIsBookModalOpen(false) // Cierra el modal automáticamente después de imprimir
+    });
 
     const columns = [
         { header: 'Apellidos y Nombres', render: (row) => <span className="font-bold text-slate-800">{row.apellidos} {row.nombres}</span> },
@@ -117,6 +121,7 @@ const BaptismIndexPage = () => {
             <Helmet><title>Índice de Bautismos</title></Helmet>
 
             <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+                
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
                     <div className="flex items-center gap-4">
                         <div className="bg-slate-100 p-4 rounded-2xl">
@@ -161,7 +166,7 @@ const BaptismIndexPage = () => {
                         <Table columns={columns} data={filteredRecords} className="border-none" />
                     ) : (
                         <div className="py-24 flex flex-col items-center justify-center text-center">
-                            <BookMarked className="w-12 h-12 text-slate-200 mb-4" />
+                            <BookOpen className="w-16 h-16 text-slate-200 mb-4" />
                             <p className="text-slate-400 font-bold uppercase text-[11px] tracking-widest">No se encontraron registros</p>
                         </div>
                     )}
@@ -198,33 +203,26 @@ const BaptismIndexPage = () => {
                         >
                             Cancelar
                         </Button>
-                        
-                        {/* 🚀 COMPONENTE REACT-TO-PRINT OFICIALMENTE MONTADO EN EL BOTÓN */}
-                        <ReactToPrint
-                            trigger={() => (
-                                <Button
-                                    disabled={!selectedBook}
-                                    className="bg-slate-800 hover:bg-slate-900 text-white px-8 py-6 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-md transition-all active:scale-95"
-                                >
-                                    <Printer className="w-4 h-4 mr-2" /> Ejecutar Impresión
-                                </Button>
-                            )}
-                            content={() => printRef.current}
-                            documentTitle={`Indice_Bautismos_Libro_${selectedBook || 'Todos'}`}
-                            onAfterPrint={() => setIsBookModalOpen(false)}
-                        />
+                        <Button
+                            onClick={handlePrintAction}
+                            disabled={!selectedBook}
+                            className="bg-slate-800 hover:bg-slate-900 text-white px-8 py-6 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-md transition-all active:scale-95"
+                        >
+                            <Printer className="w-4 h-4 mr-2" /> Ejecutar Impresión
+                        </Button>
                     </div>
                 </div>
             </Modal>
 
-            {/* Ocultamos la plantilla para impresión asegurándonos que React la pueda leer */}
-            <div style={{ display: "none" }}>
-                <BaptismIndexPrintTemplate
-                    ref={printRef}
-                    data={dataToPrint}
-                    parishInfo={parishInfo}
-                    bookNumber={selectedBook}
-                />
+            {/* 🚀 SOLUCIÓN A LA PANTALLA EN BLANCO: Carga fuera del alcance visual pero renderizada en el DOM */}
+            <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', opacity: 0, height: 0, width: 0, overflow: 'hidden' }}>
+                <div ref={printRef}>
+                    <BaptismIndexPrintTemplate
+                        data={dataToPrint}
+                        parishInfo={parishInfo}
+                        bookNumber={selectedBook}
+                    />
+                </div>
             </div>
 
         </DashboardLayout>
