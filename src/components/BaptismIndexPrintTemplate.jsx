@@ -1,1346 +1,324 @@
-```jsx
 import React, { forwardRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
 import { formatPersonData } from '@/utils/formatPersonData';
 
-const BaptismIndexPrintTemplate = forwardRef(
-    ({ data, parroquiaInfo, bookNumber }, ref) => {
-        const { user } = useAuth() || {};
-        const { getMisDatosList } = useAppData() || {};
+const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber }, ref) => {
+    const { user } = useAuth() || {};
+    const { getMisDatosList } = useAppData() || {};
+    const dataSource = data || [];
 
-        /*
-         * ================================================================
-         * 1. DATOS BASE
-         * ================================================================
-         */
+    // --- 1. EXTRACTOR DE IDENTIDAD SEGURO ---
+    const getSafeParishId = () => {
+        if (user?.parishId) return user.parishId;
+        try { return JSON.parse(localStorage.getItem('user') || '{}').parishId; } catch (e) { return null; }
+    };
+    const safeParishId = getSafeParishId();
 
-        const dataSource = Array.isArray(data) ? data : [];
+    // --- 2. BUSCADOR DEFINITIVO DE MEMBRETE ---
+    const getOfficialData = (field, fallback) => {
+        try {
+            if (parroquiaInfo && parroquiaInfo[field]) return parroquiaInfo[field];
 
-        /*
-         * ================================================================
-         * 2. IDENTIDAD SEGURA DE LA PARROQUIA
-         * ================================================================
-         */
-
-        const getSafeParishId = () => {
-            if (user?.parishId) {
-                return user.parishId;
+            if (!safeParishId) return fallback;
+            let p = null;
+            const rawGlobal = localStorage.getItem('mis_datos');
+            if (rawGlobal) {
+                const allRecords = JSON.parse(rawGlobal);
+                const record = allRecords.find(r => r.entity_id === safeParishId);
+                if (record && record.payload) p = Array.isArray(record.payload) ? record.payload[0] : record.payload;
             }
-
-            try {
-                const storedUser = JSON.parse(
-                    localStorage.getItem('user') || '{}'
-                );
-
-                return storedUser?.parishId || null;
-            } catch (error) {
-                console.warn(
-                    'No fue posible recuperar parishId desde localStorage.',
-                    error
-                );
-
-                return null;
+            if (!p && typeof getMisDatosList === 'function') {
+                const records = getMisDatosList(safeParishId);
+                if (records && records.length > 0) p = records[0]['0'] || records[0]; 
             }
-        };
+            if (!p) return fallback;
 
-        const safeParishId = getSafeParishId();
+            const f = field.toLowerCase();
+            const value = p[field] || p[f] || p[field.toUpperCase()] ||
+                (f === 'nombre' ? (p.nombre || p.nombreParroquia || p.nombreCancilleria) : null) ||
+                (f === 'diocesis' ? (p.diocesis || p.nombreDiocesis || p.diocesis_name) : null) ||
+                (f === 'ciudad' ? p.ciudad : null) || (f === 'region' ? p.region : null);
 
-        /*
-         * ================================================================
-         * 3. HELPERS GENERALES
-         * ================================================================
-         */
-
-        const sanitizeText = (value, fallback = '---') => {
-            if (
-                value === undefined ||
-                value === null ||
-                typeof value === 'object'
-            ) {
-                return fallback;
+            if (value && String(value).trim() !== '' && String(value).toUpperCase() !== 'DESCONOCIDA') {
+                return String(value).trim();
             }
+        } catch (e) { console.error("Error leyendo membrete en Índice:", e); }
+        return fallback;
+    };
 
-            const str = String(value)
-                .replace(/[\r\n\t]+/g, ' ')
-                .replace(/\s+/g, ' ')
-                .trim();
+    // --- 3. PROCESAMIENTO DE CABECERA OFICIAL ---
+    const diocesis = getOfficialData('diocesis', user?.dioceseName || 'DIÓCESIS').toUpperCase();
+    const nombreParroquia = getOfficialData('nombre', user?.parishName || 'PARROQUIA').toUpperCase();
+    
+    const ciudad = getOfficialData('ciudad', '').toUpperCase();
+    const departamento = getOfficialData('region', '').toUpperCase();
+    
+    // Evitar duplicar "Colombia" si la región ya lo trae
+    let ubicacionHeader = [ciudad, departamento].filter(Boolean).join(', ');
+    if (ubicacionHeader && !ubicacionHeader.includes('COLOMBIA')) {
+        ubicacionHeader += ' - COLOMBIA';
+    }
 
-            if (
-                !str ||
-                str === '---' ||
-                str === '-'
-            ) {
-                return fallback;
-            }
+    // --- 4. ORDENAMIENTO ALFABÉTICO ESTRICTO ---
+    const sortedData = [...dataSource].sort((a, b) => {
+        const nameA = `${a.apellidos || a.lastName || ''} ${a.nombres || a.firstName || ''}`.trim().toLowerCase();
+        const nameB = `${b.apellidos || b.lastName || ''} ${b.nombres || b.firstName || ''}`.trim().toLowerCase();
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+    });
 
-            return str.toUpperCase();
-        };
+    // Formateador robusto para números (Evita que queden en blanco)
+    const formatNumber = (val) => {
+        if (val === undefined || val === null || val === '') return '---';
+        const str = String(val).trim();
+        if (str === '0' || str === '---' || str === '-') return '---';
+        if (isNaN(str)) return str; // Por si hay folios con letras (Ej: "12B")
+        return str.padStart(4, '0');
+    };
 
-        const getField = (
-            record,
-            fields = [],
-            fallback = ''
-        ) => {
-            const raw = record?.raw_data || {};
-
-            for (const field of fields) {
-                const directValue = record?.[field];
-
-                if (
-                    directValue !== undefined &&
-                    directValue !== null &&
-                    String(directValue).trim() !== ''
-                ) {
-                    return directValue;
+    return (
+        <div ref={ref} className="print-container">
+            {/* 🚀 INYECCIÓN DE ESTILOS PROFESIONALES EXCLUSIVOS PARA IMPRESIÓN */}
+            <style type="text/css" media="print, screen">{`
+                /* RESET Y CONFIGURACIÓN BÁSICA */
+                .print-container {
+                    font-family: 'Arial', sans-serif;
+                    background-color: white;
+                    color: #000;
+                    width: 100%;
+                    margin: 0;
+                    padding: 0;
                 }
 
-                const rawValue = raw?.[field];
-
-                if (
-                    rawValue !== undefined &&
-                    rawValue !== null &&
-                    String(rawValue).trim() !== ''
-                ) {
-                    return rawValue;
-                }
-            }
-
-            return fallback;
-        };
-
-        /*
-         * ================================================================
-         * 4. BUSCADOR ROBUSTO DEL MEMBRETE
-         * ================================================================
-         */
-
-        const getOfficialData = (field, fallback = '') => {
-            try {
-                /*
-                 * Prioridad 1:
-                 * parroquiaInfo
-                 */
-                if (
-                    parroquiaInfo &&
-                    parroquiaInfo[field] !== undefined &&
-                    parroquiaInfo[field] !== null &&
-                    String(parroquiaInfo[field]).trim() !== ''
-                ) {
-                    return String(parroquiaInfo[field]).trim();
+                /* CONFIGURACIÓN DE PÁGINA (MÁRGENES FÍSICOS) */
+                @page {
+                    size: letter;
+                    margin: 15mm; /* Márgenes físicos reales para evitar cortes */
                 }
 
-                if (!safeParishId) {
-                    return fallback;
-                }
-
-                let parishData = null;
-
-                /*
-                 * Prioridad 2:
-                 * localStorage
-                 */
-                const rawGlobal =
-                    localStorage.getItem('mis_datos');
-
-                if (rawGlobal) {
-                    try {
-                        const allRecords =
-                            JSON.parse(rawGlobal);
-
-                        if (Array.isArray(allRecords)) {
-                            const record = allRecords.find(
-                                (item) =>
-                                    String(item?.entity_id) ===
-                                    String(safeParishId)
-                            );
-
-                            if (record?.payload) {
-                                parishData = Array.isArray(
-                                    record.payload
-                                )
-                                    ? record.payload[0]
-                                    : record.payload;
-                            }
-                        }
-                    } catch (storageError) {
-                        console.warn(
-                            'Error leyendo mis_datos.',
-                            storageError
-                        );
+                @media print {
+                    html, body {
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                    }
+                    
+                    /* REPETICIÓN DE CABECERAS Y PIES DE PÁGINA */
+                    .print-table {
+                        width: 100%;
+                    }
+                    .print-table thead {
+                        display: table-header-group; /* Repite la cabecera en cada página */
+                    }
+                    .print-table tbody {
+                        display: table-row-group;
+                    }
+                    .print-table tfoot {
+                        display: table-footer-group; /* Repite el pie en cada página */
+                    }
+                    
+                    /* EVITAR CORTES EN MEDIO DE LAS FILAS */
+                    .print-table tr {
+                        page-break-inside: avoid !important;
+                        break-inside: avoid !important;
+                    }
+                    .print-table td, .print-table th {
+                        page-break-inside: avoid !important;
+                        break-inside: avoid !important;
                     }
                 }
 
-                /*
-                 * Prioridad 3:
-                 * contexto
-                 */
-                if (
-                    !parishData &&
-                    typeof getMisDatosList === 'function'
-                ) {
-                    try {
-                        const records =
-                            getMisDatosList(safeParishId);
-
-                        if (
-                            Array.isArray(records) &&
-                            records.length > 0
-                        ) {
-                            parishData =
-                                records[0]?.['0'] ||
-                                records[0] ||
-                                null;
-                        }
-                    } catch (contextError) {
-                        console.warn(
-                            'Error obteniendo datos parroquiales.',
-                            contextError
-                        );
-                    }
+                /* CABECERA ECLESIÁSTICA (AHORA DENTRO DEL THEAD) */
+                .header-cell {
+                    border: none !important;
+                    background: white !important;
+                    padding: 0 0 15px 0 !important;
+                }
+                .print-diocese {
+                    font-family: 'Times New Roman', Times, serif;
+                    font-size: 13pt;
+                    font-weight: bold;
+                    letter-spacing: 1px;
+                    text-align: center;
+                }
+                .print-parish {
+                    font-family: 'Times New Roman', Times, serif;
+                    font-size: 16pt;
+                    font-weight: 900;
+                    margin: 4px 0;
+                    text-align: center;
+                }
+                .print-location {
+                    font-size: 9pt;
+                    color: #444;
+                    text-align: center;
+                }
+                .print-title {
+                    text-align: center;
+                    font-family: 'Times New Roman', Times, serif;
+                    font-size: 12pt;
+                    font-weight: bold;
+                    border-bottom: 2px solid #000;
+                    margin-top: 15px;
+                    padding-bottom: 8px;
+                    letter-spacing: 1.5px;
                 }
 
-                if (
-                    !parishData ||
-                    typeof parishData !== 'object'
-                ) {
-                    return fallback;
+                /* TABLA PRINCIPAL */
+                .print-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 9pt;
+                }
+                .header-row th {
+                    border: 1px solid #000;
+                    border-top: 2px solid #000; /* Separador fuerte */
+                    border-bottom: 2px solid #000;
+                    padding: 8px 4px;
+                    background-color: #eaeaea !important;
+                    font-weight: bold;
+                    text-align: center;
+                    text-transform: uppercase;
+                    font-size: 8.5pt;
+                }
+                .print-table td {
+                    border: 1px solid #444; /* Borde ligeramente más suave para el cuerpo */
+                    padding: 6px 5px;
+                    vertical-align: middle;
+                    line-height: 1.2;
+                }
+                
+                /* FILAS CEBRADAS */
+                .print-table tbody tr:nth-child(even) td {
+                    background-color: #f9f9f9 !important;
                 }
 
-                const normalizedField =
-                    String(field).toLowerCase();
+                /* CELDAS ESPECÍFICAS */
+                .col-center { text-align: center; }
+                .col-number { width: 4%; font-weight: bold; text-align: center; font-size: 8pt; }
+                .col-titular { width: 33%; }
+                .col-padres { width: 39%; font-size: 8pt; color: #222; }
+                .col-ref { width: 8%; font-family: 'Courier New', Courier, monospace; font-size: 9.5pt; text-align: center; font-weight: bold; }
 
-                const aliases = {
-                    nombre: [
-                        'nombre',
-                        'nombreParroquia',
-                        'nombreparroquia',
-                        'nombreCancilleria',
-                        'nombre_cancilleria',
-                    ],
+                .text-bold { font-weight: bold; font-size: 9.5pt; color: #000; }
+                .text-muted { font-size: 8.5pt; color: #444; margin-top: 2px; }
 
-                    diocesis: [
-                        'diocesis',
-                        'diócesis',
-                        'nombreDiocesis',
-                        'nombreDiócesis',
-                        'diocesis_name',
-                        'dioceseName',
-                    ],
-
-                    ciudad: [
-                        'ciudad',
-                        'municipio',
-                        'city',
-                    ],
-
-                    region: [
-                        'region',
-                        'región',
-                        'departamento',
-                        'department',
-                    ],
-                };
-
-                const possibleFields =
-                    aliases[normalizedField] || [field];
-
-                for (const possibleField of possibleFields) {
-                    const value =
-                        parishData?.[possibleField];
-
-                    if (
-                        value !== undefined &&
-                        value !== null &&
-                        String(value).trim() !== ''
-                    ) {
-                        const cleanValue =
-                            String(value).trim();
-
-                        if (
-                            cleanValue.toUpperCase() !==
-                                'DESCONOCIDA' &&
-                            cleanValue.toUpperCase() !==
-                                'UNKNOWN'
-                        ) {
-                            return cleanValue;
-                        }
-                    }
+                /* ESTADO ANULADO */
+                .row-anulada td {
+                    background-color: #fff0f0 !important;
+                    color: #777;
                 }
-            } catch (error) {
-                console.error(
-                    'Error leyendo membrete en Índice:',
-                    error
-                );
-            }
-
-            return fallback;
-        };
-
-        /*
-         * ================================================================
-         * 5. MEMBRETE
-         * ================================================================
-         */
-
-        const diocesis = sanitizeText(
-            getOfficialData(
-                'diocesis',
-                user?.dioceseName || 'DIÓCESIS'
-            ),
-            'DIÓCESIS'
-        );
-
-        const nombreParroquia = sanitizeText(
-            getOfficialData(
-                'nombre',
-                user?.parishName || 'PARROQUIA'
-            ),
-            'PARROQUIA'
-        );
-
-        const ciudad = sanitizeText(
-            getOfficialData('ciudad', ''),
-            ''
-        );
-
-        const departamento = sanitizeText(
-            getOfficialData('region', ''),
-            ''
-        );
-
-        let ubicacionHeader = [
-            ciudad,
-            departamento,
-        ]
-            .filter(Boolean)
-            .join(', ');
-
-        if (
-            ubicacionHeader &&
-            !/\bCOLOMBIA\b/i.test(ubicacionHeader)
-        ) {
-            ubicacionHeader += ' - COLOMBIA';
-        }
-
-        /*
-         * ================================================================
-         * 6. LIBRO
-         * ================================================================
-         */
-
-        const formatNumber = (value) => {
-            if (
-                value === undefined ||
-                value === null ||
-                value === ''
-            ) {
-                return '---';
-            }
-
-            const str = String(value).trim();
-
-            if (
-                !str ||
-                str === '0' ||
-                str === '---' ||
-                str === '-'
-            ) {
-                return '---';
-            }
-
-            /*
-             * Números puros:
-             * 1 -> 0001
-             * 25 -> 0025
-             */
-            if (/^\d+$/.test(str)) {
-                return str.padStart(4, '0');
-            }
-
-            /*
-             * Conserva referencias como:
-             * 12B
-             * 15-A
-             * 24 bis
-             */
-            return str;
-        };
-
-        const formattedBookNumber =
-            bookNumber !== undefined &&
-            bookNumber !== null &&
-            String(bookNumber).trim() !== ''
-                ? formatNumber(bookNumber)
-                : '';
-
-        /*
-         * ================================================================
-         * 7. ORDEN ALFABÉTICO
-         * ================================================================
-         */
-
-        const sortedData = [...dataSource].sort(
-            (a, b) => {
-                const apellidoA = sanitizeText(
-                    getField(a, [
-                        'apellidos',
-                        'apellido',
-                        'lastName',
-                    ]),
-                    ''
-                );
-
-                const nombreA = sanitizeText(
-                    getField(a, [
-                        'nombres',
-                        'nombre',
-                        'firstName',
-                    ]),
-                    ''
-                );
-
-                const apellidoB = sanitizeText(
-                    getField(b, [
-                        'apellidos',
-                        'apellido',
-                        'lastName',
-                    ]),
-                    ''
-                );
-
-                const nombreB = sanitizeText(
-                    getField(b, [
-                        'nombres',
-                        'nombre',
-                        'firstName',
-                    ]),
-                    ''
-                );
-
-                const collator = new Intl.Collator(
-                    'es-CO',
-                    {
-                        sensitivity: 'base',
-                        ignorePunctuation: true,
-                    }
-                );
-
-                const surnameResult =
-                    collator.compare(
-                        apellidoA,
-                        apellidoB
-                    );
-
-                if (surnameResult !== 0) {
-                    return surnameResult;
+                .badge-anulada {
+                    display: inline-block;
+                    background-color: #d32f2f !important;
+                    color: white !important;
+                    font-size: 6pt;
+                    padding: 2px 4px;
+                    border-radius: 3px;
+                    font-weight: bold;
+                    margin-left: 6px;
+                    vertical-align: middle;
                 }
-
-                return collator.compare(
-                    nombreA,
-                    nombreB
-                );
-            }
-        );
-
-        /*
-         * ================================================================
-         * 8. FORMATEO DE PERSONAS
-         * ================================================================
-         */
-
-        const formatPerson = (value) => {
-            const clean = sanitizeText(value, '---');
-
-            if (
-                clean === '---' ||
-                typeof formatPersonData !== 'function'
-            ) {
-                return clean;
-            }
-
-            try {
-                return sanitizeText(
-                    formatPersonData(clean),
-                    '---'
-                );
-            } catch {
-                return clean;
-            }
-        };
-
-        /*
-         * ================================================================
-         * 9. PADRES
-         * ================================================================
-         */
-
-        const getParentName = (
-            record,
-            type
-        ) => {
-            if (type === 'father') {
-                return getField(record, [
-                    'nombre_padre',
-                    'nombrePadre',
-                    'padre',
-                    'fatherName',
-                    'father_name',
-                    'padreNombre',
-                ]);
-            }
-
-            return getField(record, [
-                'nombre_madre',
-                'nombreMadre',
-                'madre',
-                'motherName',
-                'mother_name',
-                'madreNombre',
-            ]);
-        };
-
-        /*
-         * ================================================================
-         * 10. FECHA
-         * ================================================================
-         */
-
-        const generatedDate =
-            new Intl.DateTimeFormat('es-CO', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-            }).format(new Date());
-
-        /*
-         * ================================================================
-         * 11. RENDER
-         * ================================================================
-         */
-
-        return (
-            <div
-                ref={ref}
-                className="print-container"
-            >
-                <style type="text/css">
-                    {`
-                        /*
-                         * ==================================================
-                         * RESET
-                         * ==================================================
-                         */
-
-                        .print-container,
-                        .print-container * {
-                            box-sizing: border-box;
-                        }
-
-                        .print-container {
-                            width: 100%;
-                            margin: 0;
-                            padding: 0;
-                            background: #fff;
-                            color: #000;
-                        }
-
-                        /*
-                         * ==================================================
-                         * PÁGINA
-                         * ==================================================
-                         */
-
-                        @page {
-                            size: Letter portrait;
-                            margin: 10mm 11mm 11mm 11mm;
-                        }
-
-                        @media print {
-                            html,
-                            body {
-                                margin: 0 !important;
-                                padding: 0 !important;
-                                background: #fff !important;
-                                overflow: visible !important;
-                            }
-
-                            body {
-                                -webkit-print-color-adjust: exact !important;
-                                print-color-adjust: exact !important;
-                            }
-
-                            .print-container {
-                                width: 100% !important;
-                                margin: 0 !important;
-                                padding: 0 !important;
-                            }
-
-                            .print-table {
-                                page-break-inside: auto;
-                            }
-
-                            .print-table thead {
-                                display: table-header-group;
-                            }
-
-                            .print-table tfoot {
-                                display: table-footer-group;
-                            }
-
-                            .print-table tr {
-                                page-break-inside: avoid !important;
-                                break-inside: avoid !important;
-                            }
-
-                            .print-table td,
-                            .print-table th {
-                                page-break-inside: avoid !important;
-                                break-inside: avoid !important;
-                            }
-                        }
-
-                        /*
-                         * ==================================================
-                         * MEMBRETE
-                         * ==================================================
-                         */
-
-                        .print-header-cell {
-                            border: none !important;
-                            padding: 0 0 9px 0 !important;
-                            background: #fff !important;
-                        }
-
-                        .institution-header {
-                            position: relative;
-                            width: 100%;
-                            padding: 1px 0 9px 0;
-                            text-align: center;
-                        }
-
-                        /*
-                         * Pequeño elemento ornamental.
-                         * Sobrio para conservar apariencia de documento
-                         * eclesiástico oficial.
-                         */
-
-                        .header-ornament {
-                            display: block;
-                            margin: 0 auto 4px auto;
-                            color: #222;
-                            font-family:
-                                "Times New Roman",
-                                Times,
-                                serif;
-                            font-size: 10px;
-                            line-height: 1;
-                        }
-
-                        .print-diocese {
-                            margin: 0;
-                            font-family:
-                                "Times New Roman",
-                                Times,
-                                serif;
-                            font-size: 12pt;
-                            font-weight: 700;
-                            letter-spacing: 1.4px;
-                            line-height: 1.15;
-                            text-transform: uppercase;
-                        }
-
-                        .print-parish {
-                            margin: 3px 0 2px 0;
-                            font-family:
-                                "Times New Roman",
-                                Times,
-                                serif;
-                            font-size: 15pt;
-                            font-weight: 900;
-                            letter-spacing: 0.25px;
-                            line-height: 1.12;
-                            text-transform: uppercase;
-                        }
-
-                        .print-location {
-                            margin-top: 3px;
-                            font-family: Arial, Helvetica, sans-serif;
-                            font-size: 7.8pt;
-                            font-weight: 500;
-                            letter-spacing: 0.45px;
-                            line-height: 1.15;
-                            color: #333;
-                            text-transform: uppercase;
-                        }
-
-                        /*
-                         * Línea institucional doble
-                         */
-
-                        .header-rule {
-                            width: 92%;
-                            height: 5px;
-                            margin: 8px auto 6px auto;
-                            border-top: 1.5px solid #000;
-                            border-bottom: 1px solid #000;
-                        }
-
-                        .print-title {
-                            margin-top: 2px;
-                            font-family:
-                                "Times New Roman",
-                                Times,
-                                serif;
-                            font-size: 11pt;
-                            font-weight: 700;
-                            letter-spacing: 1.2px;
-                            line-height: 1.2;
-                            text-transform: uppercase;
-                        }
-
-                        .print-book {
-                            font-weight: 900;
-                        }
-
-                        /*
-                         * ==================================================
-                         * TABLA
-                         * ==================================================
-                         */
-
-                        .print-table {
-                            width: 100%;
-                            max-width: 100%;
-                            table-layout: fixed;
-                            border-collapse: collapse;
-                            border-spacing: 0;
-                            border: 1.5px solid #000;
-                            font-family:
-                                Arial,
-                                Helvetica,
-                                sans-serif;
-                            font-size: 8pt;
-                        }
-
-                        /*
-                         * ==================================================
-                         * COLUMNAS
-                         * ==================================================
-                         */
-
-                        .col-number {
-                            width: 4%;
-                            text-align: center;
-                        }
-
-                        .col-titular {
-                            width: 32%;
-                        }
-
-                        .col-padres {
-                            width: 41.5%;
-                        }
-
-                        .col-ref {
-                            width: 7.5%;
-                            text-align: center;
-                        }
-
-                        /*
-                         * ==================================================
-                         * CABECERA DE TABLA
-                         * ==================================================
-                         */
-
-                        .header-row th {
-                            padding: 6px 4px;
-                            border: 1px solid #000 !important;
-                            border-top: 2px solid #000 !important;
-                            border-bottom: 2px solid #000 !important;
-                            background: #e7e7e7 !important;
-                            color: #000;
-                            font-family:
-                                Arial,
-                                Helvetica,
-                                sans-serif;
-                            font-size: 7.3pt;
-                            font-weight: 900;
-                            letter-spacing: 0.2px;
-                            line-height: 1.1;
-                            text-align: center;
-                            text-transform: uppercase;
-                            vertical-align: middle;
-                            white-space: nowrap;
-                        }
-
-                        /*
-                         * ==================================================
-                         * CUERPO
-                         * ==================================================
-                         */
-
-                        .print-table tbody td {
-                            padding: 4.5px 5px;
-                            border: 1px solid #555 !important;
-                            background: #fff;
-                            color: #000;
-                            font-size: 7.8pt;
-                            line-height: 1.15;
-                            vertical-align: middle;
-                            overflow-wrap: break-word;
-                            word-break: normal;
-                        }
-
-                        .print-table tbody tr:nth-child(even) td {
-                            background: #f7f7f7 !important;
-                        }
-
-                        /*
-                         * ==================================================
-                         * NÚMERO
-                         * ==================================================
-                         */
-
-                        .col-number {
-                            font-family:
-                                Arial,
-                                Helvetica,
-                                sans-serif;
-                            font-size: 7.5pt !important;
-                            font-weight: 700;
-                            text-align: center;
-                        }
-
-                        /*
-                         * ==================================================
-                         * TITULAR
-                         * ==================================================
-                         */
-
-                        .text-bold {
-                            margin: 0;
-                            color: #000;
-                            font-size: 8.2pt;
-                            font-weight: 900;
-                            line-height: 1.12;
-                        }
-
-                        .text-muted {
-                            margin-top: 2px;
-                            color: #333;
-                            font-size: 7.4pt;
-                            font-weight: 500;
-                            line-height: 1.1;
-                        }
-
-                        /*
-                         * ==================================================
-                         * PADRES
-                         * ==================================================
-                         */
-
-                        .col-padres {
-                            font-size: 7.15pt !important;
-                            line-height: 1.15 !important;
-                        }
-
-                        .parent-line {
-                            margin: 0;
-                            padding: 0;
-                            line-height: 1.2;
-                        }
-
-                        .parent-line + .parent-line {
-                            margin-top: 2px;
-                        }
-
-                        .parent-label {
-                            font-weight: 900;
-                            color: #000;
-                        }
-
-                        /*
-                         * ==================================================
-                         * LIBRO / FOLIO / ACTA
-                         * ==================================================
-                         */
-
-                        .col-ref {
-                            font-family:
-                                "Courier New",
-                                Courier,
-                                monospace;
-                            font-size: 8.2pt !important;
-                            font-weight: 700;
-                            text-align: center;
-                            white-space: nowrap;
-                            letter-spacing: 0.1px;
-                        }
-
-                        /*
-                         * ==================================================
-                         * ANULADOS
-                         * ==================================================
-                         */
-
-                        .row-anulada td {
-                            background: #f4eeee !important;
-                            color: #555;
-                        }
-
-                        .row-anulada .text-bold {
-                            color: #444;
-                        }
-
-                        .badge-anulada {
-                            display: inline-block;
-                            margin-left: 5px;
-                            padding: 1.5px 4px;
-                            border: 1px solid #555;
-                            border-radius: 2px;
-                            background: #333 !important;
-                            color: #fff !important;
-                            font-family:
-                                Arial,
-                                Helvetica,
-                                sans-serif;
-                            font-size: 5pt;
-                            font-weight: 900;
-                            letter-spacing: 0.4px;
-                            line-height: 1;
-                            vertical-align: middle;
-                            white-space: nowrap;
-                        }
-
-                        /*
-                         * ==================================================
-                         * SIN REGISTROS
-                         * ==================================================
-                         */
-
-                        .empty-row td {
-                            padding: 35px 20px !important;
-                            color: #777 !important;
-                            font-family:
-                                "Times New Roman",
-                                Times,
-                                serif;
-                            font-size: 10pt !important;
-                            font-style: italic;
-                            text-align: center;
-                        }
-
-                        /*
-                         * ==================================================
-                         * PIE
-                         * ==================================================
-                         */
-
-                        .footer-cell {
-                            border: none !important;
-                            background: #fff !important;
-                            padding: 7px 0 0 0 !important;
-                            color: #666 !important;
-                            font-family:
-                                "Times New Roman",
-                                Times,
-                                serif;
-                            font-size: 6.3pt !important;
-                            font-style: italic;
-                            line-height: 1.2;
-                            text-align: right !important;
-                        }
-
-                        /*
-                         * ==================================================
-                         * ACABADO DE IMPRESIÓN
-                         * ==================================================
-                         */
-
-                        @media print {
-                            .header-row th {
-                                background-color: #e7e7e7 !important;
-                            }
-
-                            .print-table tbody tr:nth-child(even) td {
-                                background-color: #f7f7f7 !important;
-                            }
-
-                            .row-anulada td {
-                                background-color: #f4eeee !important;
-                            }
-
-                            .badge-anulada {
-                                background-color: #333 !important;
-                                color: #fff !important;
-                            }
-                        }
-                    `}
-                </style>
-
-                <table className="print-table">
-
-                    {/*
-                     * ======================================================
-                     * CONTROL ABSOLUTO DE ANCHOS
-                     * ======================================================
-                     */}
-
-                    <colgroup>
-                        <col style={{ width: '4%' }} />
-                        <col style={{ width: '32%' }} />
-                        <col style={{ width: '41.5%' }} />
-                        <col style={{ width: '7.5%' }} />
-                        <col style={{ width: '7.5%' }} />
-                        <col style={{ width: '7.5%' }} />
-                    </colgroup>
-
-                    <thead>
-
-                        {/*
-                         * ==================================================
-                         * MEMBRETE
-                         *
-                         * Al estar dentro de THEAD, se repetirá al
-                         * cambiar de página durante la impresión.
-                         * ==================================================
-                         */}
-
-                        <tr>
-                            <th
-                                colSpan={6}
-                                className="print-header-cell"
-                            >
-                                <div className="institution-header">
-
-                                    <div className="header-ornament">
-                                        ✦
+                
+                /* FOOTER DE PÁGINA */
+                .footer-cell {
+                    border: none !important;
+                    background: white !important;
+                    padding-top: 15px !important;
+                    text-align: right !important;
+                    font-size: 7.5pt !important;
+                    color: #666 !important;
+                    font-style: italic;
+                }
+            `}</style>
+            
+            <table className="print-table">
+                <thead>
+                    {/* 🚀 CABECERA QUE SE REPITE INTELIGENTEMENTE EN CADA PÁGINA */}
+                    <tr>
+                        <th colSpan="6" className="header-cell">
+                            <div className="print-diocese">{diocesis}</div>
+                            <div className="print-parish">{nombreParroquia}</div>
+                            <div className="print-location">{ubicacionHeader}</div>
+                            <div className="print-title">
+                                ÍNDICE GENERAL DE BAUTISMOS {bookNumber ? `• LIBRO ${bookNumber}` : ''}
+                            </div>
+                        </th>
+                    </tr>
+                    {/* TÍTULOS DE COLUMNAS */}
+                    <tr className="header-row">
+                        <th className="col-number">N°</th>
+                        <th className="col-titular">APELLIDOS Y NOMBRES</th>
+                        <th className="col-padres">PADRES / FILIACIÓN</th>
+                        <th className="col-ref">LIBRO</th>
+                        <th className="col-ref">FOLIO</th>
+                        <th className="col-ref">ACTA</th>
+                    </tr>
+                </thead>
+                
+                <tbody>
+                    {sortedData.map((record, index) => {
+                        const safeFormat = (val) => typeof formatPersonData === 'function' ? formatPersonData(val) : val;
+
+                        const apellidos = safeFormat(record.apellidos || record.lastName || '');
+                        const nombres = safeFormat(record.nombres || record.firstName || '');
+                        const padre = safeFormat(record.nombrePadre || record.fatherName || record.padre || '---');
+                        const madre = safeFormat(record.nombreMadre || record.motherName || record.madre || '---');
+                        
+                        // Capturando el libro con 'L' mayúscula para evitar celdas en blanco
+                        const book = formatNumber(record.Libro || record.book_number || record.libro);
+                        const page = formatNumber(record.folio || record.page_number);
+                        const entry = formatNumber(record.numero || record.numeroActa || record.entry_number);
+                        
+                        const isAnulada = record.status === 'anulada' || record.isAnnulled || record.estado === 'anulada';
+
+                        return (
+                            <tr key={record.id || index} className={isAnulada ? 'row-anulada' : ''}>
+                                <td className="col-number">{index + 1}</td>
+                                
+                                <td>
+                                    <div className="text-bold">
+                                        {apellidos}
+                                        {isAnulada && <span className="badge-anulada">ANULADA</span>}
                                     </div>
-
-                                    <div className="print-diocese">
-                                        {diocesis}
-                                    </div>
-
-                                    <div className="print-parish">
-                                        {nombreParroquia}
-                                    </div>
-
-                                    {ubicacionHeader && (
-                                        <div className="print-location">
-                                            {ubicacionHeader}
-                                        </div>
-                                    )}
-
-                                    <div className="header-rule" />
-
-                                    <div className="print-title">
-                                        ÍNDICE GENERAL DE BAUTISMOS
-
-                                        {formattedBookNumber && (
-                                            <>
-                                                {' '}
-                                                <span>
-                                                    •
-                                                </span>{' '}
-                                                <span className="print-book">
-                                                    LIBRO{' '}
-                                                    {
-                                                        formattedBookNumber
-                                                    }
-                                                </span>
-                                            </>
-                                        )}
-                                    </div>
-
-                                </div>
-                            </th>
-                        </tr>
-
-                        {/*
-                         * ==================================================
-                         * ENCABEZADOS
-                         * ==================================================
-                         */}
-
-                        <tr className="header-row">
-
-                            <th className="col-number">
-                                N°
-                            </th>
-
-                            <th className="col-titular">
-                                APELLIDOS Y NOMBRES
-                            </th>
-
-                            <th className="col-padres">
-                                PADRES / FILIACIÓN
-                            </th>
-
-                            <th className="col-ref">
-                                LIBRO
-                            </th>
-
-                            <th className="col-ref">
-                                FOLIO
-                            </th>
-
-                            <th className="col-ref">
-                                ACTA
-                            </th>
-
-                        </tr>
-
-                    </thead>
-
-                    <tbody>
-
-                        {sortedData.map(
-                            (record, index) => {
-
-                                /*
-                                 * ==========================================
-                                 * PERSONA
-                                 * ==========================================
-                                 */
-
-                                const apellidos =
-                                    formatPerson(
-                                        getField(record, [
-                                            'apellidos',
-                                            'apellido',
-                                            'lastName',
-                                        ])
-                                    );
-
-                                const nombres =
-                                    formatPerson(
-                                        getField(record, [
-                                            'nombres',
-                                            'nombre',
-                                            'firstName',
-                                        ])
-                                    );
-
-                                /*
-                                 * ==========================================
-                                 * PADRES
-                                 * ==========================================
-                                 */
-
-                                const padre =
-                                    formatPerson(
-                                        getParentName(
-                                            record,
-                                            'father'
-                                        )
-                                    );
-
-                                const madre =
-                                    formatPerson(
-                                        getParentName(
-                                            record,
-                                            'mother'
-                                        )
-                                    );
-
-                                /*
-                                 * ==========================================
-                                 * REFERENCIAS
-                                 * ==========================================
-                                 */
-
-                                const book =
-                                    formatNumber(
-                                        getField(
-                                            record,
-                                            [
-                                                'book_number',
-                                                'bookNumber',
-                                                'Libro',
-                                                'libro',
-                                                'numeroLibro',
-                                            ]
-                                        )
-                                    );
-
-                                const page =
-                                    formatNumber(
-                                        getField(
-                                            record,
-                                            [
-                                                'folio',
-                                                'Folio',
-                                                'page_number',
-                                                'pageNumber',
-                                            ]
-                                        )
-                                    );
-
-                                const entry =
-                                    formatNumber(
-                                        getField(
-                                            record,
-                                            [
-                                                'number',
-                                                'numero',
-                                                'numeroActa',
-                                                'NumeroActa',
-                                                'entry_number',
-                                                'entryNumber',
-                                                'acta',
-                                            ]
-                                        )
-                                    );
-
-                                /*
-                                 * ==========================================
-                                 * ESTADO
-                                 * ==========================================
-                                 */
-
-                                const status =
-                                    sanitizeText(
-                                        getField(
-                                            record,
-                                            [
-                                                'status',
-                                                'estado',
-                                            ]
-                                        ),
-                                        ''
-                                    ).toLowerCase();
-
-                                const isAnulada =
-                                    status ===
-                                        'anulada' ||
-                                    status ===
-                                        'anulado' ||
-                                    record?.isAnnulled ===
-                                        true ||
-                                    record?.isAnulada ===
-                                        true ||
-                                    record?.raw_data
-                                        ?.isAnnulled ===
-                                        true ||
-                                    String(
-                                        record?.raw_data
-                                            ?.estado || ''
-                                    ).toLowerCase() ===
-                                        'anulada';
-
-                                /*
-                                 * ==========================================
-                                 * KEY
-                                 * ==========================================
-                                 */
-
-                                const rowKey =
-                                    record?.id ||
-                                    record?._id ||
-                                    record?.uuid ||
-                                    `${apellidos}-${nombres}-${index}`;
-
-                                return (
-                                    <tr
-                                        key={rowKey}
-                                        className={
-                                            isAnulada
-                                                ? 'row-anulada'
-                                                : ''
-                                        }
-                                    >
-
-                                        <td className="col-number">
-                                            {index + 1}
-                                        </td>
-
-                                        <td className="col-titular">
-
-                                            <div className="text-bold">
-                                                {apellidos}
-
-                                                {isAnulada && (
-                                                    <span className="badge-anulada">
-                                                        ANULADA
-                                                    </span>
-                                                )}
-                                            </div>
-
-                                            <div className="text-muted">
-                                                {nombres}
-                                            </div>
-
-                                        </td>
-
-                                        <td className="col-padres">
-
-                                            <div className="parent-line">
-                                                <span className="parent-label">
-                                                    P:
-                                                </span>{' '}
-                                                {padre}
-                                            </div>
-
-                                            <div className="parent-line">
-                                                <span className="parent-label">
-                                                    M:
-                                                </span>{' '}
-                                                {madre}
-                                            </div>
-
-                                        </td>
-
-                                        <td className="col-ref">
-                                            {book}
-                                        </td>
-
-                                        <td className="col-ref">
-                                            {page}
-                                        </td>
-
-                                        <td className="col-ref">
-                                            {entry}
-                                        </td>
-
-                                    </tr>
-                                );
-                            }
-                        )}
-
-                        {sortedData.length === 0 && (
-                            <tr className="empty-row">
-                                <td colSpan={6}>
-                                    NO SE ENCONTRARON REGISTROS ASENTADOS
-                                    PARA GENERAR EL ÍNDICE
+                                    <div className="text-muted">{nombres}</div>
                                 </td>
+                                
+                                <td className="col-padres">
+                                    <div style={{ marginBottom: '2px' }}><strong>P:</strong> {padre}</div>
+                                    <div><strong>M:</strong> {madre}</div>
+                                </td>
+                                
+                                <td className="col-ref">{book}</td>
+                                <td className="col-ref">{page}</td>
+                                <td className="col-ref">{entry}</td>
                             </tr>
-                        )}
-
-                    </tbody>
-
-                    <tfoot>
+                        );
+                    })}
+                    
+                    {sortedData.length === 0 && (
                         <tr>
-                            <td
-                                colSpan={6}
-                                className="footer-cell"
-                            >
-                                Índice generado oficialmente por
-                                el Sistema Eclesia Digital •{' '}
-                                {generatedDate}
+                            <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#888', fontStyle: 'italic', fontSize: '10pt' }}>
+                                NO SE ENCONTRARON REGISTROS ASENTADOS PARA GENERAR EL ÍNDICE
                             </td>
                         </tr>
-                    </tfoot>
+                    )}
+                </tbody>
 
-                </table>
+                <tfoot>
+                    <tr>
+                        <td colSpan="6" className="footer-cell">
+                            Índice generado por el Sistema SacramentumRegistry • {new Date().toLocaleDateString('es-CO')}
+                        </td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    );
+});
 
-            </div>
-        );
-    }
-);
-
-BaptismIndexPrintTemplate.displayName =
-    'BaptismIndexPrintTemplate';
-
+BaptismIndexPrintTemplate.displayName = 'BaptismIndexPrintTemplate';
 export default BaptismIndexPrintTemplate;
-```
