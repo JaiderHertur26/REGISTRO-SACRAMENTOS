@@ -5,12 +5,13 @@ import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import Table from '@/components/ui/Table';
-import { Edit, Trash2, PlusCircle, Search, FileX2, Eye, Network, LayoutGrid, Church, FileSignature, ChevronDown, ChevronUp, Loader2, ShieldAlert, Cloud } from 'lucide-react';
+import { Edit, Trash2, PlusCircle, Search, FileX2, Eye, Network, LayoutGrid, Church, ChevronDown, ChevronUp, Loader2, ShieldAlert, Cloud } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import ViewCorrectionDecreeModal from '@/components/modals/ViewCorrectionDecreeModal';
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import { supabase } from '@/lib/supabaseClient';
+import { calculatePreviousConsecutive } from '@/services/sacramentParametersService'; // AÑADIDO: Importación para el reverso matemático
 
 const ViewCorrectionPage = () => {
     const { user } = useAuth();
@@ -108,7 +109,7 @@ const ViewCorrectionPage = () => {
         setFilteredRecords(filtered);
     }, [searchTerm, records, activeTab]);
 
-    // 4. ROLLBACK MAESTRO DE CORRECCIÓN
+    // 4. ROLLBACK MAESTRO DE CORRECCIÓN (HOMOLOGADO CON PARROQUIA)
     const confirmDelete = async () => {
         setIsDeleting(true);
         try {
@@ -126,41 +127,71 @@ const ViewCorrectionPage = () => {
                 const origPage = pad(origSum.page || origSum.folio);
                 const origEntry = pad(origSum.entry || origSum.numero);
 
-                const { data: origData } = await supabase.from('baptisms').select('id, raw_data').eq('parish_id', targetParishId).eq('book_number', origBook).eq('folio', origPage).eq('number', origEntry).maybeSingle();
+                const { data: origData } = await supabase.from('baptisms')
+                    .select('id, raw_data').eq('parish_id', targetParishId)
+                    .eq('book_number', origBook).eq('folio', origPage).eq('number', origEntry).maybeSingle();
 
                 if (origData) {
                     const cleanedRaw = { ...origData.raw_data };
-                    delete cleanedRaw.anulado; delete cleanedRaw.isAnnulled;
-                    cleanedRaw.status = 'seated'; cleanedRaw.estado = 'permanente';
-                    // Reemplazamos la nota actual vaciándola para limpiarla (o puedes implementar lógica más compleja para borrar solo la de anulación)
-                    cleanedRaw.notaMarginal = null; 
-                    await supabase.from('baptisms').update({ status: 'seated', nota_marginal: null, raw_data: cleanedRaw }).eq('id', origData.id);
+                    delete cleanedRaw.notaMarginal; 
+                    delete cleanedRaw.anulado; 
+                    delete cleanedRaw.isAnnulled;
+                    cleanedRaw.status = 'seated'; 
+                    cleanedRaw.estado = 'permanente';
+                    
+                    await supabase.from('baptisms').update({ 
+                        status: 'seated', nota_marginal: null, raw_data: cleanedRaw 
+                    }).eq('id', origData.id);
                 }
             }
 
-            // B. Eliminar la Supletoria y Reverso de Parámetros
+            // B. Eliminar la Supletoria y Reverso de Parámetros (Matemática Perfecta)
             if (newSum) {
                 const newBook = pad(newSum.book || newSum.Libro);
                 const newPage = pad(newSum.page || newSum.folio);
                 const newEntry = pad(newSum.entry || newSum.numero);
 
-                await supabase.from('baptisms').delete().eq('parish_id', targetParishId).eq('book_number', newBook).eq('folio', newPage).eq('number', newEntry);
+                await supabase.from('baptisms').delete()
+                    .eq('parish_id', targetParishId).eq('book_number', newBook).eq('folio', newPage).eq('number', newEntry);
 
-                const { data: pData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', targetParishId).maybeSingle();
-                if (pData && pData.bautizos_params) {
-                    const currentParams = pData.bautizos_params;
-                    if (Number(newEntry) === Number(currentParams.suplementarioNumero) - 1) {
-                        await supabase.from('parish_parameters').update({ bautizos_params: { ...currentParams, suplementarioNumero: Number(currentParams.suplementarioNumero) - 1 } }).eq('parish_id', targetParishId);
+                // --- REVERSA MATEMÁTICA PERFECTA ---
+                try {
+                    const { data: pData } = await supabase.from('parish_parameters')
+                        .select('bautizos_params').eq('parish_id', targetParishId).maybeSingle();
+
+                    if (pData && pData.bautizos_params) {
+                        const cloudParams = pData.bautizos_params;
+                        
+                        const previosSupletorios = calculatePreviousConsecutive(
+                            cloudParams.suplementarioNumero,
+                            cloudParams.suplementarioFolio,
+                            cloudParams.suplementarioLibro,
+                            cloudParams.suplementarioPartidas || 2,
+                            cloudParams.suplementarioReiniciar || false
+                        );
+
+                        // Comparamos como enteros para evitar problemas de ceros a la izquierda
+                        if (parseInt(newEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
+                            const newParamsObj = { 
+                                ...cloudParams, 
+                                suplementarioNumero: pad(previosSupletorios.numero),
+                                suplementarioFolio: pad(previosSupletorios.folio),
+                                suplementarioLibro: pad(previosSupletorios.libro)
+                            };
+                            
+                            await supabase.from('parish_parameters').update({ bautizos_params: newParamsObj }).eq('parish_id', targetParishId);
+                        }
                     }
-                }
+                } catch (err) { console.error("Error revirtiendo consecutivos:", err); }
             }
 
             // C. Eliminar Decreto
             await supabase.from('decretos').delete().eq('id', deleteConfig.id);
 
-            toast({ title: "Restauración Completada", description: "Decreto borrado, partida restaurada y supletoria destruida.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Restauración Completada", description: "Decreto borrado, partida restaurada y consecutivos actualizados.", className: "bg-green-50 text-green-900 border-green-200" });
             fetchAllDecrees();
         } catch (error) { 
+            console.error("Error al restaurar:", error);
             toast({ title: "Error", description: "No se pudo restaurar la partida.", variant: "destructive" }); 
         } finally { 
             setIsDeleting(false); setDeleteConfig({ isOpen: false, id: null, name: '' }); 
@@ -298,7 +329,15 @@ const ViewCorrectionPage = () => {
                 </Tabs>
             </div>
             <ViewCorrectionDecreeModal isOpen={viewModalOpen} onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }} decreeData={selectedDecree} isMasterCopy={true} />
-            <ConfirmationDialog isOpen={deleteConfig.isOpen} title="Restaurar Partida Original y Eliminar" message="El decreto será eliminado. La partida supletoria será destruida y la partida original recuperará su validez canónica (se borrará la nota marginal de anulación)." onConfirm={confirmDelete} onClose={() => setDeleteConfig({ isOpen: false, id: null, name: '' })} variant="destructive" confirmText={isDeleting ? "Restaurando..." : "Confirmar Restauración"} />
+            <ConfirmationDialog 
+                isOpen={deleteConfig.isOpen} 
+                title="Restaurar Partida Original y Eliminar" 
+                message="Al confirmar, el decreto será eliminado de la Nube. La partida supletoria será destruida y la partida original recuperará su validez legal (se borrará la nota marginal de anulación)." 
+                onConfirm={confirmDelete} 
+                onClose={() => setDeleteConfig({ isOpen: false, id: null, name: '' })} 
+                variant="destructive" 
+                confirmText={isDeleting ? "Restaurando..." : "Confirmar Restauración"} 
+            />
         </DashboardLayout>
     );
 };
