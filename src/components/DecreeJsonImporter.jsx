@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-// 🚀 CORRECCIÓN: Aquí agregué Loader2 y RefreshCcw que hacían falta
 import { 
     Upload, FileJson, AlertCircle, CheckCircle, 
     Database, ServerCrash, HelpCircle, X, Loader2, RefreshCcw
@@ -26,8 +25,11 @@ const DecreeJsonImporter = () => {
     const [showHelp, setShowHelp] = useState(false);
 
     const fileInputRef = useRef(null);
+
+    // Formateador estándar de 4 ceros
     const pad = (num) => String(num || '').trim().padStart(4, '0');
 
+    // Lector Multi-Formato Exacto para tu DBF
     const extractField = (item, possibleKeys) => {
         for (let key of possibleKeys) {
             if (item[key] !== undefined && item[key] !== null && String(item[key]).trim() !== '') return String(item[key]).trim();
@@ -36,18 +38,46 @@ const DecreeJsonImporter = () => {
         return null;
     };
 
-    const handleFileChange = (event) => {
+    // 🚀 LECTURA Y VALIDACIÓN INMEDIATA EN LA NUBE
+    const handleFileChange = async (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
 
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
             try {
                 const json = JSON.parse(e.target.result);
                 const data = Array.isArray(json) ? json : (json.data || []);
-                
                 if (data.length === 0) throw new Error("El archivo JSON está vacío.");
 
+                setIsProcessing(true);
+                const parishId = user?.parishId || user?.parish_id;
+
+                // 1. DESCARGA MASIVA A MEMORIA RAM (Para un cruce instantáneo)
+                const { data: allBaptisms, error: bapError } = await supabase
+                    .from('baptisms')
+                    .select('id, book_number, folio, number, raw_data, nombres, apellidos, da_fe')
+                    .eq('parish_id', parishId);
+                
+                if (bapError) throw bapError;
+
+                // Búsqueda Blindada Antierrores (ignora ceros a la izquierda y busca en JSON)
+                const findBaptism = (targetL, targetF, targetN) => {
+                    const padL = pad(targetL); const padF = pad(targetF); const padN = pad(targetN);
+                    
+                    return allBaptisms.find(b => {
+                        const raw = typeof b.raw_data === 'string' ? JSON.parse(b.raw_data) : (b.raw_data || {});
+                        
+                        // Extrae la data venga de donde venga
+                        const bL = pad(b.book_number || raw.Libro || raw.libro || raw.book_number);
+                        const bF = pad(b.folio || raw.folio || raw.page_number);
+                        const bN = pad(b.number || raw.numero || raw.numeroActa || raw.entry_number);
+                        
+                        return bL === padL && bF === padF && bN === padN;
+                    });
+                };
+
+                // 2. CRUCE INTELIGENTE REGISTRO A REGISTRO
                 const processed = data.map((item, index) => {
                     const decreto = extractField(item, ['decreto']);
                     const fecha = extractField(item, ['fecha']);
@@ -66,14 +96,30 @@ const DecreeJsonImporter = () => {
 
                     const isReposicion = ['005', '001'].includes(codConcepto); 
                     
-                    const hasNewData = newLib && newFol && newNum;
-                    const hasOrigData = oldLib && oldFol && oldNum;
-                    const hasDecree = decreto && fecha;
-
                     let errorMsg = "";
-                    if (!hasDecree) errorMsg = "Falta No. Decreto o Fecha.";
-                    else if (!hasNewData) errorMsg = "Falta ubicación supletoria (NEWLIB/NEWFOL).";
-                    else if (!isReposicion && !hasOrigData) errorMsg = "Corrección requiere ubicación original.";
+                    let isValid = true;
+                    let origRec = null;
+                    let newRec = null;
+
+                    // Validación de campos vacíos en el JSON
+                    if (!decreto || !fecha) { errorMsg = "Falta No. Decreto o Fecha."; isValid = false; }
+                    else if (!newLib || !newFol || !newNum) { errorMsg = "Falta ubicación supletoria (NEWLIB/NEWFOL/NEWNUM)."; isValid = false; }
+                    else if (!isReposicion && (!oldLib || !oldFol || !oldNum)) { errorMsg = "Corrección requiere ubicación original completa."; isValid = false; }
+
+                    // Validación contra Supabase (La Nube)
+                    if (isValid) {
+                        newRec = findBaptism(newLib, newFol, newNum);
+                        if (!newRec) {
+                            errorMsg = `Partida supletoria (L:${pad(newLib)} F:${pad(newFol)} N:${pad(newNum)}) no migrada aún a la Nube.`;
+                            isValid = false;
+                        } else if (!isReposicion) {
+                            origRec = findBaptism(oldLib, oldFol, oldNum);
+                            if (!origRec) {
+                                errorMsg = `Partida original (L:${pad(oldLib)} F:${pad(oldFol)} N:${pad(oldNum)}) no encontrada.`;
+                                isValid = false;
+                            }
+                        }
+                    }
 
                     return {
                         ...item, id: index, isReposicion,
@@ -81,7 +127,8 @@ const DecreeJsonImporter = () => {
                         observaciones_clean: observaciones, dafe_clean: dafeLegacy,
                         sNewL: pad(newLib), sNewF: pad(newFol), sNewN: pad(newNum),
                         sOldL: pad(oldLib), sOldF: pad(oldFol), sOldN: pad(oldNum),
-                        isValid: errorMsg === "", error: errorMsg
+                        isValid, error: errorMsg,
+                        _origRec: origRec, _newRec: newRec // Guardamos las referencias reales de Supabase para luego inyectar
                     };
                 });
 
@@ -95,14 +142,18 @@ const DecreeJsonImporter = () => {
                 });
                 setFile(selectedFile);
                 setImportComplete(false);
-                setProgress({ current: 0, total: processed.filter(r => r.isValid).length });
+                setProgress({ current: 0, total: 0 });
+
             } catch (error) {
-                toast({ title: "Error de lectura", description: "El archivo no tiene el formato JSON válido.", variant: "destructive" });
+                toast({ title: "Error Estructural", description: "Fallo al validar los datos contra la base de datos.", variant: "destructive" });
+            } finally {
+                setIsProcessing(false);
             }
         };
         reader.readAsText(selectedFile);
     };
 
+    // 🚀 EJECUCIÓN OFICIAL EN SUPABASE
     const handleImport = async () => {
         const validRecords = records.filter(r => r.isValid);
         if (!validRecords.length) return;
@@ -114,13 +165,6 @@ const DecreeJsonImporter = () => {
         try {
             const parishInfo = getMisDatosList(parishId)[0] || {};
             const parishLabel = `${parishInfo.nombre || 'PARROQUIA'} - ${parishInfo.ciudad || ''}`.toUpperCase();
-
-            const { data: allBaptisms, error: bapError } = await supabase
-                .from('baptisms')
-                .select('id, book_number, folio, number, raw_data, nombres, apellidos, da_fe')
-                .eq('parish_id', parishId);
-            
-            if (bapError) throw bapError;
 
             const { data: catalogoConceptos } = await supabase
                 .from('conceptos_anulacion')
@@ -140,23 +184,21 @@ const DecreeJsonImporter = () => {
                     const conceptoText = conceptoObj ? conceptoObj.concepto.toUpperCase() : "SOLICITUD DE PARTE";
                     const fechaTexto = convertDateToSpanishText(item.fecha_clean).replace(/^EL\s+/i, '').toUpperCase();
 
-                    const newRec = allBaptisms.find(b => b.book_number === item.sNewL && b.folio === item.sNewF && b.number === item.sNewN);
-                    
-                    if (!newRec) {
-                        item.error = "Partida supletoria (nueva) no encontrada en la Nube.";
-                        item.isValid = false;
-                        errorCount++;
-                        continue;
-                    }
+                    // Las partidas fueron garantizadas en la etapa de carga
+                    const newRec = item._newRec;
+                    const origRec = item._origRec;
+
+                    const rawNew = typeof newRec.raw_data === 'string' ? JSON.parse(newRec.raw_data) : (newRec.raw_data || {});
+                    const rawOrig = origRec ? (typeof origRec.raw_data === 'string' ? JSON.parse(origRec.raw_data) : (origRec.raw_data || {})) : null;
 
                     const targetName = `${newRec.nombres || ''} ${newRec.apellidos || ''}`.trim().toUpperCase();
-                    const ministroDaFe = (item.dafe_clean || newRec.da_fe || newRec.raw_data?.daFe || 'EL PÁRROCO').toUpperCase();
+                    const ministroDaFe = (item.dafe_clean || newRec.da_fe || rawNew?.daFe || 'EL PÁRROCO').toUpperCase();
 
                     if (item.isReposicion) {
                         const noteRepo = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
                         
                         const newRaw = { 
-                            ...newRec.raw_data, isSupplementary: true, creadoPorDecreto: true, 
+                            ...rawNew, isSupplementary: true, creadoPorDecreto: true, 
                             replacementDecreeRef: item.decreto_clean, notaMarginal: noteRepo 
                         };
 
@@ -173,23 +215,14 @@ const DecreeJsonImporter = () => {
                         await supabase.from('decretos').insert([{ parish_id: parishId, tipo: 'reposicion', payload: payloadDecree }]);
 
                     } else {
-                        const origRec = allBaptisms.find(b => b.book_number === item.sOldL && b.folio === item.sOldF && b.number === item.sOldN);
-                        
-                        if (!origRec) {
-                            item.error = "Partida original (afectada) no encontrada en la Nube.";
-                            item.isValid = false;
-                            errorCount++;
-                            continue;
-                        }
-
                         const noteAnulada = `PARTIDA ANULADA POR DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto}. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-${item.sNewL} F-${item.sNewF} N-${item.sNewN}.`;
                         const noteNueva = `ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto} Y ANULA LA PARTIDA DEL LIBRO: ${item.sOldL}, FOLIO: ${item.sOldF}, NÚMERO: ${item.sOldN}. DA FE: ${ministroDaFe}.`;
 
-                        const origRaw = { ...origRec.raw_data, isAnnulled: true, anulado: true, status: 'anulada', notaMarginal: noteAnulada };
-                        await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada, raw_data: origRaw }).eq('id', origRec.id);
+                        const origUpdate = { ...rawOrig, isAnnulled: true, anulado: true, status: 'anulada', notaMarginal: noteAnulada };
+                        await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada, raw_data: origUpdate }).eq('id', origRec.id);
 
-                        const newRaw = { ...newRec.raw_data, isSupplementary: true, creadoPorDecreto: true, correctionDecreeRef: item.decreto_clean, notaMarginal: noteNueva };
-                        await supabase.from('baptisms').update({ nota_marginal: noteNueva, raw_data: newRaw }).eq('id', newRec.id);
+                        const newUpdate = { ...rawNew, isSupplementary: true, creadoPorDecreto: true, correctionDecreeRef: item.decreto_clean, notaMarginal: noteNueva };
+                        await supabase.from('baptisms').update({ nota_marginal: noteNueva, raw_data: newUpdate }).eq('id', newRec.id);
 
                         const payloadDecree = {
                             decreeNumber: item.decreto_clean, decreeDate: item.fecha_clean, conceptoAnulacionId: conceptoId,
@@ -205,7 +238,7 @@ const DecreeJsonImporter = () => {
                     }
                     successCount++;
                 } catch (err) {
-                    item.error = "Fallo interno en la inyección";
+                    item.error = "Fallo de comunicación en la inyección";
                     item.isValid = false;
                     errorCount++;
                 }
@@ -217,7 +250,7 @@ const DecreeJsonImporter = () => {
             if (errorCount === 0) {
                 toast({ title: "Inyección Exitosa", description: `Se procesaron ${successCount} decretos perfectamente en la Nube.`, className: "bg-green-50 text-green-900 border-green-200" });
             } else {
-                toast({ title: "Proceso Parcial", description: `Se inyectaron ${successCount} decretos. Hubo ${errorCount} errores de cruce en Nube.`, variant: "destructive" });
+                toast({ title: "Proceso Parcial", description: `Se inyectaron ${successCount} decretos. Hubo ${errorCount} errores de red. Revise la tabla.`, variant: "destructive" });
             }
 
         } catch (error) {
@@ -241,7 +274,7 @@ const DecreeJsonImporter = () => {
             header: 'Validación en Nube', 
             render: r => r.isValid ? 
                 <div className="flex items-center gap-1 text-green-600"><CheckCircle className="w-4 h-4"/><span className="text-[10px] font-bold">APTO</span></div> : 
-                <div className="flex items-center gap-1 text-red-500"><ServerCrash className="w-4 h-4"/><span className="text-[9px] font-bold truncate max-w-[150px]" title={r.error}>{r.error}</span></div> 
+                <div className="flex items-center gap-1 text-red-500"><ServerCrash className="w-4 h-4"/><span className="text-[9px] font-bold truncate max-w-[200px]" title={r.error}>{r.error}</span></div> 
         }
     ];
 
@@ -268,6 +301,7 @@ const DecreeJsonImporter = () => {
                 </Button>
             </div>
 
+            {/* Modal de Ayuda JSON */}
             {showHelp && (
                 <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm rounded-[2.5rem] p-10 flex flex-col animate-in fade-in zoom-in-95 duration-200">
                     <div className="flex justify-between items-center mb-6">
@@ -318,11 +352,13 @@ const DecreeJsonImporter = () => {
                             <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
                                 <Loader2 className="w-12 h-12 text-[#4B7BA7] animate-spin mb-4" />
                                 <span className="font-black text-[#4B7BA7] uppercase tracking-widest text-[10px]">
-                                    Procesando {progress.current} de {progress.total}
+                                    {progress.total > 0 ? `Procesando ${progress.current} de ${progress.total}` : 'Leyendo y Validando Nube...'}
                                 </span>
-                                <div className="w-1/2 bg-slate-200 h-1.5 rounded-full mt-3 overflow-hidden">
-                                    <div className="bg-[#4B7BA7] h-full transition-all duration-300" style={{ width: `${(progress.current / progress.total) * 100}%` }}></div>
-                                </div>
+                                {progress.total > 0 && (
+                                    <div className="w-1/2 bg-slate-200 h-1.5 rounded-full mt-3 overflow-hidden">
+                                        <div className="bg-[#4B7BA7] h-full transition-all duration-300" style={{ width: `${(progress.current / progress.total) * 100}%` }}></div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -353,7 +389,7 @@ const DecreeJsonImporter = () => {
                             <div className="space-y-2">
                                 <h4 className="font-black text-blue-900 uppercase text-xs tracking-widest">Protección de Datos Activa</h4>
                                 <p className="text-xs text-blue-800/80 leading-relaxed font-medium">
-                                    El motor simulará la inyección primero. Si los folios originales o supletorios declarados en tu archivo JSON no existen actualmente en la base de datos de la Nube, el sistema bloqueará ese registro específico para evitar corrupciones.
+                                    El motor cruzará la información con la Nube de inmediato. Si los folios originales o supletorios declarados en el JSON no existen en la base de datos de Supabase, bloqueará ese registro para evitar corrupciones.
                                 </p>
                             </div>
                         </div>
@@ -362,11 +398,11 @@ const DecreeJsonImporter = () => {
                     {validationStats && validationStats.valid > 0 && (
                         <div className="flex gap-4">
                             <Button 
-                                onClick={() => fileInputRef.current?.click()}
+                                onClick={() => { setFile(null); setRecords([]); setValidationStats(null); fileInputRef.current.value = null; }}
                                 disabled={isProcessing}
                                 className="h-16 px-8 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black uppercase tracking-widest text-[10px] transition-all"
                             >
-                                Cambiar Archivo
+                                <RefreshCcw className="w-4 h-4 mr-2" /> Borrar
                             </Button>
                             <Button 
                                 onClick={handleImport} 
@@ -389,11 +425,11 @@ const DecreeJsonImporter = () => {
                     <div className="px-8 py-5 border-b border-slate-100 bg-white flex justify-between items-center">
                         <div className="flex items-center gap-3">
                             <FileJson className="w-5 h-5 text-[#4B7BA7]" />
-                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Simulación de Ejecución</span>
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Pre-Validación en Tiempo Real</span>
                         </div>
                         {validationStats?.invalid > 0 && (
                             <span className="bg-red-50 text-red-600 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest border border-red-100">
-                                {validationStats.invalid} Errores de Estructura Detectados
+                                {validationStats.invalid} Errores de Cruce Detectados
                             </span>
                         )}
                     </div>
