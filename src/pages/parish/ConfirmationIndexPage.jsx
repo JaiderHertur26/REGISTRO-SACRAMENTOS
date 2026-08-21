@@ -1,253 +1,240 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
+import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import Table from '@/components/ui/Table';
-import { Search, Printer, FileText, Filter } from 'lucide-react';
+import { Search, Printer, Loader2, BookMarked, BookOpen } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Modal } from '@/components/ui/Modal';
 import ConfirmationIndexPrintTemplate from '@/components/ConfirmationIndexPrintTemplate';
 import { Helmet } from 'react-helmet';
+import { useReactToPrint } from 'react-to-print';
 
 const ConfirmationIndexPage = () => {
-  const { user } = useAuth();
-  const { getMisDatosList, getConfirmations } = useAppData();
-  const { toast } = useToast();
-  
-  const [records, setRecords] = useState([]);
-  const [filteredRecords, setFilteredRecords] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  
-  const [isBookModalOpen, setIsBookModalOpen] = useState(false);
-  const [availableBooks, setAvailableBooks] = useState([]);
-  const [selectedBook, setSelectedBook] = useState('');
-  const [printData, setPrintData] = useState([]);
-  const [parishInfo, setParishInfo] = useState({});
-  const [currentPrintFilter, setCurrentPrintFilter] = useState(null);
+    const { user } = useAuth();
+    const { getMisDatosList } = useAppData();
+    const { toast } = useToast();
 
-  useEffect(() => {
-    if (user?.parishId) {
-      loadData();
-      loadParishInfo();
-    }
-  }, [user]);
+    const [records, setRecords] = useState([]);
+    const [filteredRecords, setFilteredRecords] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
 
-  useEffect(() => {
-    filterAndSortRecords();
-  }, [searchTerm, records]);
+    const [isBookModalOpen, setIsBookModalOpen] = useState(false);
+    const [availableBooks, setAvailableBooks] = useState([]);
+    const [selectedBook, setSelectedBook] = useState('');
+    const [parishInfo, setParishInfo] = useState({});
 
-  const loadData = () => {
-    setLoading(true);
-    try {
-      const allRecords = getConfirmations(user.parishId);
-      
-      const sorted = [...allRecords].sort((a, b) => {
-        const bookA = parseInt(a.book_number || 0);
-        const bookB = parseInt(b.book_number || 0);
-        if (bookA !== bookB) return bookA - bookB;
+    // REFERENCIA CENTRAL PARA LA IMPRESIÓN MODERNA
+    const printRef = useRef(null);
 
-        const pageA = parseInt(a.page_number || 0);
-        const pageB = parseInt(b.page_number || 0);
-        if (pageA !== pageB) return pageA - pageB;
+    useEffect(() => {
+        if (user?.parishId || user?.parish_id) {
+            const currentId = user.parishId || user.parish_id;
+            const misDatos = getMisDatosList(currentId);
+            if (misDatos && misDatos.length > 0) setParishInfo(misDatos[0]);
+            fetchCloudRecords(currentId);
+        }
+    }, [user, getMisDatosList]);
 
-        const entryA = parseInt(a.entry_number || 0);
-        const entryB = parseInt(b.entry_number || 0);
-        if (entryA !== entryB) return entryA - entryB;
+    const fetchCloudRecords = async (parishId) => {
+        setLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('confirmations')
+                .select('id, raw_data, status, folio, number, book_number')
+                .eq('parish_id', parishId)
+                .in('status', ['seated', 'confirmed', 'anulada']);
 
-        return new Date(a.sacramentDate) - new Date(b.sacramentDate);
-      });
+            if (error) throw error;
 
-      setRecords(sorted);
-      const books = [...new Set(sorted.map(r => r.book_number).filter(Boolean))].sort((a, b) => parseInt(a) - parseInt(b));
-      setAvailableBooks(books);
+            const sanitizedData = data.map(r => {
+                const raw = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : (r.raw_data || {});
+                return {
+                    ...raw,
+                    id: r.id,
+                    status: r.status,
+                    Libro: raw.Libro || raw.libro || r.book_number || '---',
+                    folio: raw.folio || raw.page_number || r.folio || '---',
+                    numero: raw.numero || raw.entry_number || r.number || '---',
+                    // Asegurar lectura de nombres
+                    apellidos: raw.apellidos || raw.lastName || '',
+                    nombres: raw.nombres || raw.firstName || '',
+                    fechaSacramento: raw.fechaSacramento || raw.fechaConfirmacion || raw.celebration_date || '---'
+                };
+            });
 
-    } catch (error) {
-      console.error("Error loading confirmations:", error);
-      toast({ title: "Error", description: "No se pudieron cargar los registros.", variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  };
+            // Ordenamiento alfabético estricto
+            sanitizedData.sort((a, b) => {
+                const nameA = `${a.apellidos} ${a.nombres}`.trim().toUpperCase();
+                const nameB = `${b.apellidos} ${b.nombres}`.trim().toUpperCase();
+                return nameA.localeCompare(nameB);
+            });
 
-  const loadParishInfo = () => {
-    try {
-        const misDatos = getMisDatosList(user.parishId);
-        // Extract first record or empty
-        const data = (misDatos && misDatos.length > 0) ? misDatos[0] : {};
-        
-        // Build specific object structure requested: { nombre, ciudad, diocesis }
-        // extracting specifically "Nombre" (capitalized) from data as requested
-        setParishInfo({
-            nombre: data.Nombre || user.parishName || 'PARROQUIA',
-            ciudad: data.Ciudad || data.ciudad || 'CIUDAD',
-            diocesis: data.Diócesis || data.diocesis || user.dioceseName || 'DIÓCESIS'
+            setRecords(sanitizedData);
+            setFilteredRecords(sanitizedData);
+
+            // Extraer libros únicos disponibles
+            const books = [...new Set(sanitizedData.map(r => r.Libro).filter(val => val !== '---'))].sort((a, b) => Number(a) - Number(b));
+            setAvailableBooks(books);
+            if (books.length > 0) setSelectedBook(books[0]);
+
+        } catch (err) {
+            console.error("Error fetching for index:", err);
+            toast({ title: "Error", description: "No se pudo cargar el índice de Confirmaciones.", variant: "destructive" });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!searchTerm) {
+            setFilteredRecords(records);
+            return;
+        }
+        const term = searchTerm.toLowerCase();
+        const filtered = records.filter(r => {
+            const fullName = `${r.apellidos || ''} ${r.nombres || ''}`.toLowerCase();
+            return fullName.includes(term) || String(r.Libro).includes(term);
         });
-    } catch (err) {
-        console.error("Error loading parish info:", err);
-        setParishInfo({
-            nombre: user.parishName || 'PARROQUIA',
-            ciudad: 'CIUDAD',
-            diocesis: user.dioceseName || 'DIÓCESIS'
-        });
-    }
-  };
+        setFilteredRecords(filtered);
+    }, [searchTerm, records]);
 
-  const filterAndSortRecords = () => {
-    let filtered = records;
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(r => 
-        (r.firstName || '').toLowerCase().includes(term) ||
-        (r.lastName || '').toLowerCase().includes(term) ||
-        String(r.book_number || '').includes(term)
-      );
-    }
-    setFilteredRecords(filtered);
-  };
+    const dataToPrint = useMemo(() => {
+        return selectedBook 
+            ? records.filter(r => String(r.Libro) === String(selectedBook)) 
+            : records;
+    }, [records, selectedBook]);
 
-  const handlePrint = (bookNumber = null) => {
-    let dataToPrint = records;
-    if (bookNumber) {
-        dataToPrint = records.filter(r => String(r.book_number) === String(bookNumber));
-        setCurrentPrintFilter(bookNumber);
-    } else {
-        setCurrentPrintFilter(null);
-    }
-    setPrintData(dataToPrint);
+    // 🚀 SOLUCIÓN REAL: Sintaxis compatible con react-to-print v3+ y v2
+    const handlePrintAction = useReactToPrint({
+        contentRef: printRef, // Obligatorio en la versión 3+
+        content: () => printRef.current, // Respaldo por si acaso
+        documentTitle: `Indice_Confirmaciones_Libro_${selectedBook || 'Todos'}`,
+        onAfterPrint: () => setIsBookModalOpen(false) // Cierra limpiamente al terminar
+    });
 
-    setTimeout(() => {
-         const printContent = document.getElementById('confirmation-index-print');
-         if (!printContent) return;
-         
-         const printWindow = window.open('', '', 'height=600,width=800');
-         printWindow.document.write('<html><head><title>Índice de Confirmaciones</title>');
-         printWindow.document.write('<style>@page { size: letter; margin: 0.5in; } body { margin: 0; } .print-container { width: 100%; } table { page-break-inside: auto; } tr { page-break-inside: avoid; page-break-after: auto; } thead { display: table-header-group; } tfoot { display: table-footer-group; }</style>');
-         printWindow.document.write('</head><body>');
-         printWindow.document.write(printContent.innerHTML);
-         printWindow.document.write('</body></html>');
-         printWindow.document.close();
-         printWindow.focus();
-         setTimeout(() => {
-             printWindow.print();
-             printWindow.close();
-         }, 500);
-    }, 100);
-  };
+    const columns = [
+        { header: 'Apellidos y Nombres', render: (row) => <span className="font-bold text-slate-800 uppercase">{row.apellidos} {row.nombres}</span> },
+        { header: 'Libro', render: (row) => <span className="font-mono text-slate-600 bg-slate-50 px-2 py-1 rounded border border-slate-100">{row.Libro}</span> },
+        { header: 'Folio', render: (row) => <span className="font-mono text-slate-600 bg-slate-50 px-2 py-1 rounded border border-slate-100">{row.folio}</span> },
+        { header: 'Acta', render: (row) => <span className="font-mono text-slate-600 bg-slate-50 px-2 py-1 rounded border border-slate-100">{row.numero}</span> },
+        { header: 'Fecha Confirmación', render: (row) => <span className="text-slate-500 font-medium">{row.fechaSacramento}</span> },
+    ];
 
-  const openBookModal = () => {
-      setSelectedBook(availableBooks[0] || '');
-      setIsBookModalOpen(true);
-  };
+    return (
+        <DashboardLayout entityName={user?.parishName || "Parroquia"}>
+            <Helmet><title>Índice de Confirmaciones</title></Helmet>
 
-  const columns = [
-    { header: 'Libro', accessor: 'book_number', className: "w-16 font-mono font-bold" },
-    { header: 'Folio', accessor: 'page_number', className: "w-16 font-mono" },
-    { header: 'Número', accessor: 'entry_number', className: "w-16 font-mono" },
-    { header: 'Apellidos', accessor: 'lastName', className: "font-semibold" },
-    { header: 'Nombres', accessor: 'firstName' },
-    { 
-        header: 'Fecha Celebración', 
-        render: (row) => row.sacramentDate ? new Date(row.sacramentDate).toLocaleDateString() : '-' 
-    },
-  ];
+            <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+                
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
+                            <BookMarked className="w-8 h-8 text-red-600" />
+                        </div>
+                        <div>
+                            <h1 className="text-3xl font-black text-slate-900 font-serif tracking-tight uppercase">Índice de Confirmaciones</h1>
+                            <p className="text-slate-500 font-medium text-xs uppercase tracking-widest mt-1">
+                                Base de Datos y Generación de Índices
+                            </p>
+                        </div>
+                    </div>
 
-  return (
-    <DashboardLayout entityName={user?.parishName || 'Parroquia'}>
-      <Helmet>
-        <title>Índice de Confirmaciones - Eclesia Digital</title>
-        <meta name="description" content="Índice general de registros de confirmación de la parroquia." />
-      </Helmet>
+                    <Button 
+                        onClick={() => setIsBookModalOpen(true)} 
+                        className="bg-red-600 hover:bg-red-800 text-white px-6 py-6 rounded-xl font-bold uppercase text-[11px] tracking-widest shadow-md transition-all active:scale-95 w-full md:w-auto"
+                    >
+                        <Printer className="w-4 h-4 mr-2" /> Imprimir Índice
+                    </Button>
+                </div>
 
-      <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-[#4B7BA7] font-serif">Índice de Confirmaciones</h1>
-          <p className="text-gray-600 mt-1">Listado general ordenado por ubicación en libros.</p>
-        </div>
-        <div className="flex gap-2">
-            <div className="bg-white px-3 py-1 rounded-full border border-gray-200 text-sm font-medium text-gray-600 shadow-sm flex items-center">
-                <FileText className="w-4 h-4 mr-2 text-blue-500" />
-                Total: {records.length}
+                <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 mb-8 flex items-center">
+                    <div className="pl-4 pr-2 text-red-400">
+                        <Search className="w-5 h-5" />
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Buscar por apellidos, nombres o libro..."
+                        className="w-full bg-transparent border-none text-sm font-medium text-slate-800 uppercase tracking-wide px-2 py-3 outline-none focus:ring-0 placeholder:text-slate-300"
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                    />
+                </div>
+
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    {loading ? (
+                        <div className="py-24 flex flex-col items-center justify-center">
+                            <Loader2 className="w-10 h-10 animate-spin text-red-500 mb-4" />
+                            <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">Sincronizando Archivos...</p>
+                        </div>
+                    ) : filteredRecords.length > 0 ? (
+                        <Table columns={columns} data={filteredRecords} className="border-none" />
+                    ) : (
+                        <div className="py-24 flex flex-col items-center justify-center text-center">
+                            <BookOpen className="w-16 h-16 text-slate-200 mb-4" />
+                            <p className="text-slate-400 font-bold uppercase text-[11px] tracking-widest">No se encontraron registros</p>
+                        </div>
+                    )}
+                </div>
             </div>
-            <div className="bg-white px-3 py-1 rounded-full border border-gray-200 text-sm font-medium text-gray-600 shadow-sm flex items-center">
-                <Filter className="w-4 h-4 mr-2 text-green-500" />
-                Libros: {availableBooks.length}
+
+            <Modal isOpen={isBookModalOpen} onClose={() => setIsBookModalOpen(false)} title="Configuración de Impresión">
+                <div className="space-y-6 py-2">
+                    <div className="bg-red-50 border border-red-100 p-4 rounded-xl">
+                        <p className="text-xs text-red-800 font-medium leading-relaxed">
+                            Seleccione el número de libro que desea imprimir. El sistema organizará y estructurará los registros alfabéticamente de forma automática.
+                        </p>
+                    </div>
+                    
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Seleccionar Libro</label>
+                        <select
+                            className="w-full p-4 border border-slate-200 rounded-xl text-slate-900 font-bold focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition-all cursor-pointer"
+                            value={selectedBook}
+                            onChange={(e) => setSelectedBook(e.target.value)}
+                        >
+                            {availableBooks.length === 0 && <option value="">No hay libros disponibles</option>}
+                            {availableBooks.map(b => (
+                                <option key={b} value={b}>LIBRO {b}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
+                        <Button 
+                            variant="ghost" 
+                            onClick={() => setIsBookModalOpen(false)} 
+                            className="px-6 py-6 rounded-xl font-bold text-slate-500 uppercase text-[10px] tracking-widest hover:bg-slate-100"
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            onClick={handlePrintAction}
+                            disabled={!selectedBook}
+                            className="bg-red-600 hover:bg-red-800 text-white px-8 py-6 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-md transition-all active:scale-95"
+                        >
+                            <Printer className="w-4 h-4 mr-2" /> Ejecutar Impresión
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* CONTENEDOR DE IMPRESIÓN (Limpio y fuera de pantalla) */}
+            <div className="absolute left-[-10000px] top-[-10000px]">
+                <div ref={printRef}>
+                    <ConfirmationIndexPrintTemplate
+                        data={dataToPrint}
+                        parroquiaInfo={parishInfo}
+                        bookNumber={selectedBook}
+                    />
+                </div>
             </div>
-        </div>
-      </div>
 
-      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6 flex flex-col md:flex-row gap-4 justify-between items-center">
-         <div className="relative w-full md:w-96">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input 
-                type="text" 
-                placeholder="Buscar por nombre, apellido o libro..." 
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#4B7BA7] outline-none text-gray-900 placeholder:text-gray-400 transition-all"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-            />
-         </div>
-         <div className="flex gap-2 w-full md:w-auto">
-             <Button variant="outline" onClick={() => openBookModal()} className="flex-1 md:flex-none gap-2">
-                 <Printer className="w-4 h-4" /> Imprimir por Libro
-             </Button>
-             <Button onClick={() => handlePrint(null)} className="flex-1 md:flex-none gap-2 bg-[#4B7BA7] hover:bg-[#3a6288]">
-                 <Printer className="w-4 h-4" /> Imprimir General
-             </Button>
-         </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <Table columns={columns} data={filteredRecords} />
-        {filteredRecords.length === 0 && !loading && (
-            <div className="text-center py-10 text-gray-500">
-                No se encontraron registros.
-            </div>
-        )}
-        {loading && (
-            <div className="text-center py-10 text-gray-500">Cargando registros...</div>
-        )}
-      </div>
-
-      <Modal isOpen={isBookModalOpen} onClose={() => setIsBookModalOpen(false)} title="Seleccionar Libro">
-           <div className="space-y-4">
-               <p className="text-sm text-gray-600">Seleccione el número de libro que desea imprimir.</p>
-               <select 
-                  className="w-full p-2 border border-gray-300 rounded-md text-gray-900"
-                  value={selectedBook}
-                  onChange={(e) => setSelectedBook(e.target.value)}
-               >
-                   {availableBooks.length === 0 && <option value="">No hay libros disponibles</option>}
-                   {availableBooks.map(b => (
-                       <option key={b} value={b}>Libro {b}</option>
-                   ))}
-               </select>
-               <div className="flex justify-end gap-2 pt-4">
-                   <Button variant="outline" onClick={() => setIsBookModalOpen(false)}>Cancelar</Button>
-                   <Button 
-                       onClick={() => {
-                           setIsBookModalOpen(false);
-                           handlePrint(selectedBook);
-                       }}
-                       disabled={!selectedBook}
-                   >
-                       Imprimir
-                   </Button>
-               </div>
-           </div>
-      </Modal>
-
-      <div id="confirmation-index-print" className="hidden">
-           <ConfirmationIndexPrintTemplate 
-               data={printData} 
-               parishInfo={parishInfo} 
-               filterBook={currentPrintFilter}
-           />
-      </div>
-
-    </DashboardLayout>
-  );
+        </DashboardLayout>
+    );
 };
 
 export default ConfirmationIndexPage;

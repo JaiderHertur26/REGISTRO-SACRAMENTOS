@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { 
     Save, ArrowLeft, Loader2, BookOpen, 
-    Hash, Calendar, User, ScrollText, Users, PenTool 
+    Calendar, User, Users, PenTool 
 } from 'lucide-react';
 import CityAutocomplete from '@/components/CityAutocomplete';
 
@@ -20,8 +20,8 @@ const BaptismEditPage = () => {
     const [searchParams] = useSearchParams();
     const recordId = searchParams.get('id');
 
-    const parishId = user?.parish_id || user?.parishId || 'ae48c502-6603-4887-ba38-6886e628430e';
-    const nombreParroquia = user?.parishName || user?.parish_name || 'PARROQUIA PADRE MISERICORDIOSO';
+    const parishId = user?.parish_id || user?.parishId;
+    const nombreParroquia = user?.parishName || user?.parish_name || 'PARROQUIA';
 
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -72,7 +72,6 @@ const BaptismEditPage = () => {
                     numero: dbRecord.entry_number || raw.numero || raw.number
                 });
 
-                // Carga de Sacerdotes y Autocompletados
                 const listaCiudadesRaw = getCiudadesList(parishId) || [];
                 setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
                 
@@ -80,11 +79,9 @@ const BaptismEditPage = () => {
                 setListaSacerdotes(listaParrocos);
                 setParrocosSugeridos(listaParrocos.map(p => `${p.nombre} ${p.apellido || ''}`.trim().toUpperCase()));
 
-                // Verificamos quién es el párroco actual por si los campos vienen vacíos
                 const parrocoActualObj = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
                 const nombreParrocoActual = parrocoActualObj ? `${parrocoActualObj.nombre} ${parrocoActualObj.apellido || ''}`.trim().toUpperCase() : '';
 
-                // 🚀 CARGA ESTRICTA
                 setFormData({
                     id: purificado.id,
                     status: purificado.status,
@@ -107,7 +104,6 @@ const BaptismEditPage = () => {
                     abuelosPaternos: purificado.abuelosPaternos,
                     abuelosMaternos: purificado.abuelosMaternos,
                     padrinos: purificado.padrinos,
-                    // Si el ministro o daFe vienen vacíos, inyectamos el actual, sino respetamos la historia
                     ministro: purificado.ministro && purificado.ministro !== '---' ? purificado.ministro : nombreParrocoActual,
                     daFe: purificado.daFe && purificado.daFe !== '---' ? purificado.daFe : nombreParrocoActual,
                     notaMarginal: purificado.notaMarginal
@@ -124,7 +120,7 @@ const BaptismEditPage = () => {
         loadRecord();
     }, [recordId, parishId, getCiudadesList, getParrocos, navigate, purificarRegistroBautismo, toast]);
 
-    // 🚀 INTELIGENCIA: Re-calcula el ministro SOLAMENTE si el usuario cambia la fecha
+    // 🚀 MÁQUINA DEL TIEMPO REPARADA: Actualiza Ministro Y Da Fe
     useEffect(() => {
         if (!userChangedDate || !formData?.fechaSacramento || listaSacerdotes.length === 0) return;
 
@@ -136,19 +132,18 @@ const BaptismEditPage = () => {
         });
 
         if (sacerdoteEncontrado) {
+            const nombreHistorico = `${sacerdoteEncontrado.nombre} ${sacerdoteEncontrado.apellido || ''}`.trim().toUpperCase();
             setFormData(prev => ({ 
                 ...prev, 
-                ministro: `${sacerdoteEncontrado.nombre} ${sacerdoteEncontrado.apellido || ''}`.trim().toUpperCase() 
+                ministro: nombreHistorico,
+                daFe: nombreHistorico
             }));
         }
     }, [formData?.fechaSacramento, listaSacerdotes, userChangedDate]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        
-        // Marcamos si el usuario tocó la fecha para activar la inteligencia de sacerdotes
         if (name === 'fechaSacramento') setUserChangedDate(true);
-
         const uppercaseFields = ['nombres', 'apellidos', 'lugarNacimiento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'abuelosPaternos', 'abuelosMaternos', 'ministro', 'daFe', 'notaMarginal'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
@@ -169,7 +164,6 @@ const BaptismEditPage = () => {
         setIsSubmitting(true);
         try {
             const res = await saveBaptismToSource(formData, parishId, formData.status || 'seated');
-            
             if (res.success) {
                 toast({ title: "¡Actualizado!", description: "Sincronizado con la Base de Datos Central.", className: "bg-green-600 text-white" });
                 navigate('/parroquia/bautismo/partidas');
