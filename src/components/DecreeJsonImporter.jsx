@@ -9,12 +9,14 @@ import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext'; 
 import { supabase } from '@/lib/supabaseClient'; 
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
+import { marginalNotesEngine } from '@/utils/marginalNotesEngine'; // 🚀 MOTOR OFICIAL DE NOTAS MARGINALES
 import Table from '@/components/ui/Table';
 
 const DecreeJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth(); 
-    const { getMisDatosList } = useAppData(); 
+    // 🚀 Extraemos getParrocoActual para resolver firmas heredadas
+    const { getMisDatosList, getParrocoActual } = useAppData(); 
     
     const [file, setFile] = useState(null);
     const [records, setRecords] = useState([]);
@@ -26,10 +28,8 @@ const DecreeJsonImporter = () => {
 
     const fileInputRef = useRef(null);
 
-    // Formateador estándar de 4 ceros
     const pad = (num) => String(num || '').trim().padStart(4, '0');
 
-    // Lector Multi-Formato Exacto para tu DBF
     const extractField = (item, possibleKeys) => {
         for (let key of possibleKeys) {
             if (item[key] !== undefined && item[key] !== null && String(item[key]).trim() !== '') return String(item[key]).trim();
@@ -38,7 +38,6 @@ const DecreeJsonImporter = () => {
         return null;
     };
 
-    // 🚀 LECTURA Y VALIDACIÓN INMEDIATA EN LA NUBE
     const handleFileChange = async (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
@@ -53,7 +52,6 @@ const DecreeJsonImporter = () => {
                 setIsProcessing(true);
                 const parishId = user?.parishId || user?.parish_id;
 
-                // 1. DESCARGA MASIVA A MEMORIA RAM (Para un cruce instantáneo)
                 const { data: allBaptisms, error: bapError } = await supabase
                     .from('baptisms')
                     .select('id, book_number, folio, number, raw_data, nombres, apellidos, da_fe')
@@ -61,23 +59,18 @@ const DecreeJsonImporter = () => {
                 
                 if (bapError) throw bapError;
 
-                // Búsqueda Blindada Antierrores (ignora ceros a la izquierda y busca en JSON)
                 const findBaptism = (targetL, targetF, targetN) => {
                     const padL = pad(targetL); const padF = pad(targetF); const padN = pad(targetN);
                     
                     return allBaptisms.find(b => {
                         const raw = typeof b.raw_data === 'string' ? JSON.parse(b.raw_data) : (b.raw_data || {});
-                        
-                        // Extrae la data venga de donde venga
                         const bL = pad(b.book_number || raw.Libro || raw.libro || raw.book_number);
                         const bF = pad(b.folio || raw.folio || raw.page_number);
                         const bN = pad(b.number || raw.numero || raw.numeroActa || raw.entry_number);
-                        
                         return bL === padL && bF === padF && bN === padN;
                     });
                 };
 
-                // 2. CRUCE INTELIGENTE REGISTRO A REGISTRO
                 const processed = data.map((item, index) => {
                     const decreto = extractField(item, ['decreto']);
                     const fecha = extractField(item, ['fecha']);
@@ -101,12 +94,10 @@ const DecreeJsonImporter = () => {
                     let origRec = null;
                     let newRec = null;
 
-                    // Validación de campos vacíos en el JSON
                     if (!decreto || !fecha) { errorMsg = "Falta No. Decreto o Fecha."; isValid = false; }
                     else if (!newLib || !newFol || !newNum) { errorMsg = "Falta ubicación supletoria (NEWLIB/NEWFOL/NEWNUM)."; isValid = false; }
                     else if (!isReposicion && (!oldLib || !oldFol || !oldNum)) { errorMsg = "Corrección requiere ubicación original completa."; isValid = false; }
 
-                    // Validación contra Supabase (La Nube)
                     if (isValid) {
                         newRec = findBaptism(newLib, newFol, newNum);
                         if (!newRec) {
@@ -128,7 +119,7 @@ const DecreeJsonImporter = () => {
                         sNewL: pad(newLib), sNewF: pad(newFol), sNewN: pad(newNum),
                         sOldL: pad(oldLib), sOldF: pad(oldFol), sOldN: pad(oldNum),
                         isValid, error: errorMsg,
-                        _origRec: origRec, _newRec: newRec // Guardamos las referencias reales de Supabase para luego inyectar
+                        _origRec: origRec, _newRec: newRec 
                     };
                 });
 
@@ -153,7 +144,6 @@ const DecreeJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
-    // 🚀 EJECUCIÓN OFICIAL EN SUPABASE
     const handleImport = async () => {
         const validRecords = records.filter(r => r.isValid);
         if (!validRecords.length) return;
@@ -165,6 +155,19 @@ const DecreeJsonImporter = () => {
         try {
             const parishInfo = getMisDatosList(parishId)[0] || {};
             const parishLabel = `${parishInfo.nombre || 'PARROQUIA'} - ${parishInfo.ciudad || ''}`.toUpperCase();
+
+            // Sacerdote actual por defecto para reescribir errores de "0006"
+            const currentPriestObj = getParrocoActual(parishId);
+            const defaultPriest = currentPriestObj 
+                ? `PBRO. ${currentPriestObj.nombre} ${currentPriestObj.apellido || ''}`.trim().toUpperCase() 
+                : 'EL PÁRROCO';
+
+            const { data: allBaptisms, error: bapError } = await supabase
+                .from('baptisms')
+                .select('id, book_number, folio, number, raw_data, nombres, apellidos, da_fe')
+                .eq('parish_id', parishId);
+            
+            if (bapError) throw bapError;
 
             const { data: catalogoConceptos } = await supabase
                 .from('conceptos_anulacion')
@@ -184,7 +187,6 @@ const DecreeJsonImporter = () => {
                     const conceptoText = conceptoObj ? conceptoObj.concepto.toUpperCase() : "SOLICITUD DE PARTE";
                     const fechaTexto = convertDateToSpanishText(item.fecha_clean).replace(/^EL\s+/i, '').toUpperCase();
 
-                    // Las partidas fueron garantizadas en la etapa de carga
                     const newRec = item._newRec;
                     const origRec = item._origRec;
 
@@ -192,17 +194,37 @@ const DecreeJsonImporter = () => {
                     const rawOrig = origRec ? (typeof origRec.raw_data === 'string' ? JSON.parse(origRec.raw_data) : (origRec.raw_data || {})) : null;
 
                     const targetName = `${newRec.nombres || ''} ${newRec.apellidos || ''}`.trim().toUpperCase();
-                    const ministroDaFe = (item.dafe_clean || newRec.da_fe || rawNew?.daFe || 'EL PÁRROCO').toUpperCase();
+
+                    // 🧠 INTELIGENCIA ANTINÚMEROS PARA LA FIRMA (Evita imprimir "DA FE: 0006")
+                    let validDaFe = defaultPriest;
+                    const dbDafe = newRec.da_fe || rawNew?.daFe || rawNew?.dafe;
+                    
+                    // Si el dato de Supabase no es numérico, lo usamos.
+                    if (dbDafe && isNaN(Number(String(dbDafe).trim()))) {
+                        validDaFe = String(dbDafe).trim().toUpperCase();
+                    } 
+                    // Si el dato del archivo JSON heredado no es numérico, lo usamos.
+                    else if (item.dafe_clean && isNaN(Number(String(item.dafe_clean).trim()))) {
+                        validDaFe = String(item.dafe_clean).trim().toUpperCase();
+                    }
+                    
+                    // Garantizamos formalidad
+                    if (!validDaFe.startsWith('PBRO') && validDaFe !== 'EL PÁRROCO') {
+                        validDaFe = `PBRO. ${validDaFe}`;
+                    }
 
                     if (item.isReposicion) {
                         const noteRepo = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
                         
                         const newRaw = { 
                             ...rawNew, isSupplementary: true, creadoPorDecreto: true, 
-                            replacementDecreeRef: item.decreto_clean, notaMarginal: noteRepo 
+                            replacementDecreeRef: item.decreto_clean, notaMarginal: noteRepo,
+                            daFe: validDaFe 
                         };
 
-                        await supabase.from('baptisms').update({ raw_data: newRaw, nota_marginal: noteRepo }).eq('id', newRec.id);
+                        await supabase.from('baptisms').update({ 
+                            raw_data: newRaw, nota_marginal: noteRepo, da_fe: validDaFe 
+                        }).eq('id', newRec.id);
 
                         const payloadDecree = {
                             decreeNumber: item.decreto_clean, numeroDecreto: item.decreto_clean, decreeDate: item.fecha_clean,
@@ -215,14 +237,22 @@ const DecreeJsonImporter = () => {
                         await supabase.from('decretos').insert([{ parish_id: parishId, tipo: 'reposicion', payload: payloadDecree }]);
 
                     } else {
-                        const noteAnulada = `PARTIDA ANULADA POR DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto}. LA INFORMACIÓN CORREGIDA PASA AL LIBRO SUPLETORIO: L-${item.sNewL} F-${item.sNewF} N-${item.sNewN}.`;
-                        const noteNueva = `ESTA PARTIDA SE INSCRIBIÓ SEGÚN DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto} Y ANULA LA PARTIDA DEL LIBRO: ${item.sOldL}, FOLIO: ${item.sOldF}, NÚMERO: ${item.sOldN}. DA FE: ${ministroDaFe}.`;
+                        // 🧠 USAMOS EL MOTOR MARGINAL OFICIAL PARA REDACCIÓN PERFECTA
+                        const noteAnulada = marginalNotesEngine.forAnnulledCorrection(parishId, {
+                            numeroDecreto: item.decreto_clean, fechaDecreto: item.fecha_clean,
+                            libroNuevo: item.sNewL, folioNuevo: item.sNewF, numeroNuevo: item.sNewN
+                        });
+
+                        const noteNueva = marginalNotesEngine.forNewCorrection(parishId, {
+                            numeroDecreto: item.decreto_clean, fechaDecreto: item.fecha_clean,
+                            libroAnulada: item.sOldL, folioAnulada: item.sOldF, numeroAnulada: item.sOldN, ministro: validDaFe
+                        });
 
                         const origUpdate = { ...rawOrig, isAnnulled: true, anulado: true, status: 'anulada', notaMarginal: noteAnulada };
                         await supabase.from('baptisms').update({ status: 'anulada', nota_marginal: noteAnulada, raw_data: origUpdate }).eq('id', origRec.id);
 
-                        const newUpdate = { ...rawNew, isSupplementary: true, creadoPorDecreto: true, correctionDecreeRef: item.decreto_clean, notaMarginal: noteNueva };
-                        await supabase.from('baptisms').update({ nota_marginal: noteNueva, raw_data: newUpdate }).eq('id', newRec.id);
+                        const newUpdate = { ...rawNew, isSupplementary: true, creadoPorDecreto: true, correctionDecreeRef: item.decreto_clean, notaMarginal: noteNueva, daFe: validDaFe };
+                        await supabase.from('baptisms').update({ nota_marginal: noteNueva, raw_data: newUpdate, da_fe: validDaFe }).eq('id', newRec.id);
 
                         const payloadDecree = {
                             decreeNumber: item.decreto_clean, decreeDate: item.fecha_clean, conceptoAnulacionId: conceptoId,
@@ -301,7 +331,6 @@ const DecreeJsonImporter = () => {
                 </Button>
             </div>
 
-            {/* Modal de Ayuda JSON */}
             {showHelp && (
                 <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm rounded-[2.5rem] p-10 flex flex-col animate-in fade-in zoom-in-95 duration-200">
                     <div className="flex justify-between items-center mb-6">
