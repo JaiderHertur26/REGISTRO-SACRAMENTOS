@@ -15,7 +15,7 @@ import Table from '@/components/ui/Table';
 const DecreeJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth(); 
-    const { getMisDatosList, getParrocoActual } = useAppData(); 
+    const { getMisDatosList, getParrocoActual, getParrocos } = useAppData(); 
     
     const [file, setFile] = useState(null);
     const [records, setRecords] = useState([]);
@@ -77,7 +77,6 @@ const DecreeJsonImporter = () => {
 
                 const findBaptism = (targetL, targetF, targetN) => {
                     const padL = pad(targetL); const padF = pad(targetF); const padN = pad(targetN);
-                    
                     return allBaptisms.find(b => {
                         const raw = typeof b.raw_data === 'string' ? JSON.parse(b.raw_data) : (b.raw_data || {});
                         const bL = pad(b.book_number || raw.Libro || raw.libro || raw.book_number);
@@ -134,8 +133,7 @@ const DecreeJsonImporter = () => {
                         observaciones_clean: observaciones, dafe_clean: dafeLegacy,
                         sNewL: pad(newLib), sNewF: pad(newFol), sNewN: pad(newNum),
                         sOldL: pad(oldLib), sOldF: pad(oldFol), sOldN: pad(oldNum),
-                        isValid, error: errorMsg,
-                        _origRec: origRec, _newRec: newRec 
+                        isValid, error: errorMsg, _origRec: origRec, _newRec: newRec 
                     };
                 });
 
@@ -172,6 +170,8 @@ const DecreeJsonImporter = () => {
             const parishInfo = getMisDatosList(parishId)[0] || {};
             const parishLabel = `${parishInfo.nombre || 'PARROQUIA'} - ${parishInfo.ciudad || ''}`.toUpperCase();
 
+            // 🚀 OBTENEMOS LA LISTA DE SACERDOTES HISTÓRICOS
+            const listaSacerdotes = getParrocos(parishId) || [];
             const currentPriestObj = getParrocoActual(parishId);
             const defaultPriest = currentPriestObj 
                 ? `PBRO. ${currentPriestObj.nombre} ${currentPriestObj.apellido || ''}`.trim().toUpperCase() 
@@ -211,11 +211,26 @@ const DecreeJsonImporter = () => {
                     const targetName = `${newRec.nombres || ''} ${newRec.apellidos || ''}`.trim().toUpperCase();
 
                     // =========================================================================
-                    // 🧠 CLONACIÓN EXACTA: Si "Ministro" funciona, "Da Fe" usará la misma fuente
+                    // 🧠 MÁQUINA DEL TIEMPO (IDÉNTICA A BAPTISM CELEBRATED PAGE)
                     // =========================================================================
-                    let rawDaFe = (rawNew.ministro || newRec.ministro || '').toUpperCase();
+                    let rawDaFe = "";
+                    
+                    if (item.fecha_clean && listaSacerdotes.length > 0) {
+                        const fechaDelDecreto = new Date(item.fecha_clean.includes('T') ? item.fecha_clean : `${item.fecha_clean}T12:00:00`);
+                        
+                        const sacerdoteEpoca = listaSacerdotes.find(s => {
+                            if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                            const fInicio = new Date((s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`);
+                            const fFin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                            return fechaDelDecreto >= fInicio && fechaDelDecreto <= fFin;
+                        });
 
-                    // Si por algún motivo el ministro estuviera vacío, usa las alternativas de respaldo
+                        if (sacerdoteEpoca) {
+                            rawDaFe = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
+                        }
+                    }
+
+                    // Si no hubo coincidencia de fechas, tratamos de rescatarlo de la data vieja
                     if (!rawDaFe) {
                         const dbDafe = newRec.da_fe || rawNew?.daFe || rawNew?.dafe;
                         if (dbDafe && isNaN(Number(String(dbDafe).trim()))) rawDaFe = String(dbDafe).trim().toUpperCase();
@@ -224,11 +239,11 @@ const DecreeJsonImporter = () => {
 
                     if (!rawDaFe) rawDaFe = defaultPriest;
 
-                    // Limpieza quirúrgica para evitar "PBRO. PBRO."
+                    // Limpieza para que no diga "PBRO. PBRO."
                     rawDaFe = rawDaFe.replace(/^(PBRO\.?\s*|PADRE\s*|SACERDOTE\s*)/i, '').trim();
                     const validDaFe = rawDaFe !== 'EL PÁRROCO' ? `PBRO. ${rawDaFe}` : rawDaFe;
 
-                    // 🚀 EXTRACCIÓN DE DATOS PARA EL PDF CON EMPAQUE MULTILLAVE
+                    // Extracción de datos para PDF
                     const pdfData = {
                         fechaSacramento: rawNew.fechaSacramento || rawNew.fecbau || newRec.celebration_date || '',
                         sexo: parseSex(rawNew.sexo || rawNew.sex),
@@ -241,10 +256,8 @@ const DecreeJsonImporter = () => {
                         abuelosMaternos: rawNew.abuelosMaternos || rawNew.abuemat || newRec.abuelos_maternos || '',
                         padrinos: rawNew.padrinos || newRec.padrinos || '',
                         ministro: (rawNew.ministro || newRec.ministro || '').toUpperCase(),
-                        daFe: validDaFe,
-                        dafe: validDaFe,
-                        da_fe: validDaFe,
-                        ministerFaith: validDaFe 
+                        // Blindaje de Sacerdote Histórico
+                        daFe: validDaFe, dafe: validDaFe, da_fe: validDaFe, ministerFaith: validDaFe 
                     };
 
                     if (item.isReposicion) {
@@ -252,8 +265,7 @@ const DecreeJsonImporter = () => {
                         
                         const newUpdateData = { 
                             ...rawNew, isSupplementary: true, creadoPorDecreto: true, 
-                            replacementDecreeRef: item.decreto_clean, notaMarginal: noteRepo, 
-                            daFe: validDaFe, dafe: validDaFe, ministerFaith: validDaFe
+                            replacementDecreeRef: item.decreto_clean, notaMarginal: noteRepo, daFe: validDaFe 
                         };
 
                         await supabase.from('baptisms').update({ raw_data: newUpdateData, nota_marginal: noteRepo, da_fe: validDaFe }).eq('id', newRec.id);
@@ -280,7 +292,7 @@ const DecreeJsonImporter = () => {
                             libroAnulada: item.sOldL, folioAnulada: item.sOldF, numeroAnulada: item.sOldN, ministro: validDaFe
                         });
 
-                        // 🚀 Inyectamos el Sacerdote Histórico en la Partida Original
+                        // 🚀 ACTUALIZA LA PARTIDA ORIGINAL CON EL SACERDOTE DE LA ÉPOCA
                         const origUpdate = { 
                             ...rawOrig, isAnnulled: true, anulado: true, status: 'anulada', 
                             notaMarginal: noteAnulada, daFe: validDaFe, dafe: validDaFe, ministerFaith: validDaFe 
@@ -289,17 +301,15 @@ const DecreeJsonImporter = () => {
                             status: 'anulada', nota_marginal: noteAnulada, raw_data: origUpdate, da_fe: validDaFe 
                         }).eq('id', origRec.id);
 
-                        // 🚀 Inyectamos el Sacerdote Histórico en la Partida Nueva
                         const newUpdate = { 
                             ...rawNew, isSupplementary: true, creadoPorDecreto: true, 
-                            correctionDecreeRef: item.decreto_clean, notaMarginal: noteNueva, 
-                            daFe: validDaFe, dafe: validDaFe, ministerFaith: validDaFe 
+                            correctionDecreeRef: item.decreto_clean, notaMarginal: noteNueva, daFe: validDaFe 
                         };
                         await supabase.from('baptisms').update({ 
                             nota_marginal: noteNueva, raw_data: newUpdate, da_fe: validDaFe 
                         }).eq('id', newRec.id);
 
-                        // 🚀 Inyectamos el Sacerdote Histórico en el Decreto Oficial
+                        // 🚀 SELLA EL DECRETO CON EL SACERDOTE HISTÓRICO
                         const payloadDecree = {
                             decreeNumber: item.decreto_clean, decreeDate: item.fecha_clean, conceptoAnulacionId: conceptoId,
                             targetName: `${origRec.nombres || ''} ${origRec.apellidos || ''}`.trim().toUpperCase(),
@@ -357,23 +367,15 @@ const DecreeJsonImporter = () => {
 
     return (
         <div className="bg-white border border-slate-200 rounded-[2.5rem] p-8 md:p-10 space-y-10 shadow-sm relative">
-            
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-100 pb-8">
                 <div className="flex items-center gap-5">
-                    <div className="bg-gradient-to-br from-[#4B7BA7] to-[#2C3E50] p-4 rounded-2xl text-white shadow-lg shadow-blue-900/20">
-                        <Database className="w-8 h-8" />
-                    </div>
+                    <div className="bg-gradient-to-br from-[#4B7BA7] to-[#2C3E50] p-4 rounded-2xl text-white shadow-lg shadow-blue-900/20"><Database className="w-8 h-8" /></div>
                     <div>
                         <h2 className="text-3xl font-black text-slate-900 tracking-tight font-serif">Motor de Inyección Masiva</h2>
                         <p className="text-slate-500 text-xs font-medium uppercase tracking-widest mt-1">Sincronización de Decretos Históricos</p>
                     </div>
                 </div>
-                
-                <Button 
-                    variant="outline" 
-                    onClick={() => setShowHelp(true)}
-                    className="rounded-xl border-blue-200 text-blue-600 font-bold uppercase text-[10px] tracking-widest hover:bg-blue-50 h-12 px-6"
-                >
+                <Button variant="outline" onClick={() => setShowHelp(true)} className="rounded-xl border-blue-200 text-blue-600 font-bold uppercase text-[10px] tracking-widest hover:bg-blue-50 h-12 px-6">
                     <HelpCircle className="w-4 h-4 mr-2" /> Ver Formato JSON Esperado
                 </Button>
             </div>
@@ -381,12 +383,9 @@ const DecreeJsonImporter = () => {
             {showHelp && (
                 <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm rounded-[2.5rem] p-10 flex flex-col animate-in fade-in zoom-in-95 duration-200">
                     <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-xl font-black text-slate-800 uppercase tracking-widest">Estructura del Archivo JSON (ANULACIO.DBF)</h3>
+                        <h3 className="text-xl font-black text-slate-800 uppercase tracking-widest">Estructura del Archivo JSON</h3>
                         <Button variant="ghost" onClick={() => setShowHelp(false)} className="rounded-full p-2"><X className="w-6 h-6" /></Button>
                     </div>
-                    <p className="text-sm text-slate-600 mb-6 leading-relaxed">
-                        Exporta tu tabla de transacciones de anulaciones a JSON. El sistema buscará las columnas oficiales de tu base de datos anterior:
-                    </p>
                     <div className="bg-slate-900 text-green-400 p-6 rounded-2xl font-mono text-sm overflow-auto flex-1 shadow-inner">
                         <pre>
 {`{
@@ -395,57 +394,32 @@ const DecreeJsonImporter = () => {
       "DECRETO": "015-2023",
       "FECHA": "2023-05-10",
       "CODICONCEP": "002",
-      
-      // Partida Original (Afectada)
-      "LIBRO": "0001",
-      "FOLIO": "0504",
-      "NUMERO": "1007",
-      
-      // Partida Nueva (Supletoria)
-      "NEWLIB": "0004",
-      "NEWFOL": "0026",
-      "NEWNUM": "0026",
-
-      // Opcionales que el sistema leerá si existen
-      "OBSERVACIO": "Anotaciones adicionales...",
-      "DAFE": "PBRO. JUAN PEREZ"
+      "LIBRO": "0001", "FOLIO": "0504", "NUMERO": "1007",
+      "NEWLIB": "0004", "NEWFOL": "0026", "NEWNUM": "0026"
     }
   ]
 }`}
                         </pre>
                     </div>
-                    <div className="mt-6 flex justify-end">
-                        <Button onClick={() => setShowHelp(false)} className="bg-slate-800 text-white font-bold uppercase text-xs px-8 py-6 rounded-xl">Entendido</Button>
-                    </div>
+                    <div className="mt-6 flex justify-end"><Button onClick={() => setShowHelp(false)} className="bg-slate-800 text-white font-bold uppercase text-xs px-8 py-6 rounded-xl">Entendido</Button></div>
                 </div>
             )}
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-10">
                 <div className="xl:col-span-1">
                     <label className="flex flex-col items-center justify-center w-full h-[280px] border-2 border-dashed border-slate-200 rounded-[2rem] cursor-pointer bg-slate-50 hover:bg-blue-50 hover:border-[#4B7BA7]/40 transition-all duration-300 group relative overflow-hidden">
-                        
                         {isProcessing && (
                             <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
                                 <Loader2 className="w-12 h-12 text-[#4B7BA7] animate-spin mb-4" />
                                 <span className="font-black text-[#4B7BA7] uppercase tracking-widest text-[10px]">
                                     {progress.total > 0 ? `Procesando ${progress.current} de ${progress.total}` : 'Leyendo y Validando Nube...'}
                                 </span>
-                                {progress.total > 0 && (
-                                    <div className="w-1/2 bg-slate-200 h-1.5 rounded-full mt-3 overflow-hidden">
-                                        <div className="bg-[#4B7BA7] h-full transition-all duration-300" style={{ width: `${(progress.current / progress.total) * 100}%` }}></div>
-                                    </div>
-                                )}
+                                {progress.total > 0 && <div className="w-1/2 bg-slate-200 h-1.5 rounded-full mt-3 overflow-hidden"><div className="bg-[#4B7BA7] h-full transition-all duration-300" style={{ width: `${(progress.current / progress.total) * 100}%` }}></div></div>}
                             </div>
                         )}
-
                         <div className="flex flex-col items-center justify-center text-center p-8">
                             <Upload className="w-14 h-14 mb-5 text-slate-300 group-hover:text-[#4B7BA7] transition-colors" />
-                            <p className="text-sm font-black text-slate-700 uppercase tracking-widest">
-                                {file ? file.name : 'Subir Archivo JSON'}
-                            </p>
-                            <p className="text-[10px] text-slate-400 mt-3 font-medium leading-relaxed max-w-[200px]">
-                                Selecciona el archivo JSON con la exportación de tu tabla ANULACIO.
-                            </p>
+                            <p className="text-sm font-black text-slate-700 uppercase tracking-widest">{file ? file.name : 'Subir Archivo JSON'}</p>
                         </div>
                         <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileChange} disabled={isProcessing} />
                     </label>
@@ -464,32 +438,16 @@ const DecreeJsonImporter = () => {
                             <AlertCircle className="w-8 h-8 text-blue-500 shrink-0" />
                             <div className="space-y-2">
                                 <h4 className="font-black text-blue-900 uppercase text-xs tracking-widest">Protección de Datos Activa</h4>
-                                <p className="text-xs text-blue-800/80 leading-relaxed font-medium">
-                                    El motor cruzará la información con la Nube de inmediato. Si los folios originales o supletorios declarados en el JSON no existen en la base de datos de Supabase, bloqueará ese registro para evitar corrupciones.
-                                </p>
+                                <p className="text-xs text-blue-800/80 leading-relaxed font-medium">El motor cruzará la información con la Nube de inmediato y validará las fechas de los sacerdotes.</p>
                             </div>
                         </div>
                     )}
 
                     {validationStats && validationStats.valid > 0 && (
                         <div className="flex gap-4">
-                            <Button 
-                                onClick={() => { setFile(null); setRecords([]); setValidationStats(null); fileInputRef.current.value = null; }}
-                                disabled={isProcessing}
-                                className="h-16 px-8 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black uppercase tracking-widest text-[10px] transition-all"
-                            >
-                                <RefreshCcw className="w-4 h-4 mr-2" /> Borrar
-                            </Button>
-                            <Button 
-                                onClick={handleImport} 
-                                disabled={isProcessing || importComplete}
-                                className="flex-1 h-16 rounded-2xl bg-gradient-to-r from-[#4B7BA7] to-[#2C3E50] hover:scale-[1.01] text-white font-black uppercase tracking-[0.2em] text-[11px] shadow-xl shadow-blue-900/10 transition-all active:scale-95"
-                            >
-                                {importComplete ? (
-                                    <><CheckCircle className="w-5 h-5 mr-3 text-green-400" /> Inyección Finalizada</>
-                                ) : (
-                                    <><Database className="w-5 h-5 mr-3" /> Iniciar Inyección de {validationStats.valid} Decretos</>
-                                )}
+                            <Button onClick={() => { setFile(null); setRecords([]); setValidationStats(null); fileInputRef.current.value = null; }} disabled={isProcessing} className="h-16 px-8 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black uppercase tracking-widest text-[10px] transition-all"><RefreshCcw className="w-4 h-4 mr-2" /> Borrar</Button>
+                            <Button onClick={handleImport} disabled={isProcessing || importComplete} className="flex-1 h-16 rounded-2xl bg-gradient-to-r from-[#4B7BA7] to-[#2C3E50] hover:scale-[1.01] text-white font-black uppercase tracking-[0.2em] text-[11px] shadow-xl shadow-blue-900/10 transition-all active:scale-95">
+                                {importComplete ? <><CheckCircle className="w-5 h-5 mr-3 text-green-400" /> Inyección Finalizada</> : <><Database className="w-5 h-5 mr-3" /> Iniciar Inyección de {validationStats.valid} Decretos</>}
                             </Button>
                         </div>
                     )}
@@ -498,18 +456,6 @@ const DecreeJsonImporter = () => {
 
             {records.length > 0 && (
                 <div className="border border-slate-100 rounded-[2rem] overflow-hidden bg-slate-50/50 shadow-inner">
-                    <div className="px-8 py-5 border-b border-slate-100 bg-white flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                            <FileJson className="w-5 h-5 text-[#4B7BA7]" />
-                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Pre-Validación en Tiempo Real</span>
-                        </div>
-                        {validationStats?.invalid > 0 && (
-                            <span className="bg-red-50 text-red-600 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest border border-red-100">
-                                {validationStats.invalid} Errores de Cruce Detectados
-                            </span>
-                        )}
-                    </div>
-                    
                     <div className="max-h-[500px] overflow-auto custom-scrollbar">
                         <Table columns={columns} data={records} className="bg-transparent" />
                     </div>
@@ -520,13 +466,7 @@ const DecreeJsonImporter = () => {
 };
 
 const StatCard = ({ label, val, color }) => {
-    const colors = {
-        slate: "bg-slate-50 border-slate-200 text-slate-700",
-        green: "bg-emerald-50 border-emerald-200 text-emerald-700",
-        amber: "bg-amber-50 border-amber-200 text-amber-700",
-        blue: "bg-blue-50 border-blue-200 text-blue-700",
-        red: "bg-red-50 border-red-200 text-red-700"
-    };
+    const colors = { slate: "bg-slate-50 border-slate-200 text-slate-700", green: "bg-emerald-50 border-emerald-200 text-emerald-700", amber: "bg-amber-50 border-amber-200 text-amber-700", blue: "bg-blue-50 border-blue-200 text-blue-700", red: "bg-red-50 border-red-200 text-red-700" };
     return (
         <div className={`p-6 rounded-[2rem] border ${colors[color]} text-center shadow-sm flex flex-col justify-center items-center h-32`}>
             <span className="block text-4xl font-black mb-2">{val}</span>

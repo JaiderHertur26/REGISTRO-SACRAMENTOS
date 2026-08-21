@@ -16,17 +16,14 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
 
       const fetchDataFromCloud = async () => {
           try {
-              // 1. BUSCAR DATOS EXACTOS DE LA CANCILLERÍA
               let chanceryIdToUse = authUser?.chanceryId || authUser?.chancery_id;
 
               if (!chanceryIdToUse) {
                   let dioceseId = authUser?.dioceseId || authUser?.diocese_id;
-                  
                   if (!dioceseId && authUser?.parishId) {
                       const { data: pData } = await supabase.from('parishes').select('diocese_id').eq('id', authUser.parishId).single();
                       if (pData) dioceseId = pData.diocese_id;
                   }
-
                   if (dioceseId) {
                       const { data: chanceryRecord } = await supabase.from('chancelleries').select('id').eq('diocese_id', dioceseId).maybeSingle();
                       if (chanceryRecord) chanceryIdToUse = chanceryRecord.id;
@@ -35,7 +32,6 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
 
               if (chanceryIdToUse) {
                   const { data: misDatosCancilleria } = await supabase.from('mis_datos').select('payload').eq('entity_id', chanceryIdToUse).maybeSingle();
-
                   if (misDatosCancilleria && misDatosCancilleria.payload && isMounted) {
                       let p = misDatosCancilleria.payload;
                       if (typeof p === 'string') p = JSON.parse(p);
@@ -44,13 +40,11 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
                   }
               }
 
-              // 2. BUSCAR DATOS DE LA PARROQUIA DESTINO Y SU PÁRROCO
               let pId = decreeData?.targetParishId || decreeData?.parish_id || authUser?.parishId;
 
               if (pId) {
                   const { data: parishMisDatos } = await supabase.from('mis_datos').select('payload').eq('entity_id', pId).maybeSingle();
                   let pName = ''; let pCity = '';
-                  
                   if (parishMisDatos && parishMisDatos.payload) {
                       let p = parishMisDatos.payload;
                       if (typeof p === 'string') p = JSON.parse(p);
@@ -60,26 +54,20 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
 
                   const { data: parrocosData } = await supabase.from('parrocos').select('payload').eq('parish_id', pId);
                   let pPriest = '';
-                  
                   if (parrocosData && parrocosData.length > 0) {
                       const activePriestRow = parrocosData.find(row => {
                           let p = row.payload; if (typeof p === 'string') p = JSON.parse(p);
                           return String(p.estado) === '1' || String(p.Estado) === '1';
                       });
-
                       if (activePriestRow) {
                           let p = activePriestRow.payload; if (typeof p === 'string') p = JSON.parse(p);
                           pPriest = `${p.nombre || p.nombres || ''} ${p.apellido || p.apellidos || ''}`.trim();
                       }
                   }
 
-                  if (isMounted) {
-                      setTargetParishInfo({ name: pName.toUpperCase(), city: pCity.toUpperCase(), priest: pPriest.toUpperCase() });
-                  }
+                  if (isMounted) setTargetParishInfo({ name: pName.toUpperCase(), city: pCity.toUpperCase(), priest: pPriest.toUpperCase() });
               }
-          } catch (err) {
-              console.error("Error buscando datos en Supabase:", err);
-          }
+          } catch (err) { console.error("Error buscando datos en Supabase:", err); }
       };
 
       if (decreeData) fetchDataFromCloud();
@@ -131,14 +119,11 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
 
   const getVal = (key) => newPartidaSummary[key] || decreeData[key] || newData[key] || baptismData[key] || '';
 
-  // 🚀 DATOS DE LA PARTIDA ANULADA (LO VIEJO)
   const oldName = (decreeData.targetName || `${originalPartidaSummary.nombres || originalPartidaSummary.firstName || ''} ${originalPartidaSummary.apellidos || originalPartidaSummary.lastName || ''}`).trim().toUpperCase() || '---';
   const oldBook = String(originalPartidaSummary.book || originalPartidaSummary.book_number || originalPartidaSummary.Libro || '---').padStart(4, '0');
   const oldPage = String(originalPartidaSummary.page || originalPartidaSummary.page_number || originalPartidaSummary.folio || '---').padStart(4, '0');
   const oldEntry = String(originalPartidaSummary.entry || originalPartidaSummary.entry_number || originalPartidaSummary.numero || '---').padStart(4, '0');
 
-  // 🚀 DATOS DE LA PARTIDA SUPLETORIA (LO NUEVO)
-  const newName = (decreeData.newTargetName || `${getVal('nombres') || getVal('firstName')} ${getVal('apellidos') || getVal('lastName')}`).trim().toUpperCase() || '---';
   const newBook = String(newPartidaSummary.book || newPartidaSummary.book_number || newPartidaSummary.Libro || '---').padStart(4, '0');
   const newPage = String(newPartidaSummary.page || newPartidaSummary.page_number || newPartidaSummary.folio || '---').padStart(4, '0');
   const newEntry = String(newPartidaSummary.entry || newPartidaSummary.entry_number || newPartidaSummary.numero || '---').padStart(4, '0');
@@ -157,7 +142,8 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
     abuelosMaternos: getVal('abuelosMaternos'),
     padrinos: getVal('padrinos'),
     ministro: getVal('ministro'),
-    daFe: nombreDaFeFinal
+    // 🚀 LA MAGIA ESTÁ AQUÍ: Lee el DA FE inyectado por el importador masivo
+    daFe: getVal('daFe') || getVal('dafe') || getVal('ministerFaith') || nombreDaFeFinal
   };
 
   const unionTypeMap = { '1': 'Matrimonio Católico', '2': 'Matrimonio Civil', '3': 'Unión Libre', '4': 'Madre Soltera', '5': 'Otro' };
@@ -187,9 +173,7 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
         }
       `}</style>
 
-      {/* --- BLOQUE SUPERIOR --- */}
       <div className="w-full flex-1 flex flex-col">
-          
           <div className="text-center mb-3 relative border-b border-black pb-2 shrink-0">
             <h1 className="text-[12pt] font-extrabold uppercase tracking-widest mb-0.5 text-black">Arquidiócesis de Barranquilla</h1>
             <h2 className="text-[9pt] font-semibold uppercase tracking-widest text-black">Oficina de Cancillería</h2>
@@ -213,7 +197,6 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
             </div>
           </div>
 
-          {/* 🚀 1. LO QUE SE ANULA (DATOS VIEJOS) */}
           <div className="mb-2 text-[9pt] text-black shrink-0">
             <p className="text-justify leading-snug">
               Por el presente documento, el Gobierno de la Arquidiócesis ordena y autoriza la anulación de la Partida de BAUTISMO correspondiente a:
@@ -229,7 +212,6 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
             </div>
           </div>
 
-          {/* 🚀 2. LO QUE SE CREA (DATOS NUEVOS/CORREGIDOS) */}
           <div className="mb-2 border-t-2 border-black pt-2 relative mt-2 flex-1 flex flex-col">
             <div className="text-center font-bold text-[8pt] tracking-widest uppercase text-black mb-2">
               Detalles Corregidos a Asentar en el Libro Supletorio
@@ -267,7 +249,6 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
             </div>
           </div>
 
-          {/* NOTA MARGINAL Y DISPOSICIÓN */}
           <div className="mb-2 relative border border-black p-2 bg-gray-50 print:bg-gray-100 mt-2 shrink-0">
              <div className="absolute -top-2.5 left-4 bg-gray-50 print:bg-gray-100 px-2 font-bold text-[7pt] tracking-widest uppercase border border-black border-b-0 text-black">
               Disposición y Nota Marginal
@@ -289,7 +270,6 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
           </p>
       </div>
 
-      {/* --- BLOQUE INFERIOR FIJO --- */}
       <div className="w-full shrink-0 pt-2">
           <div className="flex justify-between items-end px-12 mb-3">
             <div className="text-center w-5/12">
@@ -313,7 +293,6 @@ const PrintCorrectionDecree = forwardRef(({ decreeData }, ref) => {
             <p className="font-medium">{orgData.website ? `${orgData.website} • ` : ''}{orgData.email !== '[Email no configurado]' ? `E-mail: ${orgData.email}` : ''}</p>
           </div>
       </div>
-
     </div>
   );
 });
