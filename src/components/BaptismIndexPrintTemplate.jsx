@@ -60,13 +60,11 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
         ubicacionHeader += ' - COLOMBIA';
     }
 
-    // --- 4. ORDENAMIENTO ALFABÉTICO ESTRICTO ---
+    // --- 4. ORDENAMIENTO ALFABÉTICO ESTRICTO (Leyendo de Supabase Correctamente) ---
     const sortedData = [...dataSource].sort((a, b) => {
-        const nameA = `${a.apellidos || a.lastName || ''} ${a.nombres || a.firstName || ''}`.trim().toLowerCase();
-        const nameB = `${b.apellidos || b.lastName || ''} ${b.nombres || b.firstName || ''}`.trim().toLowerCase();
-        if (nameA < nameB) return -1;
-        if (nameA > nameB) return 1;
-        return 0;
+        const nameA = `${a.apellidos || a.raw_data?.apellidos || ''} ${a.nombres || a.raw_data?.nombres || ''}`.trim().toLowerCase();
+        const nameB = `${b.apellidos || b.raw_data?.apellidos || ''} ${b.nombres || b.raw_data?.nombres || ''}`.trim().toLowerCase();
+        return nameA.localeCompare(nameB);
     });
 
     // Formateador robusto para números (Evita que queden en blanco)
@@ -80,158 +78,150 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
 
     return (
         <div ref={ref} className="print-container">
-            {/* 🚀 INYECCIÓN DE ESTILOS PROFESIONALES EXCLUSIVOS PARA IMPRESIÓN */}
+            {/* 🚀 INYECCIÓN DE ESTILOS PROFESIONALES EXCLUSIVOS PARA IMPRESIÓN MULTI-PÁGINA */}
             <style type="text/css" media="print, screen">{`
-                /* RESET Y CONFIGURACIÓN BÁSICA */
+                /* RESET Y CONFIGURACIÓN BÁSICA QUE ROMPE LÍMITES DE ALTURA */
+                html, body, #root, .print-container {
+                    height: auto !important;
+                    min-height: 100% !important;
+                    overflow: visible !important;
+                    background-color: white !important;
+                }
+
                 .print-container {
-                    font-family: 'Arial', sans-serif;
-                    background-color: white;
+                    font-family: 'Times New Roman', Times, serif; /* Tipografía oficial eclesiástica */
                     color: #000;
                     width: 100%;
                     margin: 0;
                     padding: 0;
                 }
 
-                /* CONFIGURACIÓN DE PÁGINA (MÁRGENES FÍSICOS) */
+                /* CONFIGURACIÓN DE PÁGINA (MÁRGENES FÍSICOS REQUERIDOS PARA IMPRESIÓN FORMAL) */
                 @page {
-                    size: letter;
-                    margin: 15mm; /* Márgenes físicos reales para evitar cortes */
+                    size: letter portrait;
+                    margin: 15mm; 
                 }
 
                 @media print {
-                    html, body {
-                        margin: 0 !important;
-                        padding: 0 !important;
+                    * {
                         -webkit-print-color-adjust: exact !important;
                         print-color-adjust: exact !important;
                     }
                     
-                    /* REPETICIÓN DE CABECERAS Y PIES DE PÁGINA */
-                    .print-table {
-                        width: 100%;
-                    }
-                    .print-table thead {
-                        display: table-header-group; /* Repite la cabecera en cada página */
-                    }
-                    .print-table tbody {
-                        display: table-row-group;
-                    }
-                    .print-table tfoot {
-                        display: table-footer-group; /* Repite el pie en cada página */
-                    }
-                    
-                    /* EVITAR CORTES EN MEDIO DE LAS FILAS */
-                    .print-table tr {
-                        page-break-inside: avoid !important;
+                    /* EVITAR CORTES DE TABLA Y ROMPIMIENTOS DE BORDES */
+                    table { page-break-inside: auto; }
+                    tr { 
+                        page-break-inside: avoid !important; 
+                        page-break-after: auto !important;
                         break-inside: avoid !important;
                     }
-                    .print-table td, .print-table th {
-                        page-break-inside: avoid !important;
-                        break-inside: avoid !important;
-                    }
+                    thead { display: table-header-group; }
+                    tfoot { display: table-footer-group; }
                 }
 
-                /* CABECERA ECLESIÁSTICA (AHORA DENTRO DEL THEAD) */
+                /* CABECERA ECLESIÁSTICA (DENTRO DEL THEAD PARA QUE SE REPITA) */
                 .header-cell {
                     border: none !important;
                     background: white !important;
-                    padding: 0 0 15px 0 !important;
+                    padding: 0 0 20px 0 !important;
                 }
                 .print-diocese {
-                    font-family: 'Times New Roman', Times, serif;
-                    font-size: 13pt;
+                    font-size: 14pt;
                     font-weight: bold;
                     letter-spacing: 1px;
                     text-align: center;
                 }
                 .print-parish {
-                    font-family: 'Times New Roman', Times, serif;
-                    font-size: 16pt;
+                    font-size: 18pt;
                     font-weight: 900;
                     margin: 4px 0;
                     text-align: center;
                 }
                 .print-location {
-                    font-size: 9pt;
-                    color: #444;
+                    font-size: 10pt;
+                    font-family: 'Arial', sans-serif;
+                    color: #333;
                     text-align: center;
                 }
                 .print-title {
                     text-align: center;
-                    font-family: 'Times New Roman', Times, serif;
-                    font-size: 12pt;
+                    font-size: 14pt;
                     font-weight: bold;
-                    border-bottom: 2px solid #000;
+                    border-bottom: 3px double #000;
                     margin-top: 15px;
                     padding-bottom: 8px;
                     letter-spacing: 1.5px;
                 }
 
-                /* TABLA PRINCIPAL */
+                /* DISEÑO DE LA TABLA ESTILO LIBRO CONTABLE */
                 .print-table {
                     width: 100%;
-                    border-collapse: collapse;
+                    border-collapse: collapse; /* Evita bordes dobles */
+                    border-spacing: 0;
+                    font-family: 'Arial', sans-serif; /* Arial para los datos es más legible */
                     font-size: 9pt;
                 }
+                
                 .header-row th {
                     border: 1px solid #000;
-                    border-top: 2px solid #000; /* Separador fuerte */
+                    border-top: 2px solid #000;
                     border-bottom: 2px solid #000;
-                    padding: 8px 4px;
-                    background-color: #eaeaea !important;
-                    font-weight: bold;
+                    padding: 10px 6px;
+                    background-color: #f4f4f5 !important;
+                    font-weight: 900;
                     text-align: center;
                     text-transform: uppercase;
-                    font-size: 8.5pt;
-                }
-                .print-table td {
-                    border: 1px solid #444; /* Borde ligeramente más suave para el cuerpo */
-                    padding: 6px 5px;
-                    vertical-align: middle;
-                    line-height: 1.2;
+                    font-size: 8pt;
                 }
                 
-                /* FILAS CEBRADAS */
+                .print-table td {
+                    border: 1px solid #000; /* Borde estricto para evitar cortes */
+                    padding: 8px 6px;
+                    vertical-align: middle;
+                    line-height: 1.3;
+                }
+                
+                /* FILAS CEBRADAS SUAVES PARA LECTURA */
                 .print-table tbody tr:nth-child(even) td {
-                    background-color: #f9f9f9 !important;
+                    background-color: #fafafa !important;
                 }
 
                 /* CELDAS ESPECÍFICAS */
-                .col-center { text-align: center; }
                 .col-number { width: 4%; font-weight: bold; text-align: center; font-size: 8pt; }
-                .col-titular { width: 33%; }
-                .col-padres { width: 39%; font-size: 8pt; color: #222; }
-                .col-ref { width: 8%; font-family: 'Courier New', Courier, monospace; font-size: 9.5pt; text-align: center; font-weight: bold; }
+                .col-titular { width: 34%; }
+                .col-padres { width: 38%; font-size: 8pt; }
+                .col-ref { width: 8%; font-family: 'Courier New', Courier, monospace; font-size: 10pt; text-align: center; font-weight: bold; }
 
-                .text-bold { font-weight: bold; font-size: 9.5pt; color: #000; }
-                .text-muted { font-size: 8.5pt; color: #444; margin-top: 2px; }
+                .text-bold { font-weight: 900; font-size: 10pt; color: #000; letter-spacing: -0.5px; }
+                .text-muted { font-size: 9pt; color: #333; margin-top: 2px; }
 
-                /* ESTADO ANULADO */
+                /* ESTADO ANULADO / DECRETO */
                 .row-anulada td {
-                    background-color: #fff0f0 !important;
                     color: #777;
                 }
                 .badge-anulada {
                     display: inline-block;
-                    background-color: #d32f2f !important;
+                    background-color: #000 !important;
                     color: white !important;
                     font-size: 6pt;
-                    padding: 2px 4px;
-                    border-radius: 3px;
+                    padding: 2px 5px;
+                    border-radius: 2px;
                     font-weight: bold;
                     margin-left: 6px;
-                    vertical-align: middle;
+                    vertical-align: text-bottom;
+                    letter-spacing: 1px;
                 }
                 
                 /* FOOTER DE PÁGINA */
                 .footer-cell {
                     border: none !important;
                     background: white !important;
-                    padding-top: 15px !important;
+                    padding-top: 20px !important;
                     text-align: right !important;
-                    font-size: 7.5pt !important;
-                    color: #666 !important;
+                    font-size: 8pt !important;
+                    color: #555 !important;
                     font-style: italic;
+                    font-family: 'Times New Roman', Times, serif;
                 }
             `}</style>
             
@@ -244,7 +234,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                             <div className="print-parish">{nombreParroquia}</div>
                             <div className="print-location">{ubicacionHeader}</div>
                             <div className="print-title">
-                                ÍNDICE GENERAL DE BAUTISMOS {bookNumber ? `• LIBRO ${bookNumber}` : ''}
+                                ÍNDICE GENERAL DE BAUTISMOS {bookNumber ? `• LIBRO ${bookNumber.padStart(4, '0')}` : ''}
                             </div>
                         </th>
                     </tr>
@@ -263,17 +253,17 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     {sortedData.map((record, index) => {
                         const safeFormat = (val) => typeof formatPersonData === 'function' ? formatPersonData(val) : val;
 
-                        const apellidos = safeFormat(record.apellidos || record.lastName || '');
-                        const nombres = safeFormat(record.nombres || record.firstName || '');
-                        const padre = safeFormat(record.nombrePadre || record.fatherName || record.padre || '---');
-                        const madre = safeFormat(record.nombreMadre || record.motherName || record.madre || '---');
+                        // 🚀 LECTURA DIRECTA DEL ESQUEMA DE SUPABASE (CON FALLBACK AL RAW_DATA)
+                        const apellidos = safeFormat(record.apellidos || record.raw_data?.apellidos || record.lastName || '');
+                        const nombres = safeFormat(record.nombres || record.raw_data?.nombres || record.firstName || '');
+                        const padre = safeFormat(record.nombre_padre || record.raw_data?.nombrePadre || record.raw_data?.padre || record.fatherName || '---');
+                        const madre = safeFormat(record.nombre_madre || record.raw_data?.nombreMadre || record.raw_data?.madre || record.motherName || '---');
                         
-                        // Capturando el libro con 'L' mayúscula para evitar celdas en blanco
-                        const book = formatNumber(record.Libro || record.book_number || record.libro);
-                        const page = formatNumber(record.folio || record.page_number);
-                        const entry = formatNumber(record.numero || record.numeroActa || record.entry_number);
+                        const book = formatNumber(record.book_number || record.Libro || record.raw_data?.Libro || record.libro);
+                        const page = formatNumber(record.folio || record.raw_data?.folio || record.page_number);
+                        const entry = formatNumber(record.number || record.numero || record.raw_data?.numero || record.raw_data?.numeroActa);
                         
-                        const isAnulada = record.status === 'anulada' || record.isAnnulled || record.estado === 'anulada';
+                        const isAnulada = record.status === 'anulada' || record.raw_data?.isAnnulled || record.raw_data?.estado === 'anulada';
 
                         return (
                             <tr key={record.id || index} className={isAnulada ? 'row-anulada' : ''}>
@@ -288,7 +278,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                                 </td>
                                 
                                 <td className="col-padres">
-                                    <div style={{ marginBottom: '2px' }}><strong>P:</strong> {padre}</div>
+                                    <div style={{ marginBottom: '3px' }}><strong>P:</strong> {padre}</div>
                                     <div><strong>M:</strong> {madre}</div>
                                 </td>
                                 
@@ -301,7 +291,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     
                     {sortedData.length === 0 && (
                         <tr>
-                            <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#888', fontStyle: 'italic', fontSize: '10pt' }}>
+                            <td colSpan="6" style={{ textAlign: 'center', padding: '50px', color: '#888', fontStyle: 'italic', fontSize: '11pt' }}>
                                 NO SE ENCONTRARON REGISTROS ASENTADOS PARA GENERAR EL ÍNDICE
                             </td>
                         </tr>
@@ -311,7 +301,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                 <tfoot>
                     <tr>
                         <td colSpan="6" className="footer-cell">
-                            Índice generado por el Sistema SacramentumRegistry • {new Date().toLocaleDateString('es-CO')}
+                            Índice Generado Oficialmente por el Sistema Eclesia Digital • {new Date().toLocaleDateString('es-CO')}
                         </td>
                     </tr>
                 </tfoot>
