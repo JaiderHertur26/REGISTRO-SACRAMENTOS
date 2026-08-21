@@ -47,48 +47,83 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
     }
   };
 
-  const fechaBautismo = formatFecha(raw.fechaSacramento);
+  const fechaBautismoStr = raw.fechaSacramento || raw.fecbau || data.celebration_date;
+  const fechaBautismo = formatFecha(fechaBautismoStr);
   const nombresYApellidos = `${formatData(raw.nombres)} ${formatData(raw.apellidos)}`.trim();
-  const fechaNacimiento = formatFecha(raw.fechaNacimiento);
-  const lugarNacimiento = formatData(raw.lugarNacimiento);
-  const padre = formatData(raw.nombrePadre);
-  const madre = formatData(raw.nombreMadre);
-  const tipoUnion = formatData(raw.tipoUnionPadres);
-  const abuelosPaternos = formatData(raw.abuelosPaternos);
-  const abuelosMaternos = formatData(raw.abuelosMaternos);
-  const padrinos = formatData(raw.padrinos);
+  const fechaNacimiento = formatFecha(raw.fechaNacimiento || raw.fecnac || data.fecha_nacimiento);
+  const lugarNacimiento = formatData(raw.lugarNacimiento || raw.lugarn || data.lugar_nacimiento);
+  const padre = formatData(raw.nombrePadre || raw.padre || data.nombre_padre);
+  const madre = formatData(raw.nombreMadre || raw.madre || data.nombre_madre);
+  const tipoUnion = formatData(raw.tipoUnionPadres || raw.tipohijo || data.tipo_union_padres);
+  const abuelosPaternos = formatData(raw.abuelosPaternos || raw.abuepat || data.abuelos_paternos);
+  const abuelosMaternos = formatData(raw.abuelosMaternos || raw.abuemat || data.abuelos_maternos);
+  const padrinos = formatData(raw.padrinos || data.padrinos);
   
   // 🧠 Limpieza de Títulos Redundantes
-  const cleanTitle = (nameStr) => nameStr.replace(/^(PBRO\.?|PADRE|FRAY|MONS\.?)\s+/i, '').trim();
+  const cleanTitle = (nameStr) => nameStr.replace(/^(PBRO\.?|PADRE|FRAY|MONS\.?|SACERDOTE)\s+/i, '').trim();
 
-  // Párroco Actual (El que firma el papel hoy en la parte inferior)
-  const getPárrocoActual = () => {
-    const pId = raw.parishId || raw.parish_id || header.entity_id || header.id;
-    if (pId && getParrocos) {
-      const listaSacerdotes = getParrocos(pId) || [];
-      const sacerdoteActual = listaSacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
-      if (sacerdoteActual) return `${sacerdoteActual.nombre} ${sacerdoteActual.apellido || ''}`.trim();
+  const pId = raw.parishId || raw.parish_id || header.entity_id || header.id || data.parish_id;
+  const listaSacerdotes = (pId && getParrocos) ? (getParrocos(pId) || []) : [];
+
+  // 🚀 MÁQUINA DEL TIEMPO PARA EL "DOY FE" DE LA PARTIDA HISTÓRICA
+  const getHistoricalPriest = () => {
+    // 1. Priorizamos si el viejo DBF guardó el "Da Fe" no-numérico
+    let daFeExplicit = raw.daFe || raw.dafe || data.da_fe;
+    if (daFeExplicit && isNaN(Number(String(daFeExplicit).trim()))) {
+        return String(daFeExplicit).trim();
     }
+
+    // 2. Si no lo tiene o es un número (ej. "0006"), calculamos por fecha
+    if (fechaBautismoStr && listaSacerdotes.length > 0) {
+        const dStr = fechaBautismoStr.includes('T') ? fechaBautismoStr : `${fechaBautismoStr}T12:00:00`;
+        const fechaSac = new Date(dStr);
+        
+        if (!isNaN(fechaSac.getTime())) {
+            const sacerdoteEpoca = listaSacerdotes.find(s => {
+                if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                const inicio = new Date(iStr);
+                const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                return fechaSac >= inicio && fechaSac <= fin;
+            });
+
+            if (sacerdoteEpoca) {
+                return `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim();
+            }
+        }
+    }
+
+    // 3. Fallback: El Párroco Actual
+    const sacerdoteActual = listaSacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
+    if (sacerdoteActual) return `${sacerdoteActual.nombre} ${sacerdoteActual.apellido || ''}`.trim();
+
+    return header.parroco || header.canciller || 'EL PÁRROCO';
+  };
+
+  // Párroco Actual Estricto (Para la firma de expedición al final de la página)
+  const getPárrocoActual = () => {
+    const sacerdoteActual = listaSacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
+    if (sacerdoteActual) return `${sacerdoteActual.nombre} ${sacerdoteActual.apellido || ''}`.trim();
     return header.parroco || header.canciller || 'PÁRROCO ENCARGADO';
   };
   
   let parrocoFirma = formatData(getPárrocoActual());
   parrocoFirma = cleanTitle(parrocoFirma);
 
-  let ministro = formatData(raw.ministro);
-  if (ministro) ministro = `PBRO. ${cleanTitle(ministro)}`;
+  let ministro = formatData(raw.ministro || data.ministro);
+  if (ministro && !ministro.startsWith('PBRO')) ministro = `PBRO. ${cleanTitle(ministro)}`;
 
-  // 🚀 INTELIGENCIA "DOY FE"
-  let daFeRaw = formatData(raw.daFe);
+  // 🚀 APLICAMOS LA LÓGICA TEMPORAL AL CAMPO "DOY FE" DEL ACTA
+  let daFeRaw = formatData(getHistoricalPriest());
   let daFe = '';
   if (!daFeRaw || daFeRaw.includes("ENCARGADO") || daFeRaw === "---") {
       daFe = `PBRO. ${parrocoFirma}`;
   } else {
-      daFe = `PBRO. ${cleanTitle(daFeRaw)}`;
+      daFe = daFeRaw.startsWith('PBRO') ? daFeRaw : `PBRO. ${cleanTitle(daFeRaw)}`;
   }
 
   // 🧠 Limpieza Inteligente de Notas Marginales Antiguas
-  const noteTextRaw = raw.notaMarginal || '';
+  const noteTextRaw = raw.notaMarginal || raw.nota_marginal || data.nota_marginal || '';
   let finalNote = formatData(noteTextRaw);
   
   finalNote = finalNote.replace(/LA INFORMACIÓN SUMINISTRADA ES FIEL.*/i, '').trim();
@@ -96,8 +131,8 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   finalNote = finalNote.replace(/SE EXPIDE EN.*/i, '').trim();
   finalNote = finalNote.replace(/ES COPIA FIEL.*/i, '').trim();
   
-  if (!finalNote || finalNote === '---') {
-      finalNote = "SIN NOTAS MARGINALES DE MATRIMONIO U OTRAS HASTA LA FECHA.";
+  if (!finalNote || finalNote === '---' || finalNote === 'NULL') {
+      finalNote = "SIN NOTA MARGINAL DE MATRIMONIO HASTA LA FECHA.";
   }
 
   // FECHA DE EXPEDICIÓN CONVERTIDA A LETRAS PERFECTAS
@@ -211,7 +246,7 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
         {/* 5. ZONA DE FIRMAS (Centrada y empujada siempre al final) */}
         <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', fontFamily: 'Arial, sans-serif', paddingBottom: '10px', paddingTop: '80px' }}>
             
-            {/* Firma del Párroco */}
+            {/* Firma del Párroco ACTUAL expidiendo el documento */}
             <div style={{ textAlign: 'center', width: '320px' }}>
                 <div style={{ borderTop: '1.5px solid black', width: '100%', marginBottom: '8px' }}></div>
                 <div style={{ fontWeight: 'bold', fontSize: '14px', textTransform: 'uppercase' }}>PBRO. {parrocoFirma}</div>
