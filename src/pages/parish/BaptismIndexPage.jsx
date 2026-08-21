@@ -103,9 +103,14 @@ const BaptismIndexPage = () => {
         setFilteredRecords(filtered);
     }, [searchTerm, records]);
 
+    // 🚀 CORRECCIÓN AQUÍ: Se agrega el callback onAfterPrint
     const handlePrintAction = useReactToPrint({
         content: () => printRef.current,
-        documentTitle: `Indice_Bautismos_Libro_${currentPrintFilter || 'Todos'}`
+        documentTitle: `Indice_Bautismos_Libro_${currentPrintFilter || 'Todos'}`,
+        onAfterPrint: () => {
+            // Cerramos el modal solo después de que se termine/cancele la impresión
+            setIsBookModalOpen(false);
+        }
     });
 
     const handlePrint = (bookFilter = null) => {
@@ -116,9 +121,10 @@ const BaptismIndexPage = () => {
         }
         setPrintData(dataToPrint);
 
+        // Aumentamos levemente el timeout para asegurar que React termine de pasar los props
         setTimeout(() => {
             handlePrintAction();
-        }, 500);
+        }, 800);
     };
 
     // 🚀 DICCIONARIO APLICADO A LA TABLA
@@ -187,7 +193,8 @@ const BaptismIndexPage = () => {
                         <Button variant="outline" onClick={() => setIsBookModalOpen(false)}>Cancelar</Button>
                         <Button
                             onClick={() => {
-                                setIsBookModalOpen(false);
+                                // 🚀 CORRECCIÓN AQUÍ: NO CERRAMOS EL MODAL TODAVÍA. 
+                                // Se cerrará solo gracias al 'onAfterPrint' cuando se abra el menú de impresión.
                                 handlePrint(selectedBook);
                             }}
                             disabled={!selectedBook}
@@ -205,7 +212,7 @@ const BaptismIndexPage = () => {
                     <BaptismIndexPrintTemplate
                         data={printData}
                         parishInfo={parishInfo}
-                        filterBook={currentPrintFilter}
+                        bookNumber={currentPrintFilter} // <-- Ajusté el nombre de prop para que coincida con el componente hijo (antes era filterBook)
                     />
                 </div>
             </div>
