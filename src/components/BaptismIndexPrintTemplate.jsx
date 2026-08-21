@@ -66,6 +66,13 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
         return nameA.localeCompare(nameB);
     });
 
+    // 🚀 SANITIZADOR DE TEXTO ESTRICTO (Elimina saltos de línea ocultos que rompen celdas)
+    const sanitizeText = (val) => {
+        if (!val) return '---';
+        const str = String(val).replace(/[\r\n]+/g, ' ').trim();
+        return str === '' || str === '---' || str === '-' ? '---' : str.toUpperCase();
+    };
+
     const formatNumber = (val) => {
         if (val === undefined || val === null || val === '') return '---';
         const str = String(val).trim();
@@ -82,10 +89,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
         } else {
             val = record.nombre_madre || raw.nombre_madre || raw.nombreMadre || raw.madre || raw.motherName || raw.mother_name;
         }
-        if (!val || String(val).trim() === '' || String(val).trim() === '---' || String(val).trim() === '-') {
-            return '---';
-        }
-        return String(val).trim().toUpperCase();
+        return sanitizeText(val);
     };
 
     return (
@@ -103,13 +107,14 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     color: #000;
                     width: 100%;
                     margin: 0;
-                    padding: 8mm;
+                    padding: 5mm;
                     box-sizing: border-box;
                 }
 
+                /* MÁRGENES FÍSICOS AJUSTADOS PARA EVITAR CORTES EN LA BASE DE LA HOJA */
                 @page {
                     size: letter portrait;
-                    margin: 10mm; 
+                    margin: 8mm 10mm 10mm 10mm; 
                 }
 
                 @media print {
@@ -128,50 +133,50 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                 /* MEMBRETE INSTITUCIONAL FIJO AL INICIO */
                 .print-header {
                     text-align: center;
-                    margin-bottom: 15px;
+                    margin-bottom: 12px;
                     border-bottom: 3px double #000;
-                    padding-bottom: 10px;
+                    padding-bottom: 8px;
                 }
                 .print-diocese {
-                    font-size: 12pt;
+                    font-size: 11.5pt;
                     font-weight: bold;
                     letter-spacing: 1px;
                     text-transform: uppercase;
                 }
                 .print-parish {
-                    font-size: 15pt;
+                    font-size: 14pt;
                     font-weight: 900;
-                    margin: 3px 0;
+                    margin: 2px 0;
                     text-transform: uppercase;
                 }
                 .print-location {
-                    font-size: 9pt;
+                    font-size: 8.5pt;
                     font-family: 'Arial', sans-serif;
                     color: #222;
                 }
                 .print-title {
-                    font-size: 11pt;
+                    font-size: 10.5pt;
                     font-weight: bold;
-                    margin-top: 10px;
+                    margin-top: 8px;
                     letter-spacing: 1.5px;
                     text-transform: uppercase;
                 }
 
-                /* TABLA PRINCIPAL CON ANCHO FIJO (Impide deformaciones y rupturas) */
+                /* TABLA PRINCIPAL CON BORDES UNIFORMES Y ESTRICTOS */
                 .print-table {
                     width: 100%;
                     table-layout: fixed; 
                     border-collapse: collapse;
                     border-spacing: 0;
                     font-family: 'Arial', sans-serif;
-                    font-size: 8.5pt;
-                    border: 2px solid #000;
+                    font-size: 8pt;
+                    border: 1.5px solid #000;
                 }
                 
                 .header-row th {
-                    border: 1px solid #000;
-                    border-bottom: 2px solid #000;
-                    padding: 6px 4px;
+                    border: 1px solid #000 !important;
+                    border-bottom: 2px solid #000 !important;
+                    padding: 5px 4px;
                     background-color: #eaeaea !important;
                     font-weight: 900;
                     text-align: center;
@@ -181,26 +186,26 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                 }
                 
                 .print-table td {
-                    border: 1px solid #000;
-                    padding: 5px 6px;
+                    border: 1px solid #000 !important;
+                    padding: 4px 5px;
                     vertical-align: middle;
-                    line-height: 1.2;
+                    line-height: 1.15;
                     overflow: hidden;
                     word-wrap: break-word;
                 }
                 
                 .print-table tbody tr:nth-child(even) td {
-                    background-color: #fcfcfc !important;
+                    background-color: #fafafa !important;
                 }
 
                 /* DISTRIBUCIÓN ESTRICTA DE COLUMNAS (Suma exacta = 100%) */
-                .col-number { width: 6%; font-weight: bold; text-align: center; font-size: 8pt; }
-                .col-titular { width: 34%; }
-                .col-padres { width: 42%; font-size: 7.5pt; }
-                .col-ref { width: 6%; font-family: 'Courier New', Courier, monospace; font-size: 8.5pt; text-align: center; font-weight: bold; white-space: nowrap; }
+                .col-number { width: 5%; font-weight: bold; text-align: center; font-size: 7.5pt; }
+                .col-titular { width: 33%; }
+                .col-padres { width: 43%; font-size: 7.2pt; }
+                .col-ref { width: 6.33%; font-family: 'Courier New', Courier, monospace; font-size: 8.5pt; text-align: center; font-weight: bold; white-space: nowrap; }
 
-                .text-bold { font-weight: 900; font-size: 9pt; color: #000; }
-                .text-muted { font-size: 8pt; color: #333; margin-top: 1px; }
+                .text-bold { font-weight: 900; font-size: 8.5pt; color: #000; }
+                .text-muted { font-size: 7.5pt; color: #333; margin-top: 1px; }
 
                 .row-anulada td { color: #555; }
                 .badge-anulada {
@@ -211,7 +216,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     padding: 1px 3px;
                     border-radius: 2px;
                     font-weight: bold;
-                    margin-left: 5px;
+                    margin-left: 4px;
                     vertical-align: text-bottom;
                     letter-spacing: 0.5px;
                 }
@@ -219,9 +224,9 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                 .footer-cell {
                     border: none !important;
                     background: white !important;
-                    padding-top: 10px !important;
+                    padding-top: 8px !important;
                     text-align: right !important;
-                    font-size: 7pt !important;
+                    font-size: 6.5pt !important;
                     color: #555 !important;
                     font-style: italic;
                     font-family: 'Times New Roman', Times, serif;
@@ -253,11 +258,11 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     {sortedData.map((record, index) => {
                         const safeFormat = (val) => typeof formatPersonData === 'function' ? formatPersonData(val) : val;
 
-                        const apellidos = safeFormat(record.apellidos || record.raw_data?.apellidos || record.lastName || '');
-                        const nombres = safeFormat(record.nombres || record.raw_data?.nombres || record.firstName || '');
+                        const apellidos = sanitizeText(safeFormat(record.apellidos || record.raw_data?.apellidos || record.lastName || ''));
+                        const nombres = sanitizeText(safeFormat(record.nombres || record.raw_data?.nombres || record.firstName || ''));
                         
-                        const padre = safeFormat(getParentName(record, 'father'));
-                        const madre = safeFormat(getParentName(record, 'mother'));
+                        const padre = sanitizeText(safeFormat(getParentName(record, 'father')));
+                        const madre = sanitizeText(safeFormat(getParentName(record, 'mother')));
                         
                         const book = formatNumber(record.book_number || record.Libro || record.raw_data?.Libro || record.libro);
                         const page = formatNumber(record.folio || record.raw_data?.folio || record.page_number);
