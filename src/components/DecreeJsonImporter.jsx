@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
+// 🚀 CORRECCIÓN: Aquí agregué Loader2 y RefreshCcw que hacían falta
 import { 
     Upload, FileJson, AlertCircle, CheckCircle, 
-    Database, ServerCrash, HelpCircle, X
+    Database, ServerCrash, HelpCircle, X, Loader2, RefreshCcw
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/context/AuthContext'; 
@@ -27,10 +28,8 @@ const DecreeJsonImporter = () => {
     const fileInputRef = useRef(null);
     const pad = (num) => String(num || '').trim().padStart(4, '0');
 
-    // 🚀 LECTURA MULTI-FORMATO EXACTA PARA EL DBF HEREDADO
     const extractField = (item, possibleKeys) => {
         for (let key of possibleKeys) {
-            // Buscamos tanto en minúsculas como en mayúsculas por si el JSON exportó literal
             if (item[key] !== undefined && item[key] !== null && String(item[key]).trim() !== '') return String(item[key]).trim();
             if (item[key.toUpperCase()] !== undefined && item[key.toUpperCase()] !== null && String(item[key.toUpperCase()]).trim() !== '') return String(item[key.toUpperCase()]).trim();
         }
@@ -50,7 +49,6 @@ const DecreeJsonImporter = () => {
                 if (data.length === 0) throw new Error("El archivo JSON está vacío.");
 
                 const processed = data.map((item, index) => {
-                    // Mapeo exacto basado en la estructura de tu tabla .dbf
                     const decreto = extractField(item, ['decreto']);
                     const fecha = extractField(item, ['fecha']);
                     const codConcepto = extractField(item, ['codiconcep', 'codigo']);
@@ -66,7 +64,6 @@ const DecreeJsonImporter = () => {
                     const observaciones = extractField(item, ['observacio', 'observaciones']);
                     const dafeLegacy = extractField(item, ['dafe', 'ministro']);
 
-                    // Si el código es 005 o 001, lo tratamos como Reposición
                     const isReposicion = ['005', '001'].includes(codConcepto); 
                     
                     const hasNewData = newLib && newFol && newNum;
@@ -106,7 +103,6 @@ const DecreeJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
-    // 🚀 EL MOTOR DE INYECCIÓN MASIVA A LA NUBE
     const handleImport = async () => {
         const validRecords = records.filter(r => r.isValid);
         if (!validRecords.length) return;
@@ -119,7 +115,6 @@ const DecreeJsonImporter = () => {
             const parishInfo = getMisDatosList(parishId)[0] || {};
             const parishLabel = `${parishInfo.nombre || 'PARROQUIA'} - ${parishInfo.ciudad || ''}`.toUpperCase();
 
-            // Descarga de Bautismos para cruce en Memoria RAM
             const { data: allBaptisms, error: bapError } = await supabase
                 .from('baptisms')
                 .select('id, book_number, folio, number, raw_data, nombres, apellidos, da_fe')
@@ -127,7 +122,6 @@ const DecreeJsonImporter = () => {
             
             if (bapError) throw bapError;
 
-            // Descarga de Conceptos Oficiales
             const { data: catalogoConceptos } = await supabase
                 .from('conceptos_anulacion')
                 .select('id, codigo, concepto')
@@ -156,13 +150,9 @@ const DecreeJsonImporter = () => {
                     }
 
                     const targetName = `${newRec.nombres || ''} ${newRec.apellidos || ''}`.trim().toUpperCase();
-                    // Usamos el Ministro que firmó en el sistema viejo si existe, sino el actual
                     const ministroDaFe = (item.dafe_clean || newRec.da_fe || newRec.raw_data?.daFe || 'EL PÁRROCO').toUpperCase();
 
                     if (item.isReposicion) {
-                        // ==========================================
-                        // 🟢 LÓGICA DE REPOSICIÓN
-                        // ==========================================
                         const noteRepo = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${item.decreto_clean.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
                         
                         const newRaw = { 
@@ -183,9 +173,6 @@ const DecreeJsonImporter = () => {
                         await supabase.from('decretos').insert([{ parish_id: parishId, tipo: 'reposicion', payload: payloadDecree }]);
 
                     } else {
-                        // ==========================================
-                        // 🔵 LÓGICA DE CORRECCIÓN (REQUIERE ORIGINAL)
-                        // ==========================================
                         const origRec = allBaptisms.find(b => b.book_number === item.sOldL && b.folio === item.sOldF && b.number === item.sOldN);
                         
                         if (!origRec) {
@@ -281,7 +268,6 @@ const DecreeJsonImporter = () => {
                 </Button>
             </div>
 
-            {/* Modal de Ayuda JSON con las columnas reales de su DBF */}
             {showHelp && (
                 <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm rounded-[2.5rem] p-10 flex flex-col animate-in fade-in zoom-in-95 duration-200">
                     <div className="flex justify-between items-center mb-6">
