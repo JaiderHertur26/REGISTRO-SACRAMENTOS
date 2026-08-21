@@ -4,11 +4,11 @@ import { useAppData } from '@/context/AppDataContext';
 import { formatPersonData } from '@/utils/formatPersonData';
 
 const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber }, ref) => {
-    const { user } = useAuth();
+    const { user } = useAuth() || {};
     const { getMisDatosList } = useAppData() || {};
     const dataSource = data || [];
 
-    // --- 1. EXTRACTOR DE IDENTIDAD (Consistencia con el resto de la App) ---
+    // --- 1. EXTRACTOR DE IDENTIDAD SEGURO ---
     const getSafeParishId = () => {
         if (user?.parishId) return user.parishId;
         try { return JSON.parse(localStorage.getItem('user') || '{}').parishId; } catch (e) { return null; }
@@ -18,7 +18,6 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
     // --- 2. BUSCADOR DEFINITIVO DE MEMBRETE ---
     const getOfficialData = (field, fallback) => {
         try {
-            // Si pasaron info por props, tiene prioridad
             if (parroquiaInfo && parroquiaInfo[field]) return parroquiaInfo[field];
 
             if (!safeParishId) return fallback;
@@ -48,12 +47,18 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
         return fallback;
     };
 
-    // --- 3. PROCESAMIENTO DE CABECERA ---
+    // --- 3. PROCESAMIENTO DE CABECERA OFICIAL ---
     const diocesis = getOfficialData('diocesis', user?.dioceseName || 'DIÓCESIS').toUpperCase();
     const nombreParroquia = getOfficialData('nombre', user?.parishName || 'PARROQUIA').toUpperCase();
+    
     const ciudad = getOfficialData('ciudad', '').toUpperCase();
     const departamento = getOfficialData('region', '').toUpperCase();
-    const ubicacionHeader = [ciudad, departamento].filter(Boolean).join(', ') + ' - COLOMBIA';
+    
+    // Evitar duplicar "Colombia" si la región ya lo trae
+    let ubicacionHeader = [ciudad, departamento].filter(Boolean).join(', ');
+    if (ubicacionHeader && !ubicacionHeader.includes('COLOMBIA')) {
+        ubicacionHeader += ' - COLOMBIA';
+    }
 
     // --- 4. ORDENAMIENTO ALFABÉTICO ESTRICTO ---
     const sortedData = [...dataSource].sort((a, b) => {
@@ -64,121 +69,192 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
         return 0;
     });
 
+    // Formateador robusto para números (Evita que queden en blanco)
     const formatNumber = (val) => {
-        if (!val || val === '---' || val === '0' || val === 0) return '-';
-        return String(val).trim().padStart(4, '0');
-    };
-
-    // --- ESTILOS ---
-    const styles = {
-        page: { 
-            width: '8.5in', 
-            minHeight: '11in',
-            padding: '0.6in 0.8in', 
-            fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif', 
-            color: '#000', 
-            backgroundColor: 'white',
-            boxSizing: 'border-box',
-            display: 'flex',
-            flexDirection: 'column'
-        },
-        header: { textAlign: 'center', fontWeight: 'bold', fontSize: '13px', marginBottom: '25px', lineHeight: '1.4' },
-        title: { 
-            textAlign: 'center', 
-            fontWeight: '900', 
-            fontSize: '18px', 
-            marginBottom: '20px', 
-            letterSpacing: '2px',
-            borderBottom: '2px solid #000',
-            paddingBottom: '10px'
-        },
-        table: { width: '100%', borderCollapse: 'collapse', marginTop: '5px' },
-        th: { 
-            border: '1px solid #000', 
-            padding: '8px 5px', 
-            backgroundColor: '#f8f9fa', 
-            fontWeight: 'bold', 
-            textAlign: 'center', 
-            fontSize: '10px',
-            textTransform: 'uppercase'
-        },
-        td: { 
-            border: '1px solid #000', 
-            padding: '6px 8px', 
-            fontSize: '10.5px', 
-            textTransform: 'uppercase',
-            lineHeight: '1.2'
-        },
-        tdCenter: { 
-            border: '1px solid #000', 
-            padding: '6px 4px', 
-            fontSize: '10.5px', 
-            textAlign: 'center', 
-            fontWeight: '600' 
-        }
+        if (val === undefined || val === null || val === '') return '---';
+        const str = String(val).trim();
+        if (str === '0' || str === '---' || str === '-') return '---';
+        if (isNaN(str)) return str; // Por si hay folios con letras (Ej: "12B")
+        return str.padStart(4, '0');
     };
 
     return (
-        <div ref={ref} style={styles.page}>
-            <style media="print">{`
-                @page { size: letter; margin: 0; }
-                body { margin: 0; background: white; -webkit-print-color-adjust: exact; }
-                table { page-break-inside: auto; width: 100% !important; }
-                tr { page-break-inside: avoid; page-break-after: auto; }
-                thead { display: table-header-group; }
+        <div ref={ref} className="print-container">
+            {/* 🚀 INYECCIÓN DE ESTILOS PROFESIONALES EXCLUSIVOS PARA IMPRESIÓN */}
+            <style type="text/css" media="print, screen">{`
+                .print-container {
+                    padding: 0.8in 0.6in;
+                    font-family: 'Arial', sans-serif;
+                    background-color: white;
+                    color: #000;
+                }
+                
+                /* CABECERA ECLESIÁSTICA */
+                .print-header {
+                    text-align: center;
+                    margin-bottom: 30px;
+                }
+                .print-diocese {
+                    font-family: 'Times New Roman', Times, serif;
+                    font-size: 14pt;
+                    font-weight: bold;
+                    letter-spacing: 1px;
+                }
+                .print-parish {
+                    font-family: 'Times New Roman', Times, serif;
+                    font-size: 18pt;
+                    font-weight: 900;
+                    margin: 5px 0;
+                }
+                .print-location {
+                    font-size: 10pt;
+                    color: #444;
+                }
+                
+                /* TÍTULO DEL DOCUMENTO */
+                .print-title {
+                    text-align: center;
+                    font-family: 'Times New Roman', Times, serif;
+                    font-size: 14pt;
+                    font-weight: bold;
+                    border-bottom: 2px solid #000;
+                    margin-bottom: 20px;
+                    padding-bottom: 10px;
+                    letter-spacing: 2px;
+                }
+
+                /* TABLA PRINCIPAL */
+                .print-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 9.5pt;
+                }
+                .print-table th {
+                    border: 1.5px solid #000;
+                    padding: 10px 6px;
+                    background-color: #f4f4f4;
+                    font-weight: bold;
+                    text-align: center;
+                    font-size: 9pt;
+                    -webkit-print-color-adjust: exact;
+                }
+                .print-table td {
+                    border: 1px solid #666;
+                    padding: 8px 6px;
+                    vertical-align: middle;
+                    line-height: 1.3;
+                }
+                .print-table tr {
+                    page-break-inside: avoid;
+                }
+                .print-table tr:nth-child(even) {
+                    background-color: #fafafa;
+                    -webkit-print-color-adjust: exact;
+                }
+                
+                /* CELDAS ESPECÍFICAS */
+                .col-center { text-align: center; }
+                .col-number { width: 4%; font-weight: bold; text-align: center; }
+                .col-titular { width: 33%; }
+                .col-padres { width: 39%; font-size: 8.5pt; color: #333; }
+                .col-ref { width: 8%; font-family: monospace; font-size: 10pt; text-align: center; font-weight: bold; }
+                
+                .text-bold { font-weight: bold; font-size: 10.5pt; }
+                .text-muted { font-size: 8.5pt; color: #555; margin-top: 2px; }
+                
+                /* ESTADO ANULADO */
+                .row-anulada td {
+                    background-color: #ffeaea !important;
+                    color: #888;
+                    -webkit-print-color-adjust: exact;
+                }
+                .badge-anulada {
+                    display: inline-block;
+                    background-color: #e74c3c;
+                    color: white;
+                    font-size: 7pt;
+                    padding: 2px 5px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    margin-left: 6px;
+                    vertical-align: middle;
+                }
+
+                /* CONFIGURACIÓN DE PÁGINA */
+                @page {
+                    size: letter;
+                    margin: 0.4in;
+                }
+                @media print {
+                    .print-table thead { display: table-header-group; }
+                    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                }
             `}</style>
             
-            <div style={styles.header}>
-                <div>{diocesis}</div>
-                <div>{nombreParroquia}</div>
-                <div style={{ fontSize: '11px', fontWeight: 'normal' }}>{ubicacionHeader}</div>
+            <div className="print-header">
+                <div className="print-diocese">{diocesis}</div>
+                <div className="print-parish">{nombreParroquia}</div>
+                <div className="print-location">{ubicacionHeader}</div>
             </div>
             
-            <div style={styles.title}>
+            <div className="print-title">
                 ÍNDICE GENERAL DE BAUTISMOS {bookNumber ? `• LIBRO ${bookNumber}` : ''}
             </div>
 
-            <table style={styles.table}>
+            <table className="print-table">
                 <thead>
                     <tr>
-                        <th style={{ ...styles.th, width: '40px' }}>N°</th>
-                        <th style={styles.th}>APELLIDOS Y NOMBRES</th>
-                        <th style={styles.th}>PADRES / FILIACIÓN</th>
-                        <th style={{ ...styles.th, width: '55px' }}>LIBRO</th>
-                        <th style={{ ...styles.th, width: '55px' }}>FOLIO</th>
-                        <th style={{ ...styles.th, width: '55px' }}>ACTA</th>
+                        <th className="col-number">N°</th>
+                        <th className="col-titular">APELLIDOS Y NOMBRES</th>
+                        <th className="col-padres">PADRES / FILIACIÓN</th>
+                        <th className="col-ref">LIBRO</th>
+                        <th className="col-ref">FOLIO</th>
+                        <th className="col-ref">ACTA</th>
                     </tr>
                 </thead>
                 <tbody>
                     {sortedData.map((record, index) => {
-                        const apellidos = formatPersonData(record.apellidos || record.lastName || '');
-                        const nombres = formatPersonData(record.nombres || record.firstName || '');
-                        const padre = formatPersonData(record.nombrePadre || record.fatherName || record.padre || '---');
-                        const madre = formatPersonData(record.nombreMadre || record.motherName || record.madre || '---');
+                        const safeFormat = (val) => typeof formatPersonData === 'function' ? formatPersonData(val) : val;
+
+                        const apellidos = safeFormat(record.apellidos || record.lastName || '');
+                        const nombres = safeFormat(record.nombres || record.firstName || '');
+                        const padre = safeFormat(record.nombrePadre || record.fatherName || record.padre || '---');
+                        const madre = safeFormat(record.nombreMadre || record.motherName || record.madre || '---');
+                        
+                        // 🚀 CORRECCIÓN CLAVE: Agregamos record.Libro con L mayúscula
+                        const book = formatNumber(record.Libro || record.book_number || record.libro);
+                        const page = formatNumber(record.folio || record.page_number);
+                        const entry = formatNumber(record.numero || record.numeroActa || record.entry_number);
                         
                         const isAnulada = record.status === 'anulada' || record.isAnnulled || record.estado === 'anulada';
 
                         return (
-                            <tr key={record.id || index} style={{ backgroundColor: isAnulada ? '#f2f2f2' : 'transparent' }}>
-                                <td style={styles.tdCenter}>{index + 1}</td>
-                                <td style={{ ...styles.td, color: isAnulada ? '#888' : '#000' }}>
-                                    <div style={{ fontWeight: 'bold' }}>{apellidos}</div>
-                                    <div style={{ fontSize: '9.5px' }}>{nombres}</div>
+                            <tr key={record.id || index} className={isAnulada ? 'row-anulada' : ''}>
+                                <td className="col-number">{index + 1}</td>
+                                
+                                <td>
+                                    <div className="text-bold">
+                                        {apellidos}
+                                        {isAnulada && <span className="badge-anulada">ANULADA</span>}
+                                    </div>
+                                    <div className="text-muted">{nombres}</div>
                                 </td>
-                                <td style={{ ...styles.td, color: isAnulada ? '#888' : '#333', fontSize: '9px' }}>
-                                    <div>P: {padre}</div>
-                                    <div>M: {madre}</div>
+                                
+                                <td className="col-padres">
+                                    <div style={{ marginBottom: '3px' }}><strong>P:</strong> {padre}</div>
+                                    <div><strong>M:</strong> {madre}</div>
                                 </td>
-                                <td style={styles.tdCenter}>{formatNumber(record.book_number || record.libro || record.numeroLibro)}</td>
-                                <td style={styles.tdCenter}>{formatNumber(record.page_number || record.folio)}</td>
-                                <td style={styles.tdCenter}>{formatNumber(record.entry_number || record.numero || record.numeroActa)}</td>
+                                
+                                <td className="col-ref">{book}</td>
+                                <td className="col-ref">{page}</td>
+                                <td className="col-ref">{entry}</td>
                             </tr>
                         );
                     })}
                     
                     {sortedData.length === 0 && (
                         <tr>
-                            <td colSpan="6" style={{ ...styles.tdCenter, padding: '40px', color: '#999', fontStyle: 'italic' }}>
+                            <td colSpan="6" style={{ textAlign: 'center', padding: '50px', color: '#888', fontStyle: 'italic', fontSize: '11pt' }}>
                                 NO SE ENCONTRARON REGISTROS ASENTADOS PARA GENERAR EL ÍNDICE
                             </td>
                         </tr>
@@ -186,8 +262,8 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                 </tbody>
             </table>
 
-            <div style={{ marginTop: 'auto', paddingTop: '20px', textAlign: 'right', fontSize: '9px', color: '#999', fontStyle: 'italic' }}>
-                Documento generado automáticamente por el Sistema SacramentumRegistry • {new Date().toLocaleDateString()}
+            <div style={{ marginTop: '40px', paddingTop: '15px', borderTop: '1px solid #ccc', textAlign: 'right', fontSize: '8pt', color: '#666', fontStyle: 'italic' }}>
+                Índice generado por el Sistema SacramentumRegistry • {new Date().toLocaleDateString('es-CO')}
             </div>
         </div>
     );
