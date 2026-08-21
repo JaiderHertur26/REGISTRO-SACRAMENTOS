@@ -12,10 +12,10 @@ import { generateUUID } from '@/utils/supabaseHelpers';
 import Table from '@/components/ui/Table';
 import { cn } from '@/lib/utils';
 
-// 🚀 FUNCIÓN LIMPIADORA DE TÍTULOS (Normaliza la Base de Datos)
+// 🚀 FUNCIÓN LIMPIADORA DE TÍTULOS
 const cleanTitle = (nameStr) => {
     if (!nameStr) return '';
-    return String(nameStr).replace(/^(PBRO\.?|PADRE|FRAY|MONS\.?)\s+/i, '').trim();
+    return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|SACERDOTE\s*)/i, '').trim();
 };
 
 const BaptismJsonImporter = () => {
@@ -30,43 +30,45 @@ const BaptismJsonImporter = () => {
     
     const [parrocoActual, setParrocoActual] = useState('');
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
-    const [diccionarioDaFe, setDiccionarioDaFe] = useState({});
 
     const parishId = user?.parish_id || user?.parishId;
 
-    // --- 1. CARGAR HISTORIAL DE PÁRROCOS Y CREAR DICCIONARIOS ---
+    // --- 1. CARGAR HISTORIAL DE PÁRROCOS ---
     useEffect(() => {
         if (parishId) {
             const parrocos = getParrocos(parishId) || [];
             setListaSacerdotes(parrocos);
             
-            // A. Buscar Párroco Actual (Limpiando el título)
             const actual = parrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
             if (actual) {
                 setParrocoActual(cleanTitle(`${actual.nombre} ${actual.apellido || ''}`).toUpperCase());
             } else {
                 setParrocoActual('PÁRROCO ENCARGADO');
             }
-
-            // B. Generar Diccionario de Códigos (Orden cronológico)
-            const sortedParrocos = [...parrocos].sort((a, b) => {
-                const dateA = new Date(a.fechaIngreso || a.fechaNombramiento || '1900-01-01');
-                const dateB = new Date(b.fechaIngreso || b.fechaNombramiento || '1900-01-01');
-                return dateA - dateB;
-            });
-
-            const map = {};
-            sortedParrocos.forEach((p, index) => {
-                const code = String(index + 1).padStart(4, '0');
-                // Guardamos el nombre puro sin el "PBRO." quemado
-                map[code] = cleanTitle(`${p.nombre} ${p.apellido || ''}`).toUpperCase();
-            });
-            
-            setDiccionarioDaFe(map);
         }
     }, [parishId, getParrocos]);
 
-    // --- 2. PROCESAMIENTO, TRADUCCIÓN Y LÓGICA DE BAPTISM CELEBRATED ---
+    // --- 2. MÁQUINA DEL TIEMPO: BUSCADOR HISTÓRICO EXACTO ---
+    const getHistoricalPriest = (dateString) => {
+        if (!dateString || listaSacerdotes.length === 0) return null;
+        
+        const dStr = dateString.includes('T') ? dateString : `${dateString}T12:00:00`;
+        const searchDate = new Date(dStr);
+        if (isNaN(searchDate.getTime())) return null;
+
+        const found = listaSacerdotes.find(s => {
+            if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+            const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+            const inicio = new Date(iStr);
+            const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+            return searchDate >= inicio && searchDate <= fin;
+        });
+
+        if (found) return cleanTitle(`${found.nombre} ${found.apellido || ''}`).toUpperCase();
+        return null;
+    };
+
+    // --- 3. PROCESAMIENTO Y LECTURA DEL ARCHIVO ---
     const handleFileChange = async (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
@@ -104,7 +106,6 @@ const BaptismJsonImporter = () => {
                 rawData.forEach((item, index) => {
                     const rowNum = index + 1;
                     
-                    // TRADUCTOR UNIVERSAL DE LLAVES
                     const mappedItem = {
                         Libro: item["LIBRO N°"] || item.Libro || item.libro || '',
                         folio: item["FOLIO N°"] || item.folio || '',
@@ -129,37 +130,34 @@ const BaptismJsonImporter = () => {
                         notaMarginal: item["NOTAS MARGINALES"] || item.notaMarginal || ''
                     };
 
-                    // 🚀 INTELIGENCIA: AUTO-COMPLETAR MINISTRO HISTÓRICO
-                    if (!mappedItem.ministro || mappedItem.ministro === '---') {
-                        if (mappedItem.fechaSacramento && listaSacerdotes.length > 0) {
-                            const fechaBautismo = new Date(mappedItem.fechaSacramento);
-                            const ministroHistorico = listaSacerdotes.find(s => {
-                                const inicio = new Date(s.fechaIngreso || s.fechaNombramiento || '1900-01-01');
-                                const fin = s.fechaSalida ? new Date(s.fechaSalida) : new Date();
-                                return fechaBautismo >= inicio && fechaBautismo <= fin;
-                            });
-                            if (ministroHistorico) {
-                                mappedItem.ministro = cleanTitle(`${ministroHistorico.nombre} ${ministroHistorico.apellido || ''}`).toUpperCase();
-                            }
-                        }
+                    // 🚀 1. OBTENEMOS AL SACERDOTE HISTÓRICO BASADO EN LA FECHA DE BAUTISMO
+                    const sacerdoteEpoca = getHistoricalPriest(mappedItem.fechaSacramento);
+
+                    // 🚀 2. REPARAMOS MINISTRO
+                    if (!mappedItem.ministro || mappedItem.ministro === '---' || !isNaN(Number(mappedItem.ministro))) {
+                        mappedItem.ministro = sacerdoteEpoca || '';
                     } else {
-                        // Si ya trae ministro, lo purificamos
                         mappedItem.ministro = cleanTitle(mappedItem.ministro).toUpperCase();
+                    }
+
+                    // 🚀 3. REPARAMOS DA FE (Copiamos Ministro, usamos Histórico o Actual)
+                    let rawDaFe = String(mappedItem.daFe).trim();
+
+                    // Si está vacío, es número (0006) o dice encargado, aplicamos inteligencia
+                    if (!rawDaFe || rawDaFe === '---' || rawDaFe.includes('ENCARGADO') || !isNaN(Number(rawDaFe))) {
+                        rawDaFe = mappedItem.ministro || sacerdoteEpoca || parrocoActual;
+                    } else {
+                        rawDaFe = cleanTitle(rawDaFe).toUpperCase();
+                    }
+
+                    // Aseguramos que siempre lleve PBRO formalmente si no es el Párroco
+                    mappedItem.daFe = rawDaFe !== 'EL PÁRROCO' ? `PBRO. ${rawDaFe}` : rawDaFe;
+                    if (mappedItem.ministro && mappedItem.ministro !== 'EL PÁRROCO') {
+                        mappedItem.ministro = `PBRO. ${mappedItem.ministro}`;
                     }
 
                     // Purificación Estándar
                     const cleanItem = purificarRegistroBautismo(mappedItem);
-
-                    // 🚀 INTELIGENCIA "DA FE" CON DICCIONARIO
-                    const rawDaFe = String(mappedItem.daFe).trim();
-                    let finalDaFe = parrocoActual; 
-
-                    if (/^\d+$/.test(rawDaFe)) {
-                        if (diccionarioDaFe[rawDaFe]) finalDaFe = diccionarioDaFe[rawDaFe];
-                    } else if (rawDaFe && rawDaFe !== '---' && !rawDaFe.includes('ENCARGADO')) {
-                        finalDaFe = cleanTitle(rawDaFe).toUpperCase();
-                    }
-                    cleanItem.daFe = finalDaFe;
 
                     const key = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
                     const nombreBautizado = `${cleanItem.nombres} ${cleanItem.apellidos}`.trim();
@@ -190,7 +188,7 @@ const BaptismJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
-    // --- 3. INYECCIÓN MASIVA A LA NUBE (MAPEADO AL ESQUEMA EXACTO) ---
+    // --- 4. INYECCIÓN MASIVA A LA NUBE ---
     const handleImport = async () => {
         if (!validationResult || validationResult.dataToImport.length === 0) return;
         setIsProcessing(true);
@@ -198,7 +196,6 @@ const BaptismJsonImporter = () => {
         const cleanDate = (d) => (d && String(d).trim() !== '' && String(d).trim() !== '---') ? d : null;
 
         try {
-            // 🚀 ESTRUCTURA 100% FIEL A TU BASE DE DATOS
             const dbRecords = validationResult.dataToImport.map(item => ({
                 id: generateUUID(),
                 parish_id: parishId,
@@ -228,7 +225,7 @@ const BaptismJsonImporter = () => {
                 abuelos_maternos: item.abuelosMaternos || null,
                 padrinos: item.padrinos || null,
                 ministro: item.ministro || null,
-                da_fe: item.daFe || null,
+                da_fe: item.daFe || null, // 🚀 Viaja perfectamente estructurado
                 direccion: item.direccion || null,
                 nota_marginal: item.notaMarginal || null,
                 raw_data: item, 
