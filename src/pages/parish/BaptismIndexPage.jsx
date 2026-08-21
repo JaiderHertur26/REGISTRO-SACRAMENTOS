@@ -10,7 +10,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Modal } from '@/components/ui/Modal';
 import BaptismIndexPrintTemplate from '@/components/BaptismIndexPrintTemplate';
 import { Helmet } from 'react-helmet';
-import { useReactToPrint } from 'react-to-print'; // 🚀 CORREGIDO: Importación con llaves (Named Export)
+import { useReactToPrint } from 'react-to-print';
 
 const BaptismIndexPage = () => {
     const { user } = useAuth();
@@ -27,6 +27,7 @@ const BaptismIndexPage = () => {
     const [selectedBook, setSelectedBook] = useState('');
     const [parishInfo, setParishInfo] = useState({});
 
+    // REFERENCIA CENTRAL PARA LA IMPRESIÓN
     const printRef = useRef(null);
 
     useEffect(() => {
@@ -101,11 +102,12 @@ const BaptismIndexPage = () => {
             : records;
     }, [records, selectedBook]);
 
-    // 🚀 LÓGICA DE IMPRESIÓN DIRECTA
+    // 🚀 SOLUCIÓN REAL: Sintaxis compatible con react-to-print v3+ y v2
     const handlePrintAction = useReactToPrint({
-        content: () => printRef.current,
+        contentRef: printRef, // Obligatorio en la versión 3+
+        content: () => printRef.current, // Respaldo por si acaso
         documentTitle: `Indice_Bautismos_Libro_${selectedBook || 'Todos'}`,
-        onAfterPrint: () => setIsBookModalOpen(false) // Cierra el modal automáticamente después de imprimir
+        onAfterPrint: () => setIsBookModalOpen(false) // Cierra limpiamente al terminar
     });
 
     const columns = [
@@ -214,8 +216,8 @@ const BaptismIndexPage = () => {
                 </div>
             </Modal>
 
-            {/* 🚀 SOLUCIÓN A LA PANTALLA EN BLANCO: Carga fuera del alcance visual pero renderizada en el DOM */}
-            <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', opacity: 0, height: 0, width: 0, overflow: 'hidden' }}>
+            {/* CONTENEDOR DE IMPRESIÓN (Limpio y fuera de pantalla para que la librería pueda leerlo) */}
+            <div className="absolute left-[-10000px] top-[-10000px]">
                 <div ref={printRef}>
                     <BaptismIndexPrintTemplate
                         data={dataToPrint}
