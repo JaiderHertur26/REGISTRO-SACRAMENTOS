@@ -190,7 +190,7 @@ const BaptismRepositionNewPage = () => {
                 decreeDate: decreeData.fechaDecreto, conceptoAnulacionId: decreeData.conceptoAnulacionId,
                 causa: conceptoText, targetName: `${formData.lastName} ${formData.firstName}`.trim(),
                 ...formData,
-                ministro: finalMin, daFe: finalDaFe, dafe: finalDaFe, ministerFaith: finalDaFe, // Multillave purificada
+                ministro: finalMin, daFe: finalDaFe, dafe: finalDaFe, ministerFaith: finalDaFe, // 🚀 MULTILLAVE AL PDF
                 datosNuevaPartida: { ...formData, book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, book_number: supletorioLibro, page_number: supletorioFolio, entry_number: supletorioNumero, daFe: finalDaFe },
                 newPartidaSummary: { book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, nombres: formData.firstName, apellidos: formData.lastName, daFe: finalDaFe }
             };
