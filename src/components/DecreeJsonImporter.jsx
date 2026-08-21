@@ -68,6 +68,7 @@ const DecreeJsonImporter = () => {
                 setIsProcessing(true);
                 const parishId = user?.parishId || user?.parish_id;
 
+                // 1. CARGAMOS TODOS LOS BAUTISMOS PARA CRUCE DE LOCALIZACIÓN
                 const { data: allBaptisms, error: bapError } = await supabase
                     .from('baptisms')
                     .select('id, book_number, folio, number, raw_data, nombres, apellidos, da_fe')
@@ -75,8 +76,25 @@ const DecreeJsonImporter = () => {
                 
                 if (bapError) throw bapError;
 
+                // 🚀 2. CARGAMOS TODOS LOS DECRETOS PARA EVITAR DUPLICADOS
+                const { data: existingDecreesData, error: decError } = await supabase
+                    .from('decretos')
+                    .select('payload')
+                    .eq('parish_id', parishId);
+                
+                if (decError) throw decError;
+
+                // Mapeamos los números de decretos existentes en la Nube
+                const existingDecreeNumbers = new Set(
+                    existingDecreesData.map(d => {
+                        const p = typeof d.payload === 'string' ? JSON.parse(d.payload) : (d.payload || {});
+                        return String(p.decreeNumber || p.numeroDecreto || '').trim().toUpperCase();
+                    }).filter(n => n !== '')
+                );
+
                 const findBaptism = (targetL, targetF, targetN) => {
                     const padL = pad(targetL); const padF = pad(targetF); const padN = pad(targetN);
+                    
                     return allBaptisms.find(b => {
                         const raw = typeof b.raw_data === 'string' ? JSON.parse(b.raw_data) : (b.raw_data || {});
                         const bL = pad(b.book_number || raw.Libro || raw.libro || raw.book_number);
@@ -85,6 +103,8 @@ const DecreeJsonImporter = () => {
                         return bL === padL && bF === padF && bN === padN;
                     });
                 };
+
+                const seenInFile = new Set(); // Para detectar duplicados dentro del mismo archivo JSON
 
                 const processed = data.map((item, index) => {
                     const decreto = extractField(item, ['decreto']);
@@ -109,11 +129,24 @@ const DecreeJsonImporter = () => {
                     let origRec = null;
                     let newRec = null;
 
-                    if (!decreto || !fecha) { errorMsg = "Falta No. Decreto o Fecha."; isValid = false; }
-                    else if (!newLib || !newFol || !newNum) { errorMsg = "Falta ubicación supletoria (NEWLIB/NEWFOL/NEWNUM)."; isValid = false; }
-                    else if (!isReposicion && (!oldLib || !oldFol || !oldNum)) { errorMsg = "Corrección requiere ubicación original completa."; isValid = false; }
+                    const decUpper = String(decreto || '').trim().toUpperCase();
+
+                    // 🚀 VALIDACIÓN DE DUPLICADOS (NUBE Y LOCAL)
+                    if (!decreto || !fecha) { 
+                        errorMsg = "Falta No. Decreto o Fecha."; isValid = false; 
+                    } else if (existingDecreeNumbers.has(decUpper)) {
+                        errorMsg = `El Decreto No. ${decreto} ya existe en la Nube.`; isValid = false;
+                    } else if (seenInFile.has(decUpper)) {
+                        errorMsg = `El Decreto No. ${decreto} está duplicado en este archivo.`; isValid = false;
+                    } else if (!newLib || !newFol || !newNum) { 
+                        errorMsg = "Falta ubicación supletoria (NEWLIB/NEWFOL/NEWNUM)."; isValid = false; 
+                    } else if (!isReposicion && (!oldLib || !oldFol || !oldNum)) { 
+                        errorMsg = "Corrección requiere ubicación original completa."; isValid = false; 
+                    }
 
                     if (isValid) {
+                        seenInFile.add(decUpper); // Lo marcamos como visto para evitar repetirlo en el ciclo
+                        
                         newRec = findBaptism(newLib, newFol, newNum);
                         if (!newRec) {
                             errorMsg = `Partida supletoria (L:${pad(newLib)} F:${pad(newFol)} N:${pad(newNum)}) no migrada aún a la Nube.`;
@@ -133,7 +166,8 @@ const DecreeJsonImporter = () => {
                         observaciones_clean: observaciones, dafe_clean: dafeLegacy,
                         sNewL: pad(newLib), sNewF: pad(newFol), sNewN: pad(newNum),
                         sOldL: pad(oldLib), sOldF: pad(oldFol), sOldN: pad(oldNum),
-                        isValid, error: errorMsg, _origRec: origRec, _newRec: newRec 
+                        isValid, error: errorMsg,
+                        _origRec: origRec, _newRec: newRec 
                     };
                 });
 
@@ -170,7 +204,6 @@ const DecreeJsonImporter = () => {
             const parishInfo = getMisDatosList(parishId)[0] || {};
             const parishLabel = `${parishInfo.nombre || 'PARROQUIA'} - ${parishInfo.ciudad || ''}`.toUpperCase();
 
-            // 🚀 OBTENEMOS LA LISTA DE SACERDOTES HISTÓRICOS
             const listaSacerdotes = getParrocos(parishId) || [];
             const currentPriestObj = getParrocoActual(parishId);
             const defaultPriest = currentPriestObj 
@@ -210,9 +243,6 @@ const DecreeJsonImporter = () => {
 
                     const targetName = `${newRec.nombres || ''} ${newRec.apellidos || ''}`.trim().toUpperCase();
 
-                    // =========================================================================
-                    // 🧠 MÁQUINA DEL TIEMPO (IDÉNTICA A BAPTISM CELEBRATED PAGE)
-                    // =========================================================================
                     let rawDaFe = "";
                     
                     if (item.fecha_clean && listaSacerdotes.length > 0) {
@@ -230,7 +260,6 @@ const DecreeJsonImporter = () => {
                         }
                     }
 
-                    // Si no hubo coincidencia de fechas, tratamos de rescatarlo de la data vieja
                     if (!rawDaFe) {
                         const dbDafe = newRec.da_fe || rawNew?.daFe || rawNew?.dafe;
                         if (dbDafe && isNaN(Number(String(dbDafe).trim()))) rawDaFe = String(dbDafe).trim().toUpperCase();
@@ -239,11 +268,9 @@ const DecreeJsonImporter = () => {
 
                     if (!rawDaFe) rawDaFe = defaultPriest;
 
-                    // Limpieza para que no diga "PBRO. PBRO."
                     rawDaFe = rawDaFe.replace(/^(PBRO\.?\s*|PADRE\s*|SACERDOTE\s*)/i, '').trim();
                     const validDaFe = rawDaFe !== 'EL PÁRROCO' ? `PBRO. ${rawDaFe}` : rawDaFe;
 
-                    // Extracción de datos para PDF
                     const pdfData = {
                         fechaSacramento: rawNew.fechaSacramento || rawNew.fecbau || newRec.celebration_date || '',
                         sexo: parseSex(rawNew.sexo || rawNew.sex),
@@ -256,7 +283,6 @@ const DecreeJsonImporter = () => {
                         abuelosMaternos: rawNew.abuelosMaternos || rawNew.abuemat || newRec.abuelos_maternos || '',
                         padrinos: rawNew.padrinos || newRec.padrinos || '',
                         ministro: (rawNew.ministro || newRec.ministro || '').toUpperCase(),
-                        // Blindaje de Sacerdote Histórico
                         daFe: validDaFe, dafe: validDaFe, da_fe: validDaFe, ministerFaith: validDaFe 
                     };
 
@@ -292,7 +318,6 @@ const DecreeJsonImporter = () => {
                             libroAnulada: item.sOldL, folioAnulada: item.sOldF, numeroAnulada: item.sOldN, ministro: validDaFe
                         });
 
-                        // 🚀 ACTUALIZA LA PARTIDA ORIGINAL CON EL SACERDOTE DE LA ÉPOCA
                         const origUpdate = { 
                             ...rawOrig, isAnnulled: true, anulado: true, status: 'anulada', 
                             notaMarginal: noteAnulada, daFe: validDaFe, dafe: validDaFe, ministerFaith: validDaFe 
@@ -309,7 +334,6 @@ const DecreeJsonImporter = () => {
                             nota_marginal: noteNueva, raw_data: newUpdate, da_fe: validDaFe 
                         }).eq('id', newRec.id);
 
-                        // 🚀 SELLA EL DECRETO CON EL SACERDOTE HISTÓRICO
                         const payloadDecree = {
                             decreeNumber: item.decreto_clean, decreeDate: item.fecha_clean, conceptoAnulacionId: conceptoId,
                             targetName: `${origRec.nombres || ''} ${origRec.apellidos || ''}`.trim().toUpperCase(),
