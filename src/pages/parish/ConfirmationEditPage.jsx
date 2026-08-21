@@ -2,445 +2,379 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
+import { useAppData } from '@/context/AppDataContext';
+import { supabase } from '@/lib/supabaseClient'; 
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
-import { Save, X, ArrowLeft, Loader2, Info } from 'lucide-react';
+import { 
+    Save, ArrowLeft, Loader2, BookOpen, 
+    Calendar, User, Fingerprint, PenTool, Droplet, ShieldCheck 
+} from 'lucide-react';
+import CityAutocomplete from '@/components/CityAutocomplete';
 import ChurchLocationAutocomplete from '@/components/ChurchLocationAutocomplete';
 
-// --- HELPER FUNCTIONS ---
-
-// Helper to normalize sex values to specific uppercase format
-const normalizeSex = (val) => {
-    if (!val) return '';
-    const s = String(val).toUpperCase().trim();
-    
-    // Handle numeric codes
-    if (s === '1') return 'MASCULINO';
-    if (s === '2') return 'FEMENINO';
-    
-    // Handle text variations
-    if (s.startsWith('M')) return 'MASCULINO';
-    if (s.startsWith('F')) return 'FEMENINO';
-    
-    return '';
-};
-
-const convertirSexo = (sexoCode) => {
-    const normalized = normalizeSex(sexoCode);
-    return normalized || 'NO ESPECIFICADO';
-};
-
-const InfoBox = ({ data }) => {
-    if (!data) return null;
-
-    // Determine correctness based on isAnnulled property
-    const isValid = !data.isAnnulled;
-
-    return (
-        <div className="mb-6 border border-blue-200 rounded-lg overflow-hidden shadow-sm bg-white">
-            <div className="bg-gradient-to-r from-[#4B7BA7] to-[#2a4e70] px-6 py-3 border-b border-blue-800">
-                <h3 className="text-white font-bold text-lg flex items-center gap-2">
-                   <Info className="w-5 h-5 text-blue-200" />
-                   Resumen del Registro (Lectura)
-                </h3>
-            </div>
-            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-y-6 gap-x-8">
-                 <div className="space-y-1">
-                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Libro / Folio / Número</span>
-                     <span className="text-base font-bold text-gray-900 bg-gray-50 px-2 py-1 rounded border border-gray-200 inline-block font-mono">
-                         {data.book_number} / {data.page_number} / {data.entry_number}
-                     </span>
-                 </div>
-                 <div className="space-y-1">
-                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Fecha Confirmación</span>
-                     <span className="text-base font-medium text-gray-800">{data.sacramentDate || '-'}</span>
-                 </div>
-                 <div className="space-y-1">
-                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Ministro</span>
-                     <span className="text-base font-medium text-gray-800 truncate" title={data.minister}>{data.minister || '-'}</span>
-                 </div>
-
-                 <div className="border-t border-gray-100 col-span-full my-1"></div>
-
-                 <div className="space-y-1">
-                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Apellidos</span>
-                     <span className="text-base font-bold text-gray-900">{data.lastName}</span>
-                 </div>
-                 <div className="space-y-1">
-                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Nombres</span>
-                     <span className="text-base font-bold text-gray-900">{data.firstName}</span>
-                 </div>
-                 <div className="space-y-1">
-                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Sexo</span>
-                     <span className="text-base font-medium text-gray-800">{convertirSexo(data.sex)}</span>
-                 </div>
-                 <div className="space-y-1">
-                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Fecha Nacimiento</span>
-                     <span className="text-base font-medium text-gray-800">{data.birthDate || '-'}</span>
-                 </div>
-
-                 <div className="border-t border-gray-100 col-span-full my-1"></div>
-
-                 <div className="space-y-1">
-                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Padre</span>
-                     <span className="text-base font-medium text-gray-800">{data.fatherName || 'NO REGISTRADO'}</span>
-                 </div>
-                 <div className="space-y-1">
-                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Madre</span>
-                     <span className="text-base font-medium text-gray-800">{data.motherName || 'NO REGISTRADO'}</span>
-                 </div>
-                 <div className="space-y-1">
-                      <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Lugar Confirmación</span>
-                      <span className="text-base font-medium text-gray-800">{data.sacramentPlace || data.place || '-'}</span>
-                 </div>
-            </div>
-            {/* Status Footer - Shows CORRECTA or ANULADA based on validity */}
-            <div className="border-t border-gray-200 p-4 bg-gray-50 flex justify-end items-center">
-                {isValid ? (
-                    <span className="text-green-600 font-bold text-lg">CORRECTA</span>
-                ) : (
-                    <span className="text-red-600 font-bold text-lg">ANULADA</span>
-                )}
-            </div>
-        </div>
-    );
-};
-
 const ConfirmationEditPage = () => {
-  const { user } = useAuth();
-  const { toast } = useToast();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const recordId = searchParams.get('id');
+    const { user } = useAuth();
+    const { getParrocos, getCiudadesList } = useAppData(); 
+    const { toast } = useToast();
+    const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const recordId = searchParams.get('id');
 
-  const [isLoading, setIsLoading] = useState(true);
-  const [formData, setFormData] = useState(null);
+    const parishId = user?.parish_id || user?.parishId;
+    const nombreParroquia = user?.parishName || user?.parish_name || 'PARROQUIA';
 
-  // Helper to convert storage format (DD/MM/YYYY) to input format (YYYY-MM-DD)
-  const toInputDate = (dateStr) => {
-      if (!dateStr) return '';
-      if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) return dateStr.split('T')[0];
-      if (dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-          const [d, m, y] = dateStr.split('/');
-          return `${y}-${m}-${d}`;
-      }
-      return '';
-  };
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [formData, setFormData] = useState(null);
+    const [rawOriginal, setRawOriginal] = useState({});
+    
+    const [ciudades, setCiudades] = useState([]); 
+    const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
+    
+    // 🚀 Lógica inteligente de sacerdotes (Máquina del Tiempo)
+    const [listaSacerdotes, setListaSacerdotes] = useState([]);
+    const [userChangedDate, setUserChangedDate] = useState(false);
 
-  // Helper to convert input format (YYYY-MM-DD) to storage format (DD/MM/YYYY)
-  const toStorageDate = (dateStr) => {
-      if (!dateStr) return '';
-      const [y, m, d] = dateStr.split('-');
-      return `${d}/${m}/${y}`;
-  };
+    const toInputDate = (dateStr) => {
+        if (!dateStr) return '';
+        if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) return dateStr.split('T')[0];
+        if (dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+            const [d, m, y] = dateStr.split('/');
+            return `${y}-${m}-${d}`;
+        }
+        return '';
+    };
 
-  useEffect(() => {
-    if (!user || !recordId) return;
-    loadRecord();
-  }, [user, recordId]);
+    useEffect(() => {
+        if (!recordId) {
+            navigate('/parroquia/confirmacion/partidas');
+            return;
+        }
 
-  const loadRecord = () => {
-    setIsLoading(true);
-    const entityId = user.parishId || user.dioceseId;
-    const key = `confirmations_${entityId}`;
+        const loadRecord = async () => {
+            setIsLoading(true);
+            try {
+                // 1. Extraer desde Supabase directamente
+                const { data: dbRecord, error } = await supabase
+                    .from('confirmations')
+                    .select('*')
+                    .eq('id', recordId)
+                    .single();
 
-    try {
-        const storedData = localStorage.getItem(key);
-        if (storedData) {
-            const records = JSON.parse(storedData);
-            const record = records.find(r => r.id === recordId);
-            
-            if (record) {
-                // Ensure robust mapping of fields that might have different names in legacy data
+                if (error || !dbRecord) throw new Error("Registro no encontrado.");
+
+                const raw = typeof dbRecord.raw_data === 'string' ? JSON.parse(dbRecord.raw_data) : (dbRecord.raw_data || {});
+                setRawOriginal(raw);
+
+                // Carga de Sacerdotes y Autocompletados
+                const listaCiudadesRaw = getCiudadesList(parishId) || [];
+                setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
                 
-                // Prepare baptism data object from mixed sources
-                // PRIORITY: record.baptismData object -> record.baptismPlace (flat) -> record.lugarBautismo (legacy flat)
-                
-                const rawBaptismData = record.baptismData || {};
-                
-                // Construct a robust baptismInfo object
-                const baptismInfo = {
-                    place: rawBaptismData.place || record.baptismPlace || record.lugarBautismo || '',
-                    book: rawBaptismData.book || rawBaptismData.libro || record.baptismBook || record.libroBautismo || '',
-                    folio: rawBaptismData.folio || rawBaptismData.page || record.baptismFolio || record.folioBautismo || '',
-                    number: rawBaptismData.number || rawBaptismData.entry || record.baptismNumber || record.numeroBautismo || ''
-                };
+                const listaParrocos = getParrocos(parishId) || [];
+                setListaSacerdotes(listaParrocos);
+                setParrocosSugeridos(listaParrocos.map(p => `${p.nombre} ${p.apellido || ''}`.trim().toUpperCase()));
 
-                const initializedRecord = {
-                    ...record,
-                    // Map legacy/Spanish field names to form state names
-                    ministerFaith: record.ministerFaith || record.daFe || record.signature || '',
-                    observations: record.observations || record.notaMarginal || record.notasMarginales || '',
-                    // Use the normalized baptism data object
-                    baptismData: baptismInfo,
-                    // VITAL: Normalize sex to uppercase MASCULINO/FEMENINO on load
-                    sex: normalizeSex(record.sex || record.sexo)
-                };
+                const parrocoActualObj = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
+                const nombreParrocoActual = parrocoActualObj ? `${parrocoActualObj.nombre} ${parrocoActualObj.apellido || ''}`.trim().toUpperCase() : '';
 
-                setFormData(initializedRecord);
-            } else {
-                toast({ title: "Error", description: "Registro no encontrado.", variant: "destructive" });
+                // 🚀 CARGA ESTRICTA HÍBRIDA (Mapeo Definitivo)
+                setFormData({
+                    id: dbRecord.id,
+                    status: dbRecord.status || 'seated',
+                    Libro: dbRecord.book_number || raw.Libro || raw.libro || '',
+                    folio: dbRecord.folio || raw.folio || raw.page_number || '',
+                    numero: dbRecord.number || raw.numero || raw.entry_number || '',
+                    fechaSacramento: dbRecord.celebration_date || raw.fechaSacramento || raw.fechaConfirmacion || '',
+                    lugarSacramento: raw.lugarSacramento || raw.lugar || raw.place || nombreParroquia,
+                    apellidos: dbRecord.apellidos || raw.apellidos || raw.lastName || '',
+                    nombres: dbRecord.nombres || raw.nombres || raw.firstName || '',
+                    sexo: dbRecord.sexo || raw.sexo || raw.sex || '',
+                    fechaNacimiento: dbRecord.fecha_nacimiento || raw.fechaNacimiento || raw.birthDate || '',
+                    edad: raw.edad || raw.metadata?.ageAtConfirmation || '',
+                    lugarNacimiento: dbRecord.lugar_nacimiento || raw.lugarNacimiento || '',
+                    tipoUnionPadres: dbRecord.tipo_union_padres || raw.tipoUnionPadres || '',
+                    nombrePadre: dbRecord.nombre_padre || raw.nombrePadre || raw.fatherName || '',
+                    cedulaPadre: raw.cedulaPadre || '',
+                    nombreMadre: dbRecord.nombre_madre || raw.nombreMadre || raw.motherName || '',
+                    cedulaMadre: raw.cedulaMadre || '',
+                    
+                    // Datos de Bautismo
+                    lugarBautismo: dbRecord.lugar_bautismo || raw.lugarBautismo || raw.baptismPlace || raw.baptismData?.place || '',
+                    libroBautismo: raw.libroBautismo || raw.baptismBook || raw.baptismData?.book || '',
+                    folioBautismo: raw.folioBautismo || raw.baptismFolio || raw.baptismData?.folio || '',
+                    numeroBautismo: raw.numeroBautismo || raw.baptismNumber || raw.baptismData?.number || '',
+
+                    padrinos: dbRecord.padrinos || raw.padrinos || raw.godparents || '',
+                    ministro: dbRecord.ministro || raw.ministro || raw.minister || '',
+                    daFe: dbRecord.da_fe || raw.daFe || raw.ministerFaith || nombreParrocoActual,
+                    notaMarginal: dbRecord.nota_marginal || raw.notaMarginal || raw.observations || ''
+                });
+
+            } catch (error) {
+                toast({ title: "Error", description: "No se pudo cargar el registro.", variant: "destructive" });
                 navigate('/parroquia/confirmacion/partidas');
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        loadRecord();
+    }, [recordId, parishId, getCiudadesList, getParrocos, navigate, toast, nombreParroquia]);
+
+    // 🚀 INTELIGENCIA 1: Re-calcula el Párroco (Da Fe) SOLAMENTE si el usuario cambia la fecha
+    useEffect(() => {
+        if (!userChangedDate || !formData?.fechaSacramento || listaSacerdotes.length === 0) return;
+
+        const fechaSeleccionada = new Date(formData.fechaSacramento);
+        const sacerdoteEncontrado = listaSacerdotes.find(s => {
+            const inicio = new Date(s.fechaIngreso || s.fechaNombramiento);
+            const fin = s.fechaSalida ? new Date(s.fechaSalida) : new Date();
+            return fechaSeleccionada >= inicio && fechaSeleccionada <= fin;
+        });
+
+        if (sacerdoteEncontrado) {
+            setFormData(prev => ({ 
+                ...prev, 
+                daFe: `${sacerdoteEncontrado.nombre} ${sacerdoteEncontrado.apellido || ''}`.trim().toUpperCase() 
+            }));
+        }
+    }, [formData?.fechaSacramento, listaSacerdotes, userChangedDate]);
+
+    // 🚀 INTELIGENCIA 2: Recalcular Edad Dinámicamente
+    useEffect(() => {
+        if (formData?.fechaNacimiento && formData?.fechaSacramento) {
+            const birth = new Date(formData.fechaNacimiento);
+            const conf = new Date(formData.fechaSacramento);
+            if (!isNaN(birth.getTime()) && !isNaN(conf.getTime())) {
+                let age = conf.getFullYear() - birth.getFullYear();
+                const m = conf.getMonth() - birth.getMonth();
+                if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) age--;
+                setFormData(prev => ({ ...prev, edad: age >= 0 ? age.toString() : '' }));
             }
         }
-    } catch (error) {
-        console.error("Error loading record:", error);
-    } finally {
-        setIsLoading(false);
-    }
-  };
+    }, [formData?.fechaNacimiento, formData?.fechaSacramento]);
 
-  const handleChange = (e) => {
-      const { name, value, type } = e.target;
-      let finalValue = value;
-      
-      if (type === 'date') {
-          finalValue = toStorageDate(value);
-      }
-      
-      // Additional normalization for sex field, though select options should handle it
-      if (name === 'sex') {
-          finalValue = normalizeSex(value);
-      }
-
-      setFormData(prev => ({ ...prev, [name]: finalValue }));
-  };
-
-  const handleBaptismDataChange = (field, value) => {
-      setFormData(prev => ({
-          ...prev,
-          baptismData: {
-              ...prev.baptismData,
-              [field]: value
-          }
-      }));
-  };
-
-  const handleSave = () => {
-      if (!formData) return;
-
-      setIsLoading(true);
-      const entityId = user.parishId || user.dioceseId;
-      const key = `confirmations_${entityId}`;
-
-      try {
-          const storedData = localStorage.getItem(key);
-          if (storedData) {
-              const records = JSON.parse(storedData);
-              const updatedRecords = records.map(r => 
-                  r.id === recordId 
-                    ? { 
-                        ...formData, 
-                        sex: normalizeSex(formData.sex), // Ensure saved value is normalized
-                        updatedAt: new Date().toISOString() 
-                      } 
-                    : r
-              );
-              
-              localStorage.setItem(key, JSON.stringify(updatedRecords));
-              toast({ title: "Éxito", description: "Registro actualizado correctamente.", className: "bg-green-50 border-green-200 text-green-900" });
-              navigate('/parroquia/confirmacion/partidas');
-          }
-      } catch (error) {
-          console.error("Error saving record:", error);
-          toast({ title: "Error", description: "No se pudo guardar los cambios.", variant: "destructive" });
-      } finally {
-          setIsLoading(false);
-      }
-  };
-
-  if (isLoading && !formData) {
-      return (
-          <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-              <div className="flex justify-center items-center h-64">
-                  <Loader2 className="w-8 h-8 animate-spin text-[#4B7BA7]" />
-              </div>
-          </DashboardLayout>
-      );
-  }
-
-  if (!formData) return null;
-
-  return (
-    <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-      <div className="flex items-center gap-4 mb-6">
-        <Button variant="ghost" onClick={() => navigate('/parroquia/confirmacion/partidas')} className="p-0 hover:bg-transparent text-gray-500 hover:text-gray-900">
-            <ArrowLeft className="w-6 h-6" />
-        </Button>
-        <div>
-            <h1 className="text-2xl font-bold text-gray-900 font-serif">Editar Registro de Confirmación</h1>
-            <p className="text-sm text-gray-600">Libro: {formData.book_number} | Folio: {formData.page_number} | Número: {formData.entry_number}</p>
-        </div>
-      </div>
-
-      {/* Info Box with Read-Only Data */}
-      <InfoBox data={formData} />
-
-      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 space-y-8">
+    const handleChange = (e) => {
+        const { name, value } = e.target;
         
-        {/* Section 0: Datos de Registro */}
-        <div>
-            <h3 className="text-sm font-bold text-[#4B7BA7] uppercase tracking-wider border-b border-gray-100 pb-2 mb-4">Datos del Registro</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Libro</label>
-                    <Input name="book_number" value={formData.book_number || ''} onChange={handleChange} />
-                </div>
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Folio</label>
-                    <Input name="page_number" value={formData.page_number || ''} onChange={handleChange} />
-                </div>
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Número</label>
-                    <Input name="entry_number" value={formData.entry_number || ''} onChange={handleChange} />
-                </div>
-            </div>
-        </div>
+        if (name === 'fechaSacramento') setUserChangedDate(true);
 
-        {/* Section 1: Datos del Confirmado */}
-        <div>
-            <h3 className="text-sm font-bold text-[#4B7BA7] uppercase tracking-wider border-b border-gray-100 pb-2 mb-4">Datos del Confirmado</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Apellidos</label>
-                    <Input name="lastName" value={formData.lastName || ''} onChange={handleChange} />
-                </div>
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Nombres</label>
-                    <Input name="firstName" value={formData.firstName || ''} onChange={handleChange} />
-                </div>
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Sexo</label>
-                    <select 
-                        name="sex" 
-                        value={formData.sex || ''} 
-                        onChange={handleChange}
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#4B7BA7] bg-white text-gray-900"
-                    >
-                        <option value="">Seleccione...</option>
-                        <option value="MASCULINO">MASCULINO</option>
-                        <option value="FEMENINO">FEMENINO</option>
-                    </select>
-                </div>
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Fecha de Nacimiento</label>
-                    <Input name="birthDate" type="date" value={toInputDate(formData.birthDate)} onChange={handleChange} />
-                </div>
-            </div>
-        </div>
+        const uppercaseFields = [
+            'nombres', 'apellidos', 'lugarNacimiento', 'lugarSacramento', 'lugarBautismo', 
+            'padrinos', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe', 'notaMarginal'
+        ];
+        const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
+        setFormData(prev => ({ ...prev, [name]: finalValue }));
+    };
 
-        {/* Section 2: Datos del Sacramento */}
-        <div>
-            <h3 className="text-sm font-bold text-[#4B7BA7] uppercase tracking-wider border-b border-gray-100 pb-2 mb-4">Datos de la Confirmación</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Fecha de Confirmación</label>
-                    <Input name="sacramentDate" type="date" value={toInputDate(formData.sacramentDate)} onChange={handleChange} />
-                </div>
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Lugar Confirmación (Parroquia)</label>
-                    <Input name="sacramentPlace" value={formData.sacramentPlace || formData.place || ''} onChange={handleChange} />
-                </div>
-            </div>
-        </div>
+    const handleCityChange = (data) => {
+        let value = data?.target?.value || data?.nombre || data || "";
+        setFormData(prev => ({ ...prev, lugarNacimiento: String(value).toUpperCase() }));
+    };
 
-        {/* Section 2.5: Datos del Bautismo - FIX APPLIED HERE */}
-        <div>
-            <h3 className="text-sm font-bold text-[#4B7BA7] uppercase tracking-wider border-b border-gray-100 pb-2 mb-4">Datos del Bautismo</h3>
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-end">
-                <div className="md:col-span-12">
-                     <label className="text-xs font-semibold text-gray-700 mb-1 block">Lugar de Bautizo</label>
-                     <ChurchLocationAutocomplete 
-                        value={formData.baptismData?.place || ''} 
-                        onChange={(val) => handleBaptismDataChange('place', val)} 
-                        placeholder="Buscar iglesia y ciudad..." 
-                    />
-                </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mt-4">
-                 <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Libro</label>
-                    <Input value={formData.baptismData?.book || ''} onChange={(e) => handleBaptismDataChange('book', e.target.value)} />
-                </div>
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Folio</label>
-                    <Input value={formData.baptismData?.folio || ''} onChange={(e) => handleBaptismDataChange('folio', e.target.value)} />
-                </div>
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Número</label>
-                    <Input value={formData.baptismData?.number || ''} onChange={(e) => handleBaptismDataChange('number', e.target.value)} />
-                </div>
-            </div>
-        </div>
+    const handleSave = async (e) => {
+        e.preventDefault();
+        if (!formData.nombres || !formData.apellidos) {
+            toast({ title: "Campos Requeridos", description: "Nombres y Apellidos obligatorios.", variant: "destructive" });
+            return;
+        }
 
-        {/* Section 3: Datos de los Padres */}
-        <div>
-            <h3 className="text-sm font-bold text-[#4B7BA7] uppercase tracking-wider border-b border-gray-100 pb-2 mb-4">Datos de los Padres</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Nombre del Padre</label>
-                    <Input name="fatherName" value={formData.fatherName || ''} onChange={handleChange} />
-                </div>
-                <div>
-                     <label className="text-xs font-semibold text-gray-700 mb-1 block">Nombre de la Madre</label>
-                    <Input name="motherName" value={formData.motherName || ''} onChange={handleChange} />
-                </div>
-            </div>
-        </div>
+        setIsSubmitting(true);
+        try {
+            // 🚀 ACTUALIZACIÓN DIRECTA EN SUPABASE CON INYECCIÓN HÍBRIDA
+            const payloadToSave = { ...rawOriginal, ...formData };
 
-        {/* Section 4: Padrinos */}
-        <div>
-            <h3 className="text-sm font-bold text-[#4B7BA7] uppercase tracking-wider border-b border-gray-100 pb-2 mb-4">Padrinos</h3>
-            <div className="grid grid-cols-1 gap-5">
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Padrinos</label>
-                    <textarea 
-                        name="godparents" 
-                        value={formData.godparents || ''} 
-                        onChange={handleChange}
-                        className="w-full rounded-md border border-gray-300 p-2 text-sm h-16 resize-none focus:ring-2 focus:ring-[#4B7BA7] outline-none text-gray-900"
-                    />
-                </div>
-            </div>
-        </div>
+            const { error } = await supabase.from('confirmations').update({
+                book_number: formData.Libro,
+                folio: formData.folio,
+                number: formData.numero,
+                celebration_date: formData.fechaSacramento || null,
+                lugar_bautismo: formData.lugarBautismo || null,
+                apellidos: formData.apellidos || null,
+                nombres: formData.nombres || null,
+                sexo: formData.sexo || null,
+                fecha_nacimiento: formData.fechaNacimiento || null,
+                lugar_nacimiento: formData.lugarNacimiento || null,
+                nombre_padre: formData.nombrePadre || null,
+                nombre_madre: formData.nombreMadre || null,
+                tipo_union_padres: formData.tipoUnionPadres || null,
+                padrinos: formData.padrinos || null,
+                ministro: formData.ministro || null,
+                da_fe: formData.daFe || null,
+                nota_marginal: formData.notaMarginal || null,
+                raw_data: payloadToSave,
+                updated_at: new Date().toISOString()
+            }).eq('id', recordId);
+            
+            if (error) throw error;
 
-        {/* Section 5: Datos Legales */}
-        <div>
-            <h3 className="text-sm font-bold text-[#4B7BA7] uppercase tracking-wider border-b border-gray-100 pb-2 mb-4">Datos Adicionales</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-                 <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Ministro</label>
-                    <Input name="minister" value={formData.minister || ''} onChange={handleChange} />
-                </div>
-                 <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Firma Responsable (Da Fe)</label>
-                    <Input name="ministerFaith" value={formData.ministerFaith || ''} onChange={handleChange} placeholder="Nombre de quien firma" />
-                </div>
-            </div>
-             <div className="grid grid-cols-1 gap-5">
-                <div>
-                    <label className="text-xs font-semibold text-gray-700 mb-1 block">Notas Marginales</label>
-                    <Input name="observations" value={formData.observations || ''} onChange={handleChange} />
-                </div>
-            </div>
-        </div>
+            toast({ title: "¡Actualizado!", description: "Sincronizado con la Base de Datos Central.", className: "bg-green-600 text-white" });
+            navigate('/parroquia/confirmacion/partidas');
 
-        {/* Action Buttons */}
-        <div className="flex justify-end gap-4 pt-6 border-t border-gray-200">
-            <Button variant="outline" onClick={() => navigate('/parroquia/confirmacion/partidas')} className="text-gray-600 border-gray-300 hover:bg-gray-50">
-                <X className="w-4 h-4 mr-2" />
-                Cancelar
-            </Button>
-            <Button onClick={handleSave} disabled={isLoading} className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white font-medium">
-                {isLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                Guardar Cambios
-            </Button>
-        </div>
+        } catch (error) {
+            toast({ title: "Error de Guardado", description: error.message, variant: "destructive" });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
 
-      </div>
-    </DashboardLayout>
-  );
+    if (isLoading || !formData) return (
+        <DashboardLayout entityName={nombreParroquia}>
+            <div className="flex flex-col justify-center items-center h-screen">
+                <Loader2 className="w-12 h-12 animate-spin text-red-600 mb-4" />
+                <p className="text-gray-500 font-black uppercase text-[10px] tracking-widest">Accediendo a la Nube...</p>
+            </div>
+        </DashboardLayout>
+    );
+
+    const labelClass = "block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1";
+    const inputClass = "h-11 w-full px-4 py-2 text-sm text-gray-900 font-bold border border-gray-200 rounded-xl focus:ring-4 focus:ring-red-600/10 focus:border-red-600 outline-none transition-all bg-gray-50/50 focus:bg-white uppercase shadow-sm";
+    const sectionHeaderClass = "text-[11px] font-black text-red-600 uppercase tracking-[0.2em] border-b border-gray-100 pb-3 mb-6 flex items-center gap-2 mt-8";
+
+    return (
+        <DashboardLayout entityName={nombreParroquia}>
+            <div className="max-w-5xl mx-auto px-4 pb-24 pt-6">
+                <datalist id="lista-parrocos">
+                    {parrocosSugeridos.map((nombre, index) => <option key={index} value={nombre} />)}
+                </datalist>
+
+                <div className="flex items-center justify-between mb-10">
+                    <div className="flex items-center gap-4">
+                        <Button variant="ghost" onClick={() => navigate('/parroquia/confirmacion/partidas')} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><ArrowLeft className="w-6 h-6 text-gray-400" /></Button>
+                        <div>
+                            <h1 className="text-3xl font-black text-gray-900 tracking-tighter uppercase leading-none font-serif">Editar Partida</h1>
+                            <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest mt-2 flex items-center gap-2"><BookOpen className="w-3 h-3" /> Registro de Confirmación en la Nube</p>
+                        </div>
+                    </div>
+                </div>
+
+                <form onSubmit={handleSave} className="bg-white rounded-[2.5rem] shadow-2xl shadow-red-900/5 border border-gray-100 p-8 md:p-12 space-y-8 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-red-600 via-[#D4AF37] to-red-600"></div>
+                    
+                    <section>
+                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 01. Localización Física</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
+                            <div><label className={labelClass}>Libro</label><input type="text" name="Libro" onChange={handleChange} className={`${inputClass} font-mono text-lg text-red-600`} value={formData.Libro || ''} required /></div>
+                            <div><label className={labelClass}>Folio</label><input type="text" name="folio" onChange={handleChange} className={`${inputClass} font-mono text-lg`} value={formData.folio || ''} required /></div>
+                            <div><label className={labelClass}>Número (Acta)</label><input type="text" name="numero" onChange={handleChange} className={`${inputClass} font-mono text-lg`} value={formData.numero || ''} required /></div>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 02. Datos de la Celebración</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div><label className={labelClass}>Fecha Confirmación</label><input type="date" name="fechaSacramento" required value={toInputDate(formData.fechaSacramento) || ''} onChange={handleChange} className={inputClass} /></div>
+                            <div><label className={labelClass}>Parroquia / Lugar</label><input type="text" name="lugarSacramento" required value={formData.lugarSacramento || ''} onChange={handleChange} className={inputClass} /></div>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 03. Identidad del Confirmado</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                            <div><label className={labelClass}>Apellidos</label><input type="text" name="apellidos" required value={formData.apellidos || ''} onChange={handleChange} className={inputClass} /></div>
+                            <div><label className={labelClass}>Nombres</label><input type="text" name="nombres" required value={formData.nombres || ''} onChange={handleChange} className={inputClass} /></div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                            <div>
+                                <label className={labelClass}>Sexo</label>
+                                <select name="sexo" required value={formData.sexo || ''} onChange={handleChange} className={inputClass}>
+                                    <option value="">SELECCIONE...</option>
+                                    <option value="MASCULINO">MASCULINO</option>
+                                    <option value="FEMENINO">FEMENINO</option>
+                                </select>
+                            </div>
+                            <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="fechaNacimiento" value={toInputDate(formData.fechaNacimiento) || ''} onChange={handleChange} className={inputClass} /></div>
+                            <div>
+                                <label className={labelClass}>Edad Conf.</label>
+                                <div className="relative">
+                                    <input type="number" name="edad" value={formData.edad || ''} onChange={handleChange} className={`${inputClass} pr-12`} />
+                                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">AÑOS</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label className={labelClass}>Lugar de Nacimiento</label>
+                                <CityAutocomplete name="lugarNacimiento" value={formData.lugarNacimiento || ''} onChange={handleCityChange} cities={ciudades} className={inputClass} />
+                            </div>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 04. Filiación</h3>
+                        <div className="mb-6">
+                            <label className={labelClass}>Tipo de Unión de Padres</label>
+                            <select name="tipoUnionPadres" value={formData.tipoUnionPadres || ''} onChange={handleChange} className="w-full md:w-1/2 px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl font-black text-gray-600 uppercase outline-none shadow-sm focus:bg-white transition-all">
+                                <option value="">SELECCIONE...</option>
+                                <option value="MATRIMONIO CATÓLICO">MATRIMONIO CATÓLICO</option>
+                                <option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option>
+                                <option value="UNIÓN LIBRE">UNIÓN LIBRE</option>
+                                <option value="MADRE SOLTERA">MADRE SOLTERA</option>
+                                <option value="PADRE SOLTERO">PADRE SOLTERO</option>
+                            </select>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                            <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-4 shadow-sm">
+                                <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Datos del Padre</p>
+                                <div><label className={labelClass}>Nombre del Padre</label><input type="text" name="nombrePadre" value={formData.nombrePadre || ''} onChange={handleChange} className={inputClass} /></div>
+                                <div><label className={labelClass}>Cédula Padre</label><input type="text" name="cedulaPadre" value={formData.cedulaPadre || ''} onChange={handleChange} className={inputClass} /></div>
+                            </div>
+                            <div className="bg-pink-50/30 p-8 rounded-[2rem] border border-pink-100/50 space-y-4 shadow-sm">
+                                <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Datos de la Madre</p>
+                                <div><label className={labelClass}>Nombre de la Madre</label><input type="text" name="nombreMadre" value={formData.nombreMadre || ''} onChange={handleChange} className={inputClass} /></div>
+                                <div><label className={labelClass}>Cédula Madre</label><input type="text" name="cedulaMadre" value={formData.cedulaMadre || ''} onChange={handleChange} className={inputClass} /></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 05. Registro de Bautismo Origen</h3>
+                        <div className="space-y-6">
+                            <div>
+                                <label className={labelClass}>Lugar y Parroquia de Bautismo</label>
+                                <ChurchLocationAutocomplete 
+                                    value={formData.lugarBautismo || ''} 
+                                    onChange={(val) => setFormData(prev => ({...prev, lugarBautismo: val}))}
+                                    placeholder="Buscar iglesia y ciudad..."
+                                />
+                            </div>
+                            <div className="grid grid-cols-3 gap-6 bg-slate-50 p-6 rounded-3xl border border-slate-100">
+                                <div><label className={labelClass}>Libro Baut.</label><input name="libroBautismo" value={formData.libroBautismo || ''} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
+                                <div><label className={labelClass}>Folio Baut.</label><input name="folioBautismo" value={formData.folioBautismo || ''} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
+                                <div><label className={labelClass}>Acta Baut.</label><input name="numeroBautismo" value={formData.numeroBautismo || ''} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 06. Ministros y Testigos</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-6">
+                            <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input type="text" name="ministro" required value={formData.ministro || ''} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} /></div>
+                            <div><label className={labelClass}>Párroco que Da Fe</label><input type="text" name="daFe" required value={formData.daFe || ''} onChange={handleChange} className={inputClass} list="lista-parrocos" /></div>
+                        </div>
+                        <div>
+                            <label className={labelClass}>Padrinos</label>
+                            <input type="text" name="padrinos" value={formData.padrinos || ''} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" />
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 07. Observaciones</h3>
+                        <div>
+                            <label className={labelClass}>Nota Marginal / Observaciones</label>
+                            <textarea name="notaMarginal" value={formData.notaMarginal || ''} onChange={handleChange} className={`${inputClass} h-24 resize-none font-mono text-xs`} />
+                        </div>
+                    </section>
+
+                    <div className="flex justify-end gap-4 pt-8 border-t border-gray-100">
+                        <Button type="button" variant="ghost" onClick={() => navigate('/parroquia/confirmacion/partidas')} className="px-8 py-6 rounded-2xl text-gray-400 font-black uppercase text-[10px] tracking-widest hover:bg-gray-50 transition-all">Cancelar</Button>
+                        <Button type="submit" disabled={isSubmitting} className="bg-red-600 hover:bg-red-800 text-white px-10 py-6 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl transition-all transform active:scale-95">
+                            {isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} Guardar Cambios
+                        </Button>
+                    </div>
+                </form>
+            </div>
+        </DashboardLayout>
+    );
 };
 
 export default ConfirmationEditPage;
