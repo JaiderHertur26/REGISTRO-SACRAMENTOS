@@ -154,14 +154,15 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     text-transform: uppercase;
                 }
 
-                /* TABLA PRINCIPAL CON MARCO NATIVO (Cierra en cada salto de página) */
+                /* TABLA PRINCIPAL CON BORDES NATIVOS POR CELDA (Cierra perfecto en cada hoja) */
                 .print-table {
                     width: 100%;
                     border-collapse: collapse;
                     border-spacing: 0;
                     font-family: 'Arial', sans-serif;
                     font-size: 8.5pt;
-                    border: 2px solid #000; /* Marco exterior principal sólido */
+                    border-top: 2px solid #000;
+                    border-bottom: 2px solid #000;
                 }
                 
                 .header-row th {
@@ -176,7 +177,7 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                 }
                 
                 .print-table td {
-                    border: 1px solid #000; /* Cada celda sella su propio espacio, evitando líneas huérfanas */
+                    border: 1px solid #000;
                     padding: 5px 6px;
                     vertical-align: middle;
                     line-height: 1.2;
