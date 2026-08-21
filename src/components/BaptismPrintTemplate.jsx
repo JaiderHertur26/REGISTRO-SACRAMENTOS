@@ -35,7 +35,6 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   const folio = formatData(String(raw.folio || '0').padStart(4, '0'));
   const acta = formatData(String(raw.numero || raw.numeroActa || '0').padStart(4, '0'));
 
-  // Formateador de Fechas Inteligente (Asegura que siempre diga "EL ...")
   const formatFecha = (dStr) => {
     if (!dStr || dStr === '---' || dStr.trim() === '') return '';
     try {
@@ -47,8 +46,7 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
     }
   };
 
-  const fechaBautismoStr = raw.fechaSacramento || raw.fecbau || data.celebration_date;
-  const fechaBautismo = formatFecha(fechaBautismoStr);
+  const fechaBautismo = formatFecha(raw.fechaSacramento || raw.fecbau || data.celebration_date);
   const nombresYApellidos = `${formatData(raw.nombres)} ${formatData(raw.apellidos)}`.trim();
   const fechaNacimiento = formatFecha(raw.fechaNacimiento || raw.fecnac || data.fecha_nacimiento);
   const lugarNacimiento = formatData(raw.lugarNacimiento || raw.lugarn || data.lugar_nacimiento);
@@ -65,42 +63,7 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   const pId = raw.parishId || raw.parish_id || header.entity_id || header.id || data.parish_id;
   const listaSacerdotes = (pId && getParrocos) ? (getParrocos(pId) || []) : [];
 
-  // 🚀 MÁQUINA DEL TIEMPO PARA EL "DOY FE" DE LA PARTIDA HISTÓRICA
-  const getHistoricalPriest = () => {
-    // 1. Priorizamos si el viejo DBF guardó el "Da Fe" no-numérico
-    let daFeExplicit = raw.daFe || raw.dafe || data.da_fe;
-    if (daFeExplicit && isNaN(Number(String(daFeExplicit).trim()))) {
-        return String(daFeExplicit).trim();
-    }
-
-    // 2. Si no lo tiene o es un número (ej. "0006"), calculamos por fecha
-    if (fechaBautismoStr && listaSacerdotes.length > 0) {
-        const dStr = fechaBautismoStr.includes('T') ? fechaBautismoStr : `${fechaBautismoStr}T12:00:00`;
-        const fechaSac = new Date(dStr);
-        
-        if (!isNaN(fechaSac.getTime())) {
-            const sacerdoteEpoca = listaSacerdotes.find(s => {
-                if (!s.fechaIngreso && !s.fechaNombramiento) return false;
-                const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
-                const inicio = new Date(iStr);
-                const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
-                return fechaSac >= inicio && fechaSac <= fin;
-            });
-
-            if (sacerdoteEpoca) {
-                return `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim();
-            }
-        }
-    }
-
-    // 3. Fallback: El Párroco Actual
-    const sacerdoteActual = listaSacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
-    if (sacerdoteActual) return `${sacerdoteActual.nombre} ${sacerdoteActual.apellido || ''}`.trim();
-
-    return header.parroco || header.canciller || 'EL PÁRROCO';
-  };
-
-  // Párroco Actual Estricto (Para la firma de expedición al final de la página)
+  // Párroco Actual (Para la firma de expedición al final de la página)
   const getPárrocoActual = () => {
     const sacerdoteActual = listaSacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
     if (sacerdoteActual) return `${sacerdoteActual.nombre} ${sacerdoteActual.apellido || ''}`.trim();
@@ -110,17 +73,19 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   let parrocoFirma = formatData(getPárrocoActual());
   parrocoFirma = cleanTitle(parrocoFirma);
 
-  let ministro = formatData(raw.ministro || data.ministro);
-  if (ministro && !ministro.startsWith('PBRO')) ministro = `PBRO. ${cleanTitle(ministro)}`;
+  let ministroRaw = formatData(raw.ministro || data.ministro);
+  let ministro = ministroRaw;
+  if (ministro) ministro = `PBRO. ${cleanTitle(ministro)}`;
 
-  // 🚀 APLICAMOS LA LÓGICA TEMPORAL AL CAMPO "DOY FE" DEL ACTA
-  let daFeRaw = formatData(getHistoricalPriest());
-  let daFe = '';
-  if (!daFeRaw || daFeRaw.includes("ENCARGADO") || daFeRaw === "---") {
-      daFe = `PBRO. ${parrocoFirma}`;
-  } else {
-      daFe = daFeRaw.startsWith('PBRO') ? daFeRaw : `PBRO. ${cleanTitle(daFeRaw)}`;
+  // 🚀 INTELIGENCIA "DOY FE" (Clonación desde el Ministro)
+  let daFeRaw = formatData(raw.daFe || raw.dafe || data.da_fe);
+  
+  // Si Da Fe es numérico (0006), está vacío o dice encargado, usamos al Ministro histórico
+  if (!daFeRaw || !isNaN(Number(daFeRaw)) || daFeRaw.includes("ENCARGADO") || daFeRaw === "---") {
+      daFeRaw = ministroRaw || parrocoFirma;
   }
+
+  let daFe = `PBRO. ${cleanTitle(daFeRaw)}`;
 
   // 🧠 Limpieza Inteligente de Notas Marginales Antiguas
   const noteTextRaw = raw.notaMarginal || raw.nota_marginal || data.nota_marginal || '';
@@ -135,7 +100,6 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
       finalNote = "SIN NOTA MARGINAL DE MATRIMONIO HASTA LA FECHA.";
   }
 
-  // FECHA DE EXPEDICIÓN CONVERTIDA A LETRAS PERFECTAS
   const getFechaExpedicion = () => {
     const date = new Date();
     const dia = date.getDate();
@@ -175,7 +139,6 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   );
 
   return (
-    // CANDADO DE 1 SOLA PÁGINA (height: '11in' y overflow: 'hidden')
     <div ref={ref} style={{
         width: '8.5in', height: '11in', padding: '0.6in 0.8in', color: '#000', backgroundColor: 'white', 
         boxSizing: 'border-box', margin: '0 auto', display: 'flex', flexDirection: 'column', position: 'relative',
@@ -200,7 +163,7 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
             El suscrito Párroco <strong>CERTIFICA</strong> que en el archivo parroquial reposa un acta que a la letra dice:
         </div>
 
-        {/* CAJA DE REGISTRO (DISEÑO TABULAR OFICIAL) */}
+        {/* CAJA DE REGISTRO */}
         <div style={{ border: '1.5px solid black', borderRadius: '4px', width: '100%', overflow: 'hidden' }}>
             
             <div style={{ display: 'flex', borderBottom: '1.5px solid black', backgroundColor: '#f4f4f5' }}>

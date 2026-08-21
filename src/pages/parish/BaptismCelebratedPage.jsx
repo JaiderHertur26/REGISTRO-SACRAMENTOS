@@ -34,7 +34,6 @@ const BaptismCelebratedPage = () => {
     const [ciudades, setCiudades] = useState([]);
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
 
-    // 📖 DICCIONARIO EXACTO A SU NATURALEZA ORIGINAL (Solo 20 campos)
     const [formData, setFormData] = useState({
         Libro: '', 
         folio: '', 
@@ -93,6 +92,7 @@ const BaptismCelebratedPage = () => {
         loadInitialData();
     }, [parishId, nombreParroquia, getMisDatosList, getCiudadesList, getParrocos, getBaptismParameters]);
 
+    // 🚀 MÁQUINA DEL TIEMPO: SINCRONIZA MINISTRO Y DA FE
     useEffect(() => {
         if (!formData.fechaSacramento || listaSacerdotes.length === 0) return;
 
@@ -104,16 +104,17 @@ const BaptismCelebratedPage = () => {
         });
 
         if (sacerdoteEncontrado) {
+            const nombreSacerdoteHistorico = `${sacerdoteEncontrado.nombre} ${sacerdoteEncontrado.apellido || ''}`.trim().toUpperCase();
             setFormData(prev => ({ 
                 ...prev, 
-                ministro: `${sacerdoteEncontrado.nombre} ${sacerdoteEncontrado.apellido || ''}`.trim().toUpperCase() 
+                ministro: nombreSacerdoteHistorico,
+                daFe: nombreSacerdoteHistorico // Sincronización Automática
             }));
         }
     }, [formData.fechaSacramento, listaSacerdotes]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        // 🚀 LIMPIEZA: Solo los campos exactos de este formulario
         const uppercaseFields = ['nombres', 'apellidos', 'lugarNacimiento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'abuelosPaternos', 'abuelosMaternos', 'ministro', 'daFe'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
