@@ -22,13 +22,11 @@ const BaptismIndexPage = () => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
 
-    // Printing states
+    // Estados de impresión
     const [isBookModalOpen, setIsBookModalOpen] = useState(false);
     const [availableBooks, setAvailableBooks] = useState([]);
     const [selectedBook, setSelectedBook] = useState('');
-    const [printData, setPrintData] = useState([]);
     const [parishInfo, setParishInfo] = useState({});
-    const [currentPrintFilter, setCurrentPrintFilter] = useState(null);
 
     const printRef = useRef();
 
@@ -44,8 +42,6 @@ const BaptismIndexPage = () => {
     const fetchCloudRecords = async (parishId) => {
         setLoading(true);
         try {
-            // 🚀 LECTURA SEGURA ALINEADA CON EL CSV: 
-            // Solo pedimos las columnas físicas que existen (id, status, folio, number) y nuestro JSON maestro (raw_data).
             const { data, error } = await supabase
                 .from('baptisms')
                 .select('id, raw_data, status, folio, number')
@@ -60,7 +56,6 @@ const BaptismIndexPage = () => {
                     ...raw,
                     id: r.id,
                     status: r.status,
-                    // Garantizamos que use nuestro lenguaje (Libro, folio, numero)
                     Libro: raw.Libro || '---',
                     folio: raw.folio || r.folio || '---',
                     numero: raw.numero || r.number || '---'
@@ -77,7 +72,7 @@ const BaptismIndexPage = () => {
             setRecords(sanitizedData);
             setFilteredRecords(sanitizedData);
 
-            // Extraer los libros únicos disponibles basándonos exclusivamente en "Libro"
+            // Extraer los libros únicos disponibles
             const books = [...new Set(sanitizedData.map(r => r.Libro).filter(val => val !== '---'))].sort((a, b) => Number(a) - Number(b));
             setAvailableBooks(books);
             if (books.length > 0) setSelectedBook(books[0]);
@@ -103,31 +98,20 @@ const BaptismIndexPage = () => {
         setFilteredRecords(filtered);
     }, [searchTerm, records]);
 
-    // 🚀 CORRECCIÓN AQUÍ: Se agrega el callback onAfterPrint
+    // 🚀 1. CALCULAMOS LOS DATOS EN VIVO: El DOM siempre está listo con el libro seleccionado.
+    const dataToPrint = selectedBook 
+        ? records.filter(r => String(r.Libro) === String(selectedBook)) 
+        : records;
+
+    // 🚀 2. FUNCIÓN DE IMPRESIÓN SÍNCRONA
     const handlePrintAction = useReactToPrint({
         content: () => printRef.current,
-        documentTitle: `Indice_Bautismos_Libro_${currentPrintFilter || 'Todos'}`,
+        documentTitle: `Indice_Bautismos_Libro_${selectedBook || 'Todos'}`,
         onAfterPrint: () => {
-            // Cerramos el modal solo después de que se termine/cancele la impresión
-            setIsBookModalOpen(false);
+            setIsBookModalOpen(false); // Cierra el modal cuando termina de imprimir
         }
     });
 
-    const handlePrint = (bookFilter = null) => {
-        setCurrentPrintFilter(bookFilter);
-        let dataToPrint = records;
-        if (bookFilter) {
-            dataToPrint = records.filter(r => String(r.Libro) === String(bookFilter));
-        }
-        setPrintData(dataToPrint);
-
-        // Aumentamos levemente el timeout para asegurar que React termine de pasar los props
-        setTimeout(() => {
-            handlePrintAction();
-        }, 800);
-    };
-
-    // 🚀 DICCIONARIO APLICADO A LA TABLA
     const columns = [
         { header: 'Apellidos y Nombres', render: (row) => <span className="font-bold uppercase text-gray-900">{row.apellidos} {row.nombres}</span> },
         { header: 'Libro', render: (row) => <span className="font-mono text-gray-700">{row.Libro}</span> },
@@ -192,11 +176,7 @@ const BaptismIndexPage = () => {
                     <div className="flex justify-end gap-3 pt-4 border-t mt-4">
                         <Button variant="outline" onClick={() => setIsBookModalOpen(false)}>Cancelar</Button>
                         <Button
-                            onClick={() => {
-                                // 🚀 CORRECCIÓN AQUÍ: NO CERRAMOS EL MODAL TODAVÍA. 
-                                // Se cerrará solo gracias al 'onAfterPrint' cuando se abra el menú de impresión.
-                                handlePrint(selectedBook);
-                            }}
+                            onClick={handlePrintAction} /* 🚀 3. ACCIÓN DIRECTA (SÍNCRONA) */
                             disabled={!selectedBook}
                             className="bg-[#D4AF37] hover:bg-[#C4A027] text-white"
                         >
@@ -206,13 +186,13 @@ const BaptismIndexPage = () => {
                 </div>
             </Modal>
 
-            {/* HIDDEN PRINT TEMPLATE */}
-            <div className="hidden">
+            {/* 🚀 4. REEMPLAZO DE CLASSNAME HIDDEN POR ESTILOS SEGUROS PARA IMPRESIÓN */}
+            <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', opacity: 0, pointerEvents: 'none' }}>
                 <div ref={printRef}>
                     <BaptismIndexPrintTemplate
-                        data={printData}
+                        data={dataToPrint}
                         parishInfo={parishInfo}
-                        bookNumber={currentPrintFilter} // <-- Ajusté el nombre de prop para que coincida con el componente hijo (antes era filterBook)
+                        bookNumber={selectedBook}
                     />
                 </div>
             </div>
