@@ -275,7 +275,6 @@ const NewDecreeReplacementPage = () => {
                 suplementarioLibro: siguientesSupletorios.libro
             };
 
-            // ⚠️ CORRECCIÓN CLAVE: Usamos bautismoDecree.targetParishId explícitamente
             await supabase.from('parish_parameters').upsert({ 
                 parish_id: bautismoDecree.targetParishId, 
                 bautizos_params: newParams 
@@ -389,7 +388,13 @@ const NewDecreeReplacementPage = () => {
                                         <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="birthDate" value={bautismoNewPartida.birthDate} onChange={handleChange} className={inputClass} /></div>
                                         <div>
                                             <label className={labelClass}>Lugar de Nacimiento</label>
-                                            <CityAutocomplete name="placeOfBirth" value={bautismoNewPartida.placeOfBirth} onChange={handleCityChange} cities={ciudades} className={inputClass} />
+                                            <CityAutocomplete 
+                                                name="placeOfBirth" 
+                                                value={bautismoNewPartida.lugarNacimientoDetalle} 
+                                                onChange={handleCityChange} 
+                                                cities={ciudades} 
+                                                className={inputClass} 
+                                            />
                                         </div>
                                     </div>
                                 </section>

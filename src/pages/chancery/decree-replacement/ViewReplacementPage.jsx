@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/use-toast';
 import ViewRepositionDecreeModal from '@/components/modals/ViewRepositionDecreeModal';
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import { supabase } from '@/lib/supabaseClient';
+import { calculatePreviousConsecutive } from '@/services/sacramentParametersService'; // AÑADIDO: Importación para el reverso matemático
 
 const ChanceryDecreeReplacementViewPage = () => {
     const { user } = useAuth();
@@ -133,7 +134,7 @@ const ChanceryDecreeReplacementViewPage = () => {
         setFilteredRecords(filtered);
     }, [searchTerm, records, activeTab]);
 
-    // LÓGICA MAESTRA DE ROLLBACK PARA REPOSICIONES (SIN PARTIDA ORIGINAL)
+    // 🚀 LÓGICA DE RESTAURACIÓN COMPLETA (ROLLBACK TOTAL PARA REPOSICIONES) - HOMOLOGADA CON PARROQUIA
     const confirmDelete = async () => {
         setIsDeleting(true);
         try {
@@ -144,20 +145,50 @@ const ChanceryDecreeReplacementViewPage = () => {
             const newSum = decreeToUndo.newPartidaSummary || decreeToUndo.datosNuevaPartida;
             const targetParishId = decreeToUndo.targetParishId;
 
-            // 1. Eliminar Supletoria
+            // 1. Eliminar la Partida Supletoria y Revertir el Parámetro
             if (newSum) {
-                const newBook = pad(newSum.book || newSum.Libro);
-                const newPage = pad(newSum.page || newSum.folio);
-                const newEntry = pad(newSum.entry || newSum.numero);
+                const newBook = pad(newSum.book || newSum.book_number || newSum.Libro);
+                const newPage = pad(newSum.page || newSum.page_number || newSum.folio);
+                const newEntry = pad(newSum.entry || newSum.entry_number || newSum.numero);
 
-                await supabase.from('baptisms').delete().eq('parish_id', targetParishId).eq('book_number', newBook).eq('folio', newPage).eq('number', newEntry);
+                await supabase.from('baptisms').delete()
+                    .eq('parish_id', targetParishId)
+                    .eq('book_number', newBook)
+                    .eq('folio', newPage)
+                    .eq('number', newEntry);
 
-                // Reverso de Parámetros de la Parroquia
-                const { data: pData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', targetParishId).maybeSingle();
+                // MAGIA DEL REVERSO DEL LIBRO SUPLETORIO CON EL MOTOR MATEMÁTICO Y SALVAVIDAS
+                const { data: pData } = await supabase
+                    .from('parish_parameters')
+                    .select('bautizos_params')
+                    .eq('parish_id', targetParishId)
+                    .maybeSingle();
+
                 if (pData && pData.bautizos_params) {
                     const currentParams = pData.bautizos_params;
-                    if (Number(newEntry) === Number(currentParams.suplementarioNumero) - 1) {
-                        await supabase.from('parish_parameters').update({ bautizos_params: { ...currentParams, suplementarioNumero: Number(currentParams.suplementarioNumero) - 1 } }).eq('parish_id', targetParishId);
+                    
+                    // Usamos el motor para saber exactamente cómo retroceder el folio y número
+                    const previosSupletorios = calculatePreviousConsecutive(
+                        currentParams.suplementarioNumero,
+                        currentParams.suplementarioFolio,
+                        currentParams.suplementarioLibro,
+                        currentParams.suplementarioPartidas || 2, // SALVAVIDAS
+                        currentParams.suplementarioReiniciar || false // SALVAVIDAS
+                    );
+
+                    // Comparamos como enteros. Si es seguro, inyectamos los folios exactos con ceros.
+                    if (parseInt(newEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
+                        const newParamsObj = { 
+                            ...currentParams, 
+                            suplementarioNumero: pad(previosSupletorios.numero),
+                            suplementarioFolio: pad(previosSupletorios.folio),
+                            suplementarioLibro: pad(previosSupletorios.libro)
+                        };
+                        
+                        await supabase
+                            .from('parish_parameters')
+                            .update({ bautizos_params: newParamsObj })
+                            .eq('parish_id', targetParishId);
                     }
                 }
             }
@@ -168,6 +199,7 @@ const ChanceryDecreeReplacementViewPage = () => {
             toast({ title: "Restauración Completada", description: "Decreto borrado remotamente y partida supletoria destruida.", className: "bg-green-50 text-green-900 border-green-200" });
             fetchAllDecrees();
         } catch (error) { 
+            console.error("Error al restaurar:", error);
             toast({ title: "Error", description: "No se pudo restaurar la partida.", variant: "destructive" }); 
         } finally { 
             setIsDeleting(false); setDeleteConfig({ isOpen: false, id: null, name: '' }); 
@@ -192,6 +224,8 @@ const ChanceryDecreeReplacementViewPage = () => {
         return c ? c.concepto.toUpperCase() : 'REPOSICIÓN DE PARTIDA';
     };
 
+    const pad = (val) => val ? String(val).padStart(4, '0') : '----';
+
     const DecreeTable = ({ decrees }) => {
         if (decrees.length === 0) return null;
 
@@ -202,7 +236,7 @@ const ChanceryDecreeReplacementViewPage = () => {
             {
                 header: 'Ubicación Supletoria', render: (row) => {
                     const sum = row.newPartidaSummary || row.datosNuevaPartida || {};
-                    return <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest font-mono">L:{sum.book || sum.book_number || ''} F:{sum.page || sum.page_number || ''} N:{sum.entry || sum.entry_number || ''}</span>;
+                    return <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest font-mono">L:{pad(sum.book || sum.book_number || sum.Libro)} F:{pad(sum.page || sum.page_number || sum.folio)} N:{pad(sum.entry || sum.entry_number || sum.numero)}</span>;
                 }
             },
             { header: 'Causa', render: (row) => <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-tight block max-w-[150px] truncate">{getConceptName(row)}</span> }
@@ -216,7 +250,7 @@ const ChanceryDecreeReplacementViewPage = () => {
                     actions={[
                         { label: <Eye className="w-4 h-4" />, type: 'view', onClick: (row) => { setSelectedDecree(row); setViewModalOpen(true); }, className: "text-[#D4AF37] hover:bg-yellow-50 p-2 rounded-xl transition-all" },
                         { label: <Edit className="w-4 h-4" />, type: 'edit', onClick: (row) => navigate(`/chancery/decree-replacement/edit?id=${row.id}`), className: "text-amber-600 hover:bg-amber-50 p-2 rounded-xl transition-all" },
-                        { label: <Trash2 className="w-4 h-4" />, type: 'delete', onClick: (row) => setDeleteConfig({ isOpen: true, id: row.id, name: row.decreeNumber }), className: "text-red-500 hover:bg-red-50 p-2 rounded-xl transition-all" }
+                        { label: <Trash2 className="w-4 h-4" />, type: 'delete', onClick: (row) => setDeleteConfig({ isOpen: true, id: row.id, name: row.decreeNumber || row.numeroDecreto }), className: "text-red-500 hover:bg-red-50 p-2 rounded-xl transition-all" }
                     ]}
                 />
             </div>
@@ -386,8 +420,8 @@ const ChanceryDecreeReplacementViewPage = () => {
 
             <ConfirmationDialog 
                 isOpen={deleteConfig.isOpen} 
-                title="Restaurar Partida y Eliminar Decreto" 
-                message="Al confirmar, el decreto será eliminado de la Nube y la partida supletoria será destruida permanentemente." 
+                title="Restaurar Consecutivos y Eliminar" 
+                message="Al confirmar, el decreto será eliminado de la Nube. La partida supletoria generada será destruida y el consecutivo del libro supletorio regresará a su estado anterior remotamente." 
                 onConfirm={confirmDelete} 
                 onClose={() => setDeleteConfig({ isOpen: false, id: null, name: '' })} 
                 variant="destructive"
