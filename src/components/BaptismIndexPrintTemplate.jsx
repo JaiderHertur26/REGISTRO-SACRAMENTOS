@@ -74,7 +74,6 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
         return str.padStart(4, '0');
     };
 
-    // 🚀 EXTRACCIÓN ROBUSTA DE PADRES (Cubre Supabase columnas y raw_data)
     const getParentName = (record, type) => {
         const raw = record.raw_data || {};
         if (type === 'father') {
@@ -101,13 +100,13 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     color: #000;
                     width: 100%;
                     margin: 0;
-                    padding: 10mm;
+                    padding: 8mm;
                     box-sizing: border-box;
                 }
 
                 @page {
                     size: letter portrait;
-                    margin: 12mm; 
+                    margin: 10mm; 
                 }
 
                 @media print {
@@ -123,66 +122,62 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                     tfoot { display: table-footer-group; }
                 }
 
-                /* MEMBRETE INSTITUCIONAL FUERA DE LA TABLA (NO SE DUPLICA) */
+                /* MEMBRETE INSTITUCIONAL FIJO AL INICIO */
                 .print-header {
                     text-align: center;
-                    margin-bottom: 20px;
+                    margin-bottom: 15px;
                     border-bottom: 3px double #000;
-                    padding-bottom: 12px;
+                    padding-bottom: 10px;
                 }
                 .print-diocese {
-                    font-size: 13pt;
+                    font-size: 12pt;
                     font-weight: bold;
                     letter-spacing: 1px;
                     text-transform: uppercase;
                 }
                 .print-parish {
-                    font-size: 16pt;
+                    font-size: 15pt;
                     font-weight: 900;
-                    margin: 4px 0;
+                    margin: 3px 0;
                     text-transform: uppercase;
                 }
                 .print-location {
-                    font-size: 9.5pt;
+                    font-size: 9pt;
                     font-family: 'Arial', sans-serif;
                     color: #222;
                 }
                 .print-title {
-                    font-size: 12pt;
+                    font-size: 11pt;
                     font-weight: bold;
-                    margin-top: 12px;
+                    margin-top: 10px;
                     letter-spacing: 1.5px;
                     text-transform: uppercase;
                 }
 
-                /* MARCO EXTERIOR Y TABLA */
-                .table-wrapper {
-                    border: 2px solid #000;
-                    width: 100%;
-                }
-
+                /* TABLA PRINCIPAL CON MARCO NATIVO (Cierra en cada salto de página) */
                 .print-table {
                     width: 100%;
                     border-collapse: collapse;
                     border-spacing: 0;
                     font-family: 'Arial', sans-serif;
-                    font-size: 9pt;
+                    font-size: 8.5pt;
+                    border: 2px solid #000; /* Marco exterior principal sólido */
                 }
                 
                 .header-row th {
                     border: 1px solid #000;
                     border-bottom: 2px solid #000;
-                    padding: 8px 6px;
+                    padding: 6px 4px;
                     background-color: #eaeaea !important;
                     font-weight: 900;
                     text-align: center;
                     text-transform: uppercase;
-                    font-size: 8pt;
+                    font-size: 7.5pt;
                 }
                 
                 .print-table td {
-                    border: 1px solid #000;
-                    padding: 6px 6px;
+                    border: 1px solid #000; /* Cada celda sella su propio espacio, evitando líneas huérfanas */
+                    padding: 5px 6px;
                     vertical-align: middle;
                     line-height: 1.2;
                 }
@@ -193,22 +188,22 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
 
                 .col-number { width: 5%; font-weight: bold; text-align: center; font-size: 8pt; }
                 .col-titular { width: 32%; }
-                .col-padres { width: 41%; font-size: 8pt; }
-                .col-ref { width: 7%; font-family: 'Courier New', Courier, monospace; font-size: 9.5pt; text-align: center; font-weight: bold; }
+                .col-padres { width: 41%; font-size: 7.5pt; }
+                .col-ref { width: 7%; font-family: 'Courier New', Courier, monospace; font-size: 9pt; text-align: center; font-weight: bold; }
 
-                .text-bold { font-weight: 900; font-size: 9.5pt; color: #000; }
-                .text-muted { font-size: 8.5pt; color: #333; margin-top: 2px; }
+                .text-bold { font-weight: 900; font-size: 9pt; color: #000; }
+                .text-muted { font-size: 8pt; color: #333; margin-top: 1px; }
 
                 .row-anulada td { color: #555; }
                 .badge-anulada {
                     display: inline-block;
                     background-color: #000 !important;
                     color: white !important;
-                    font-size: 5.5pt;
-                    padding: 1px 4px;
+                    font-size: 5pt;
+                    padding: 1px 3px;
                     border-radius: 2px;
                     font-weight: bold;
-                    margin-left: 6px;
+                    margin-left: 5px;
                     vertical-align: text-bottom;
                     letter-spacing: 0.5px;
                 }
@@ -216,16 +211,15 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                 .footer-cell {
                     border: none !important;
                     background: white !important;
-                    padding-top: 15px !important;
+                    padding-top: 10px !important;
                     text-align: right !important;
-                    font-size: 7.5pt !important;
+                    font-size: 7pt !important;
                     color: #555 !important;
                     font-style: italic;
                     font-family: 'Times New Roman', Times, serif;
                 }
             `}</style>
             
-            {/* MEMBRETE FIJO (SOLO APARECE AL INICIO DE LA PRIMERA PÁGINA O LIMPIO) */}
             <div className="print-header">
                 <div className="print-diocese">{diocesis}</div>
                 <div className="print-parish">{nombreParroquia}</div>
@@ -235,78 +229,75 @@ const BaptismIndexPrintTemplate = forwardRef(({ data, parroquiaInfo, bookNumber 
                 </div>
             </div>
 
-            <div className="table-wrapper">
-                <table className="print-table">
-                    <thead>
-                        {/* 🚀 SOLO LOS TÍTULOS DE LAS COLUMNAS SE REPETIRÁN EN CADA HOJA NUEVA */}
-                        <tr className="header-row">
-                            <th className="col-number">N°</th>
-                            <th className="col-titular">APELLIDOS Y NOMBRES</th>
-                            <th className="col-padres">PADRES / FILIACIÓN</th>
-                            <th className="col-ref">LIBRO</th>
-                            <th className="col-ref">FOLIO</th>
-                            <th className="col-ref">ACTA</th>
-                        </tr>
-                    </thead>
-                    
-                    <tbody>
-                        {sortedData.map((record, index) => {
-                            const safeFormat = (val) => typeof formatPersonData === 'function' ? formatPersonData(val) : val;
+            <table className="print-table">
+                <thead>
+                    <tr className="header-row">
+                        <th className="col-number">N°</th>
+                        <th className="col-titular">APELLIDOS Y NOMBRES</th>
+                        <th className="col-padres">PADRES / FILIACIÓN</th>
+                        <th className="col-ref">LIBRO</th>
+                        <th className="col-ref">FOLIO</th>
+                        <th className="col-ref">ACTA</th>
+                    </tr>
+                </thead>
+                
+                <tbody>
+                    {sortedData.map((record, index) => {
+                        const safeFormat = (val) => typeof formatPersonData === 'function' ? formatPersonData(val) : val;
 
-                            const apellidos = safeFormat(record.apellidos || record.raw_data?.apellidos || record.lastName || '');
-                            const nombres = safeFormat(record.nombres || record.raw_data?.nombres || record.firstName || '');
-                            
-                            const padre = safeFormat(getParentName(record, 'father'));
-                            const madre = safeFormat(getParentName(record, 'mother'));
-                            
-                            const book = formatNumber(record.book_number || record.Libro || record.raw_data?.Libro || record.libro);
-                            const page = formatNumber(record.folio || record.raw_data?.folio || record.page_number);
-                            const entry = formatNumber(record.number || record.numero || record.raw_data?.numero || record.raw_data?.numeroActa);
-                            
-                            const isAnulada = record.status === 'anulada' || record.raw_data?.isAnnulled || record.raw_data?.estado === 'anulada';
-
-                            return (
-                                <tr key={record.id || index} className={isAnulada ? 'row-anulada' : ''}>
-                                    <td className="col-number">{index + 1}</td>
-                                    
-                                    <td>
-                                        <div className="text-bold">
-                                            {apellidos}
-                                            {isAnulada && <span className="badge-anulada">ANULADA</span>}
-                                        </div>
-                                        <div className="text-muted">{nombres}</div>
-                                    </td>
-                                    
-                                    <td className="col-padres">
-                                        <div style={{ marginBottom: '2px' }}><strong>P:</strong> {padre}</div>
-                                        <div><strong>M:</strong> {madre}</div>
-                                    </td>
-                                    
-                                    <td className="col-ref">{book}</td>
-                                    <td className="col-ref">{page}</td>
-                                    <td className="col-ref">{entry}</td>
-                                </tr>
-                            );
-                        })}
+                        const apellidos = safeFormat(record.apellidos || record.raw_data?.apellidos || record.lastName || '');
+                        const nombres = safeFormat(record.nombres || record.raw_data?.nombres || record.firstName || '');
                         
-                        {sortedData.length === 0 && (
-                            <tr>
-                                <td colSpan="6" style={{ textAlign: 'center', padding: '50px', color: '#888', fontStyle: 'italic', fontSize: '11pt' }}>
-                                    NO SE ENCONTRARON REGISTROS ASENTADOS PARA GENERAR EL ÍNDICE
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
+                        const padre = safeFormat(getParentName(record, 'father'));
+                        const madre = safeFormat(getParentName(record, 'mother'));
+                        
+                        const book = formatNumber(record.book_number || record.Libro || record.raw_data?.Libro || record.libro);
+                        const page = formatNumber(record.folio || record.raw_data?.folio || record.page_number);
+                        const entry = formatNumber(record.number || record.numero || record.raw_data?.numero || record.raw_data?.numeroActa);
+                        
+                        const isAnulada = record.status === 'anulada' || record.raw_data?.isAnnulled || record.raw_data?.estado === 'anulada';
 
-                    <tfoot>
+                        return (
+                            <tr key={record.id || index} className={isAnulada ? 'row-anulada' : ''}>
+                                <td className="col-number">{index + 1}</td>
+                                
+                                <td>
+                                    <div className="text-bold">
+                                        {apellidos}
+                                        {isAnulada && <span className="badge-anulada">ANULADA</span>}
+                                    </div>
+                                    <div className="text-muted">{nombres}</div>
+                                </td>
+                                
+                                <td className="col-padres">
+                                    <div style={{ marginBottom: '1px' }}><strong>P:</strong> {padre}</div>
+                                    <div><strong>M:</strong> {madre}</div>
+                                </td>
+                                
+                                <td className="col-ref">{book}</td>
+                                <td className="col-ref">{page}</td>
+                                <td className="col-ref">{entry}</td>
+                            </tr>
+                        );
+                    })}
+                    
+                    {sortedData.length === 0 && (
                         <tr>
-                            <td colSpan="6" className="footer-cell">
-                                Índice Generado Oficialmente por el Sistema Eclesia Digital • {new Date().toLocaleDateString('es-CO')}
+                            <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#888', fontStyle: 'italic', fontSize: '10pt' }}>
+                                NO SE ENCONTRARON REGISTROS ASENTADOS PARA GENERAR EL ÍNDICE
                             </td>
                         </tr>
-                    </tfoot>
-                </table>
-            </div>
+                    )}
+                </tbody>
+
+                <tfoot>
+                    <tr>
+                        <td colSpan="6" className="footer-cell">
+                            Índice Generado Oficialmente por el Sistema Eclesia Digital • {new Date().toLocaleDateString('es-CO')}
+                        </td>
+                    </tr>
+                </tfoot>
+            </table>
         </div>
     );
 });
