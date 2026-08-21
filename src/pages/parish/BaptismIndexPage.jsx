@@ -62,7 +62,6 @@ const BaptismIndexPage = () => {
                 };
             });
 
-            // Ordenar alfabéticamente por Apellidos y Nombres
             sanitizedData.sort((a, b) => {
                 const nameA = `${a.apellidos || ''} ${a.nombres || ''}`.trim().toUpperCase();
                 const nameB = `${b.apellidos || ''} ${b.nombres || ''}`.trim().toUpperCase();
@@ -72,7 +71,6 @@ const BaptismIndexPage = () => {
             setRecords(sanitizedData);
             setFilteredRecords(sanitizedData);
 
-            // Extraer los libros únicos disponibles
             const books = [...new Set(sanitizedData.map(r => r.Libro).filter(val => val !== '---'))].sort((a, b) => Number(a) - Number(b));
             setAvailableBooks(books);
             if (books.length > 0) setSelectedBook(books[0]);
@@ -98,19 +96,26 @@ const BaptismIndexPage = () => {
         setFilteredRecords(filtered);
     }, [searchTerm, records]);
 
-    // 🚀 1. CALCULAMOS LOS DATOS EN VIVO: El DOM siempre está listo con el libro seleccionado.
     const dataToPrint = selectedBook 
         ? records.filter(r => String(r.Libro) === String(selectedBook)) 
         : records;
 
-    // 🚀 2. FUNCIÓN DE IMPRESIÓN SÍNCRONA
+    // 🚀 1. LIBRERÍA DE IMPRESIÓN (SIN BLOQUEOS)
     const handlePrintAction = useReactToPrint({
         content: () => printRef.current,
-        documentTitle: `Indice_Bautismos_Libro_${selectedBook || 'Todos'}`,
-        onAfterPrint: () => {
-            setIsBookModalOpen(false); // Cierra el modal cuando termina de imprimir
-        }
+        documentTitle: `Indice_Bautismos_Libro_${selectedBook || 'Todos'}`
     });
+
+    // 🚀 2. FUNCIÓN DE "TRUCO" PARA ESQUIVAR EL MODAL
+    const executePrintSequence = () => {
+        // Primero, destruimos el Modal para que libere el navegador
+        setIsBookModalOpen(false);
+        
+        // Esperamos medio segundo a que termine la animación visual y luego imprimimos
+        setTimeout(() => {
+            handlePrintAction();
+        }, 500);
+    };
 
     const columns = [
         { header: 'Apellidos y Nombres', render: (row) => <span className="font-bold uppercase text-gray-900">{row.apellidos} {row.nombres}</span> },
@@ -176,7 +181,7 @@ const BaptismIndexPage = () => {
                     <div className="flex justify-end gap-3 pt-4 border-t mt-4">
                         <Button variant="outline" onClick={() => setIsBookModalOpen(false)}>Cancelar</Button>
                         <Button
-                            onClick={handlePrintAction} /* 🚀 3. ACCIÓN DIRECTA (SÍNCRONA) */
+                            onClick={executePrintSequence} /* 🚀 3. LLAMAMOS AL TRUCO AQUÍ */
                             disabled={!selectedBook}
                             className="bg-[#D4AF37] hover:bg-[#C4A027] text-white"
                         >
@@ -186,8 +191,8 @@ const BaptismIndexPage = () => {
                 </div>
             </Modal>
 
-            {/* 🚀 4. REEMPLAZO DE CLASSNAME HIDDEN POR ESTILOS SEGUROS PARA IMPRESIÓN */}
-            <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', opacity: 0, pointerEvents: 'none' }}>
+            {/* 🚀 CONTENEDOR OCULTO PERFECTO PARA REACT-TO-PRINT */}
+            <div style={{ display: 'none' }}>
                 <div ref={printRef}>
                     <BaptismIndexPrintTemplate
                         data={dataToPrint}
