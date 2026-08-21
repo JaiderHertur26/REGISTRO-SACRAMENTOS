@@ -13,12 +13,17 @@ import { supabase } from '@/lib/supabaseClient';
 import CityAutocomplete from '@/components/CityAutocomplete'; 
 import { calculateNextConsecutive } from '@/services/sacramentParametersService';
 
+const cleanTitle = (nameStr) => {
+    if (!nameStr) return '';
+    return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|SACERDOTE\s*)/i, '').trim();
+};
+
 const BaptismRepositionNewPage = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
     
-    // 🚀 AHORA SÍ: SOLO USAMOS EL CEREBRO GLOBAL
+    // 🚀 Extraemos getParrocos para la máquina del tiempo
     const { getParrocoActual, getMisDatosList, getCiudadesList, getParrocos } = useAppData();
     
     const [activeTab, setActiveTab] = useState("bautismo");
@@ -26,9 +31,9 @@ const BaptismRepositionNewPage = () => {
     const [conceptos, setConceptos] = useState([]);
     const [cloudParams, setCloudParams] = useState({});
     
-    // 🚀 ESTADOS LIMPIOS PARA LAS LISTAS
     const [ciudades, setCiudades] = useState([]);
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
+    const [sacerdotePorDefecto, setSacerdotePorDefecto] = useState('');
     
     const [decreeData, setDecreeData] = useState({ 
         numeroDecreto: '', 
@@ -40,7 +45,7 @@ const BaptismRepositionNewPage = () => {
         sacramentDate: '', firstName: '', lastName: '', sex: 'MASCULINO',
         birthDate: '', placeOfBirth: '', fatherName: '', motherName: '', 
         tipoUnionPadres: 'MATRIMONIO CATÓLICO', paternalGrandparents: '', 
-        maternalGrandparents: '', godparents: '', minister: '', ministerFaith: '',
+        maternalGrandparents: '', godparents: '', ministro: '', daFe: '', // Estandarizado
         serialRegCivil: '', nuipNuit: '', oficinaRegistro: '', fechaExpedicion: ''
     });
 
@@ -63,21 +68,18 @@ const BaptismRepositionNewPage = () => {
                     if (data) setConceptos(data.filter(c => c.tipo === 'porReposicion' || c.concepto?.toLowerCase().includes('reposici')));
                 }
 
-                // 🚀 CARGA PURA COMO EN BAPTISM CELEBRATED PAGE
                 const listaCruda = getCiudadesList(user.parishId) || [];
                 setCiudades(listaCruda.map(c => (c.nombre || '').toUpperCase()));
 
+                // 🚀 CARGAMOS LA LISTA HISTÓRICA
                 const parrocos = getParrocos(user.parishId) || [];
                 setListaSacerdotes(parrocos);
 
                 const priest = getParrocoActual(user.parishId);
                 if (priest) {
-                    const name = `${priest.nombre} ${priest.apellido || ''}`.trim().toUpperCase();
-                    setFormData(prev => ({ 
-                        ...prev, 
-                        ministerFaith: name, 
-                        minister: name 
-                    })); 
+                    const defName = `${priest.nombre} ${priest.apellido || ''}`.trim().toUpperCase();
+                    setSacerdotePorDefecto(defName);
+                    setFormData(prev => ({ ...prev, daFe: defName })); 
                 }
 
             } catch (error) {
@@ -88,14 +90,40 @@ const BaptismRepositionNewPage = () => {
         loadInitialData();
     }, [user, getParrocoActual, getCiudadesList, getParrocos]);
 
+    // 🚀 MÁQUINA DEL TIEMPO: SINCRONIZA MINISTRO Y DA FE CON LA FECHA DEL BAUTISMO
+    useEffect(() => {
+        if (!formData.sacramentDate || listaSacerdotes.length === 0) return;
+
+        const fechaSeleccionada = new Date(formData.sacramentDate.includes('T') ? formData.sacramentDate : `${formData.sacramentDate}T12:00:00`);
+        
+        const sacerdoteEpoca = listaSacerdotes.find(s => {
+            if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+            const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+            const inicio = new Date(iStr);
+            const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+            return fechaSeleccionada >= inicio && fechaSeleccionada <= fin;
+        });
+
+        if (sacerdoteEpoca) {
+            const histPriest = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
+            setFormData(prev => ({ 
+                ...prev, 
+                ministro: histPriest,
+                daFe: histPriest // Se sincroniza automáticamente
+            }));
+        } else {
+            // Si no encuentra, restaura el actual
+            setFormData(prev => ({ ...prev, daFe: sacerdotePorDefecto }));
+        }
+    }, [formData.sacramentDate, listaSacerdotes, sacerdotePorDefecto]);
+
     const handleChange = (e) => {
         const { name, value } = e.target;
-        const uppercaseFields = ['firstName', 'lastName', 'fatherName', 'motherName', 'paternalGrandparents', 'maternalGrandparents', 'godparents', 'minister', 'ministerFaith', 'oficinaRegistro'];
+        const uppercaseFields = ['firstName', 'lastName', 'fatherName', 'motherName', 'paternalGrandparents', 'maternalGrandparents', 'godparents', 'ministro', 'daFe', 'oficinaRegistro'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
 
-    // 🚀 MANEJADOR DEL CITYAUTOCOMPLETE
     const handleCityChange = (data) => {
         let value = data?.target?.value || data?.nombre || data || "";
         setFormData(prev => ({ ...prev, placeOfBirth: String(value).toUpperCase() }));
@@ -133,7 +161,15 @@ const BaptismRepositionNewPage = () => {
             const conceptoText = conceptoMatch?.concepto || 'REPOSICIÓN POR DETERIORO O PÉRDIDA';
             const fechaTexto = convertDateToSpanishText(decreeData.fechaDecreto).replace(/^EL\s+/i, '').toUpperCase();
             
-            const notaMarginalTecnica = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${decreeData.numeroDecreto.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText.toUpperCase()}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.`;
+            // 🚀 LIMPIEZA DE FIRMAS Y EMPAQUE SEGURO
+            let finalMin = cleanTitle(formData.ministro);
+            finalMin = finalMin !== 'EL PÁRROCO' && finalMin ? `PBRO. ${finalMin}` : finalMin;
+            
+            let finalDaFe = cleanTitle(formData.daFe);
+            finalDaFe = finalDaFe !== 'EL PÁRROCO' && finalDaFe ? `PBRO. ${finalDaFe}` : finalDaFe;
+
+            // Inyectamos el Sacerdote Histórico a la nota de reposición
+            const notaMarginalTecnica = `ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. ${decreeData.numeroDecreto.toUpperCase()} DE FECHA ${fechaTexto}, MOTIVO: ${conceptoText.toUpperCase()}. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO. DA FE: ${finalDaFe}.`;
 
             const partidaToSave = {
                 ...formData,
@@ -144,7 +180,8 @@ const BaptismRepositionNewPage = () => {
                 lugarn: formData.placeOfBirth, sex: formData.sex,
                 padre: formData.fatherName, madre: formData.motherName, tipohijo: formData.tipoUnionPadres,
                 abuepat: formData.paternalGrandparents, abuemat: formData.maternalGrandparents,
-                padrinos: formData.godparents, ministro: formData.minister, dafe: formData.ministerFaith,
+                padrinos: formData.godparents, 
+                ministro: finalMin, dafe: finalDaFe, daFe: finalDaFe, // Multillave purificada
                 anulado: false, status: 'seated', notaMarginal: notaMarginalTecnica
             };
 
@@ -153,8 +190,9 @@ const BaptismRepositionNewPage = () => {
                 decreeDate: decreeData.fechaDecreto, conceptoAnulacionId: decreeData.conceptoAnulacionId,
                 causa: conceptoText, targetName: `${formData.lastName} ${formData.firstName}`.trim(),
                 ...formData,
-                datosNuevaPartida: { ...formData, book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, book_number: supletorioLibro, page_number: supletorioFolio, entry_number: supletorioNumero },
-                newPartidaSummary: { book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, nombres: formData.firstName, apellidos: formData.lastName }
+                ministro: finalMin, daFe: finalDaFe, dafe: finalDaFe, ministerFaith: finalDaFe, // Multillave purificada
+                datosNuevaPartida: { ...formData, book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, book_number: supletorioLibro, page_number: supletorioFolio, entry_number: supletorioNumero, daFe: finalDaFe },
+                newPartidaSummary: { book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, nombres: formData.firstName, apellidos: formData.lastName, daFe: finalDaFe }
             };
 
             const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{
@@ -163,7 +201,7 @@ const BaptismRepositionNewPage = () => {
                 fecha_nacimiento: formData.birthDate || null, lugar_nacimiento: formData.placeOfBirth,
                 nombre_padre: formData.fatherName, nombre_madre: formData.motherName, tipo_union_padres: formData.tipoUnionPadres,
                 abuelos_paternos: formData.paternalGrandparents, abuelos_maternos: formData.maternalGrandparents, padrinos: formData.godparents,
-                ministro: formData.minister, da_fe: formData.ministerFaith, status: 'seated', nota_marginal: notaMarginalTecnica,
+                ministro: finalMin, da_fe: finalDaFe, status: 'seated', nota_marginal: notaMarginalTecnica,
                 raw_data: partidaToSave
             }]).select('id').single();
 
@@ -172,7 +210,6 @@ const BaptismRepositionNewPage = () => {
             payloadDecree.newPartidaId = newBap.id;
             await supabase.from('decretos').insert([{ parish_id: user.parishId, tipo: 'reposicion', payload: payloadDecree }]);
 
-            // 4. Calcular e incrementar consecutivos correctamente con el motor y salvavidas
             const siguientesSupletorios = calculateNextConsecutive(
                 cloudParams.suplementarioNumero,
                 cloudParams.suplementarioFolio,
@@ -189,7 +226,7 @@ const BaptismRepositionNewPage = () => {
             };
 
             await supabase.from('parish_parameters').upsert({ 
-                parish_id: user.parishId, // En parroquia es estrictamente este
+                parish_id: user.parishId, 
                 bautizos_params: newParams 
             }, { onConflict: 'parish_id' });
 
@@ -325,8 +362,8 @@ const BaptismRepositionNewPage = () => {
                                 <section>
                                     <SectionHeader number="06" title="Ministro y Autoridad" icon={PenTool} />
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                        <div><label className={labelClass}>Sacerdote Celebrante</label><input name="minister" list="lista-parrocos" value={formData.minister} onChange={handleChange} className={`${inputClass} border-l-8 border-l-[#4B7BA7]`} /></div>
-                                        <div><label className={labelClass}>Firma (Da Fe) *</label><input name="ministerFaith" required list="lista-parrocos" value={formData.ministerFaith} onChange={handleChange} className={inputClass} /></div>
+                                        <div><label className={labelClass}>Sacerdote Celebrante</label><input name="ministro" list="lista-parrocos" value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-[#4B7BA7]`} /></div>
+                                        <div><label className={labelClass}>Firma (Da Fe) *</label><input name="daFe" required list="lista-parrocos" value={formData.daFe} onChange={handleChange} className={inputClass} /></div>
                                     </div>
                                     <div><label className={labelClass}>Padrinos</label><input name="godparents" value={formData.godparents} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
                                 </section>

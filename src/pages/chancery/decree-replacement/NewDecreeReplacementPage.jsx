@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Save, ArrowLeft, FileText, UserPlus, Loader2, ShieldCheck, BookOpen, Calendar, User, Fingerprint, PenTool } from 'lucide-react';
+import { Save, ArrowLeft, FileText, UserPlus, Loader2, ShieldCheck, BookOpen, Calendar, User, Fingerprint, Users, PenTool, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { convertDateToSpanishText } from '@/utils/dateTimeFormatters';
@@ -13,30 +13,36 @@ import { supabase } from '@/lib/supabaseClient';
 import CityAutocomplete from '@/components/CityAutocomplete'; 
 import { calculateNextConsecutive } from '@/services/sacramentParametersService';
 
+// 🚀 FUNCIÓN LIMPIADORA DE TÍTULOS
+const cleanTitle = (nameStr) => {
+    if (!nameStr) return '';
+    return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|SACERDOTE\s*)/i, '').trim();
+};
+
 const NewDecreeReplacementPage = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
     
-    // 🚀 CEREBRO GLOBAL
     const { getMisDatosList } = useAppData();
     
     const [activeTab, setActiveTab] = useState("bautismo");
     const [isSubmitting, setIsSubmitting] = useState(false);
     
-    // --- ESTADOS EXCLUSIVOS CANCILLERÍA (100% NUBE) ---
+    // --- ESTADOS EXCLUSIVOS CANCILLERÍA ---
     const [parishesList, setParishesList] = useState([]);
     const [conceptos, setConceptos] = useState([]);
     const [chanceryNotesConfig, setChanceryNotesConfig] = useState(null);
     const [cloudParams, setCloudParams] = useState({});
     
-    // --- ESTADOS PARA LAS LISTAS DEPENDIENTES DE LA PARROQUIA ---
     const [ciudades, setCiudades] = useState([]);
     
-    // Contadores en vivo desde Supabase
     const [nextParams, setNextParams] = useState({ libro: '', folio: '', numero: '' });
 
-    // --- ESTADOS DE FORMULARIO ---
+    // 🚀 ESTADOS PARA MÁQUINA DEL TIEMPO EN CANCILLERÍA
+    const [targetPriests, setTargetPriests] = useState([]);
+    const [sacerdoteDestinoPorDefecto, setSacerdoteDestinoPorDefecto] = useState('');
+
     const [bautismoDecree, setBautismoDecree] = useState({ 
         parroquia: '', targetParishId: '', numeroDecreto: '', 
         fechaDecreto: new Date().toISOString().split('T')[0], conceptoAnulacionId: '' 
@@ -51,7 +57,6 @@ const NewDecreeReplacementPage = () => {
         oficinaRegistro: '', fechaExpedicion: ''
     });
 
-    // 1. CARGA INICIAL: Obtener Parroquias y Conceptos Directamente de Supabase
     useEffect(() => {
         const initializeData = async () => {
             if (!user) return;
@@ -65,7 +70,6 @@ const NewDecreeReplacementPage = () => {
                     if (chanData) currentDioceseId = chanData.diocese_id;
                 }
 
-                // Cargar Membrete de Cancillería
                 const entityId = user.chanceryId || user.id;
                 const misDatosList = getMisDatosList(entityId);
                 let entityLabel = '';
@@ -81,18 +85,15 @@ const NewDecreeReplacementPage = () => {
 
                 setBautismoDecree(prev => ({ ...prev, parroquia: entityLabel }));
 
-                // Cargar Plantillas de Notas de Cancillería
                 const { data: chanceryParams } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', entityId).maybeSingle();
                 if (chanceryParams && chanceryParams.bautizos_params?.plantillas_notas) {
                     setChanceryNotesConfig(chanceryParams.bautizos_params.plantillas_notas);
                 }
 
                 if (currentDioceseId) {
-                    // Cargar Conceptos
                     const { data: cData } = await supabase.from('conceptos_anulacion').select('id, codigo, concepto, tipo').eq('diocese_id', currentDioceseId).order('codigo', { ascending: true });
                     if (cData) setConceptos(cData.filter(c => c.tipo === 'porReposicion' || (c.concepto && c.concepto.toLowerCase().includes('reposici'))));
 
-                    // Cargar Parroquias de la Diócesis
                     const { data: pData } = await supabase.from('parishes').select('id, name, city').eq('diocese_id', currentDioceseId).order('name', { ascending: true });
                     if (pData) setParishesList(pData);
                 }
@@ -105,7 +106,6 @@ const NewDecreeReplacementPage = () => {
         initializeData();
     }, [user, getMisDatosList]);
 
-    // 2. EFECTO REACTIVO: Cuando la Cancillería elige la Parroquia Destino, traemos sus parámetros EN VIVO
     useEffect(() => {
         const fetchParishLiveParams = async () => {
             const pid = bautismoDecree.targetParishId;
@@ -114,11 +114,12 @@ const NewDecreeReplacementPage = () => {
                 setNextParams({ libro: '', folio: '', numero: '' });
                 setBautismoNewPartida(prev => ({ ...prev, ministerFaith: '', minister: '' }));
                 setCiudades([]);
+                setTargetPriests([]);
+                setSacerdoteDestinoPorDefecto('');
                 return;
             }
 
             try {
-                // A. Traer Consecutivos Supletorios
                 const { data: pData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', pid).maybeSingle();
                 if (pData && pData.bautizos_params) {
                     setCloudParams(pData.bautizos_params);
@@ -131,22 +132,26 @@ const NewDecreeReplacementPage = () => {
                     setNextParams({ libro: '0001', folio: '0001', numero: '0001' });
                 }
 
-                // B. Traer Párroco Activo de la Parroquia Seleccionada
+                // 🚀 CARGAR LISTA HISTÓRICA DE SACERDOTES DE LA PARROQUIA SELECCIONADA
+                let priestList = [];
+                let activePriestName = 'PÁRROCO ENCARGADO';
                 const { data: priestData } = await supabase.from('parrocos').select('payload').eq('parish_id', pid);
+                
                 if (priestData && priestData.length > 0) {
-                    const active = priestData.find(r => String(r.payload.estado || r.payload.Estado) === '1');
+                    priestList = priestData.map(r => typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload);
+                    setTargetPriests(priestList);
+                    
+                    const active = priestList.find(r => String(r.estado || r.Estado) === '1');
                     if (active) {
-                        let name = `${active.payload.nombre || ''} ${active.payload.apellido || ''}`.trim().toUpperCase();
-                        if (!name.startsWith('PBRO')) name = `PBRO. ${name}`;
-                        setBautismoNewPartida(prev => ({ ...prev, ministerFaith: name, minister: name }));
-                    } else {
-                        setBautismoNewPartida(prev => ({ ...prev, ministerFaith: 'PÁRROCO ENCARGADO', minister: 'PÁRROCO ENCARGADO' }));
+                        activePriestName = `${active.nombre || ''} ${active.apellido || ''}`.trim().toUpperCase();
                     }
                 } else {
-                    setBautismoNewPartida(prev => ({ ...prev, ministerFaith: 'PÁRROCO ENCARGADO', minister: 'PÁRROCO ENCARGADO' }));
+                    setTargetPriests([]);
                 }
+                
+                setSacerdoteDestinoPorDefecto(activePriestName);
+                setBautismoNewPartida(prev => ({ ...prev, ministerFaith: activePriestName, minister: activePriestName }));
 
-                // C. Traer Ciudades Registradas de esa Parroquia
                 const { data: citiesData } = await supabase.from('ciudades').select('nombre').eq('context_id', pid);
                 if (citiesData) {
                     setCiudades(citiesData.map(c => (c.nombre || '').toUpperCase()));
@@ -162,7 +167,38 @@ const NewDecreeReplacementPage = () => {
         fetchParishLiveParams();
     }, [bautismoDecree.targetParishId]);
 
-    // --- MANEJADORES DE ESTADO ---
+    // 🚀 MÁQUINA DEL TIEMPO: SINCRONIZA EL "DA FE" Y "MINISTRO" SEGÚN LA FECHA DE BAUTISMO EN ESA PARROQUIA
+    useEffect(() => {
+        if (!bautismoNewPartida.sacramentDate || targetPriests.length === 0) return;
+
+        const fechaSac = new Date(bautismoNewPartida.sacramentDate.includes('T') ? bautismoNewPartida.sacramentDate : `${bautismoNewPartida.sacramentDate}T12:00:00`);
+        
+        if (!isNaN(fechaSac.getTime())) {
+            const sacerdoteEpoca = targetPriests.find(s => {
+                if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                const inicio = new Date(iStr);
+                const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                return fechaSac >= inicio && fechaSac <= fin;
+            });
+
+            if (sacerdoteEpoca) {
+                const histPriest = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
+                setBautismoNewPartida(prev => ({ 
+                    ...prev, 
+                    minister: histPriest,
+                    ministerFaith: histPriest 
+                }));
+            } else {
+                setBautismoNewPartida(prev => ({ 
+                    ...prev, 
+                    minister: sacerdoteDestinoPorDefecto,
+                    ministerFaith: sacerdoteDestinoPorDefecto 
+                }));
+            }
+        }
+    }, [bautismoNewPartida.sacramentDate, targetPriests, sacerdoteDestinoPorDefecto]);
+
     const handleChange = (e) => {
         const { name, value } = e.target;
         const uppercaseFields = ['firstName', 'lastName', 'fatherName', 'motherName', 'paternalGrandparents', 'maternalGrandparents', 'godparents', 'minister', 'ministerFaith', 'oficinaRegistro', 'lugarBautismo'];
@@ -180,7 +216,6 @@ const NewDecreeReplacementPage = () => {
         setBautismoDecree(prev => ({ ...prev, [name]: name === 'numeroDecreto' ? value.toUpperCase() : value }));
     };
 
-    // --- SUBMIT 100% SUPABASE ---
     const handleSubmit = async (e) => {
         e.preventDefault();
         
@@ -196,7 +231,6 @@ const NewDecreeReplacementPage = () => {
         setIsSubmitting(true);
 
         try {
-            // 1. Validar Duplicidad de Decreto en esa Parroquia
             const { data: existingDecree } = await supabase.from('decretos').select('id').eq('tipo', 'reposicion')
                 .eq('parish_id', bautismoDecree.targetParishId).contains('payload', { decreeNumber: bautismoDecree.numeroDecreto }).maybeSingle();
 
@@ -206,30 +240,40 @@ const NewDecreeReplacementPage = () => {
                 return;
             }
 
-            // 2. Motor de Notas (Usando plantillas de Cancillería o Defaults)
+            const supletorioLibro = String(cloudParams.suplementarioLibro || '1').padStart(4, '0');
+            const supletorioFolio = String(cloudParams.suplementarioFolio || '1').padStart(4, '0');
+            const supletorioNumero = String(cloudParams.suplementarioNumero || '1').padStart(4, '0');
+
             const conceptoMatch = conceptos.find(c => String(c.id) === String(bautismoDecree.conceptoAnulacionId));
             const conceptoText = conceptoMatch?.concepto || 'REPOSICIÓN POR DETERIORO O PÉRDIDA';
             const fechaTexto = convertDateToSpanishText(bautismoDecree.fechaDecreto).replace(/^EL\s+/i, '').toUpperCase();
             
+            // 🚀 LIMPIEZA DE FIRMAS
+            let finalMin = cleanTitle(bautismoNewPartida.minister);
+            finalMin = finalMin !== 'EL PÁRROCO' && finalMin ? `PBRO. ${finalMin}` : finalMin;
+            
+            let finalDaFe = cleanTitle(bautismoNewPartida.ministerFaith);
+            finalDaFe = finalDaFe !== 'EL PÁRROCO' && finalDaFe ? `PBRO. ${finalDaFe}` : finalDaFe;
+
             let templateNueva = chanceryNotesConfig?.reposicion_nueva || "ESTA PARTIDA SE INSCRIBE POR REPOSICIÓN SEGÚN DECRETO NO. [NUMERO_DECRETO] DE FECHA [FECHA_DECRETO], MOTIVO: [CAUSA_REPOSICION]. LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO SUPLETORIO.";
             
             const notaMarginalTecnica = templateNueva
                 .replace(/\[NUMERO_DECRETO\]/g, bautismoDecree.numeroDecreto.toUpperCase())
                 .replace(/\[FECHA_DECRETO\]/g, fechaTexto)
                 .replace(/\[CAUSA_REPOSICION\]/g, conceptoText.toUpperCase())
-                .replace(/\[MINISTRO\]/g, bautismoNewPartida.daFe);
+                .replace(/\[MINISTRO\]/g, finalDaFe);
 
-            // 3. Preparar Partida Supletoria
             const partidaToSave = {
                 ...bautismoNewPartida,
-                Libro: nextParams.libro, folio: nextParams.folio, numero: nextParams.numero,
-                book_number: nextParams.libro, page_number: nextParams.folio, entry_number: nextParams.numero,
+                Libro: supletorioLibro, folio: supletorioFolio, numero: supletorioNumero,
+                book_number: supletorioLibro, page_number: supletorioFolio, entry_number: supletorioNumero,
                 nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName,
                 fecbau: bautismoNewPartida.sacramentDate, fecnac: bautismoNewPartida.birthDate,
                 lugarn: bautismoNewPartida.lugarNacimientoDetalle, sex: bautismoNewPartida.sex,
                 padre: bautismoNewPartida.fatherName, madre: bautismoNewPartida.motherName, tipohijo: bautismoNewPartida.tipoUnionPadres,
                 abuepat: bautismoNewPartida.paternalGrandparents, abuemat: bautismoNewPartida.maternalGrandparents,
-                padrinos: bautismoNewPartida.godparents, ministro: bautismoNewPartida.minister, dafe: bautismoNewPartida.ministerFaith,
+                padrinos: bautismoNewPartida.godparents, 
+                ministro: finalMin, dafe: finalDaFe, daFe: finalDaFe, // Purificados
                 anulado: false, status: 'seated', notaMarginal: notaMarginalTecnica
             };
 
@@ -238,33 +282,31 @@ const NewDecreeReplacementPage = () => {
                 decreeDate: bautismoDecree.fechaDecreto, conceptoAnulacionId: bautismoDecree.conceptoAnulacionId,
                 causa: conceptoText, targetName: `${bautismoNewPartida.lastName} ${bautismoNewPartida.firstName}`.trim(),
                 ...bautismoNewPartida,
-                datosNuevaPartida: { ...bautismoNewPartida, book: nextParams.libro, page: nextParams.folio, entry: nextParams.numero, book_number: nextParams.libro, page_number: nextParams.folio, entry_number: nextParams.numero },
-                newPartidaSummary: { book: nextParams.libro, page: nextParams.folio, entry: nextParams.numero, nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName }
+                ministro: finalMin, daFe: finalDaFe, dafe: finalDaFe, ministerFaith: finalDaFe, // 🚀 MULTILLAVE AL PDF
+                datosNuevaPartida: { ...bautismoNewPartida, book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, book_number: supletorioLibro, page_number: supletorioFolio, entry_number: supletorioNumero, daFe: finalDaFe },
+                newPartidaSummary: { book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero, nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName, daFe: finalDaFe }
             };
 
-            // 4. Inserción Directa de Partida a Supabase
             const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{
-                parish_id: bautismoDecree.targetParishId, book_number: nextParams.libro, folio: nextParams.folio, number: nextParams.numero,
+                parish_id: bautismoDecree.targetParishId, book_number: supletorioLibro, folio: supletorioFolio, number: supletorioNumero,
                 celebration_date: bautismoNewPartida.sacramentDate || null, nombres: bautismoNewPartida.firstName, apellidos: bautismoNewPartida.lastName, sexo: bautismoNewPartida.sex,
                 fecha_nacimiento: bautismoNewPartida.birthDate || null, lugar_nacimiento: bautismoNewPartida.lugarNacimientoDetalle,
                 nombre_padre: bautismoNewPartida.fatherName, nombre_madre: bautismoNewPartida.motherName, tipo_union_padres: bautismoNewPartida.tipoUnionPadres,
                 abuelos_paternos: bautismoNewPartida.paternalGrandparents, abuelos_maternos: bautismoNewPartida.maternalGrandparents, padrinos: bautismoNewPartida.godparents,
-                ministro: bautismoNewPartida.minister, da_fe: bautismoNewPartida.ministerFaith, status: 'seated', nota_marginal: notaMarginalTecnica,
+                ministro: finalMin, da_fe: finalDaFe, status: 'seated', nota_marginal: notaMarginalTecnica,
                 raw_data: partidaToSave
             }]).select('id').single();
 
             if (errBap) throw errBap;
 
-            // 5. Inserción del Decreto a Supabase
             payloadDecree.newPartidaId = newBap.id;
             await supabase.from('decretos').insert([{ parish_id: bautismoDecree.targetParishId, tipo: 'reposicion', payload: payloadDecree }]);
 
-            // 6. Calcular e incrementar consecutivos correctamente con el motor
             const siguientesSupletorios = calculateNextConsecutive(
                 cloudParams.suplementarioNumero,
                 cloudParams.suplementarioFolio,
                 cloudParams.suplementarioLibro,
-                cloudParams.suplementarioPartidas || 2, 
+                cloudParams.suplementarioPartidas || 2,
                 cloudParams.suplementarioReiniciar || false
             );
 
@@ -283,14 +325,10 @@ const NewDecreeReplacementPage = () => {
             toast({ title: "Reposición Exitosa", description: "Partida y Decreto sincronizados remotamente.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/chancery/decree-replacement/view');
 
-        } catch (error) { 
-            toast({ title: "Error en Proceso", description: error.message, variant: "destructive" }); 
-        } finally { 
-            setIsSubmitting(false); 
-        }
+        } catch (error) { toast({ title: "Error en Proceso", description: error.message, variant: "destructive" }); } 
+        finally { setIsSubmitting(false); }
     };
 
-    // --- ESTILOS VISUALES ---
     const inputClass = "h-11 w-full px-4 py-2 text-sm text-gray-900 font-bold border border-gray-200 rounded-xl focus:ring-4 focus:ring-amber-500/10 focus:border-amber-500 outline-none transition-all bg-gray-50/50 focus:bg-white uppercase shadow-sm";
     const labelClass = "block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1";
 
@@ -388,13 +426,7 @@ const NewDecreeReplacementPage = () => {
                                         <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="birthDate" value={bautismoNewPartida.birthDate} onChange={handleChange} className={inputClass} /></div>
                                         <div>
                                             <label className={labelClass}>Lugar de Nacimiento</label>
-                                            <CityAutocomplete 
-                                                name="placeOfBirth" 
-                                                value={bautismoNewPartida.lugarNacimientoDetalle} 
-                                                onChange={handleCityChange} 
-                                                cities={ciudades} 
-                                                className={inputClass} 
-                                            />
+                                            <CityAutocomplete name="placeOfBirth" value={bautismoNewPartida.placeOfBirth} onChange={handleCityChange} cities={ciudades} className={inputClass} />
                                         </div>
                                     </div>
                                 </section>
@@ -426,8 +458,8 @@ const NewDecreeReplacementPage = () => {
                                 <section className={`transition-opacity duration-300 ${!bautismoDecree.targetParishId ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
                                     <SectionHeader number="06" title="Ministro y Autoridad" icon={PenTool} />
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                        <div><label className={labelClass}>Sacerdote Celebrante</label><input name="minister" value={bautismoNewPartida.minister} onChange={handleChange} className={`${inputClass} border-l-8 border-l-amber-500`} /></div>
-                                        <div><label className={labelClass}>Firma (Da Fe) *</label><input name="ministerFaith" required value={bautismoNewPartida.ministerFaith} onChange={handleChange} className={inputClass} /></div>
+                                        <div><label className={labelClass}>Sacerdote Celebrante</label><input name="minister" list="lista-parrocos" value={bautismoNewPartida.minister} onChange={handleChange} className={`${inputClass} border-l-8 border-l-amber-500`} /></div>
+                                        <div><label className={labelClass}>Firma (Da Fe) *</label><input name="ministerFaith" required list="lista-parrocos" value={bautismoNewPartida.ministerFaith} onChange={handleChange} className={inputClass} /></div>
                                     </div>
                                     <div><label className={labelClass}>Padrinos</label><input name="godparents" value={bautismoNewPartida.godparents} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
                                 </section>
@@ -435,7 +467,7 @@ const NewDecreeReplacementPage = () => {
                                 <div className="flex justify-end gap-4 border-t border-gray-100 pt-12">
                                     <Button type="button" variant="ghost" onClick={() => navigate('/chancery/decree-replacement/view')} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] hover:bg-gray-50 transition-all">Descartar</Button>
                                     <Button type="submit" disabled={isSubmitting || !bautismoDecree.targetParishId} className="bg-gradient-to-r from-amber-600 to-[#2C3E50] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
-                                        {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Save className="w-5 h-5 mr-3" />} Emitir Decreto Remoto
+                                        {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Save className="w-5 h-5 mr-3" />} Emitir Decreto Permanente
                                     </Button>
                                 </div>
                             </div>
@@ -447,4 +479,4 @@ const NewDecreeReplacementPage = () => {
     );
 };
 
-export default NewDecreeReplacementPage;
+export default BaptismRepositionNewPage;
