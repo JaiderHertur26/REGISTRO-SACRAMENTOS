@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
-import CityAutocomplete from '@/components/CityAutocomplete';
 import { supabase } from '@/lib/supabaseClient';
 import SearchBaptismPartidaModal from '@/components/modals/SearchBaptismPartidaModal';
 import { motion } from 'framer-motion';
@@ -23,7 +22,6 @@ const ConfirmationCelebratedPage = () => {
     const { 
         validateConfirmationNumbers, 
         getMisDatosList, 
-        getCiudadesList, 
         getParrocos
     } = useAppData();
 
@@ -31,12 +29,12 @@ const ConfirmationCelebratedPage = () => {
     const nombreParroquia = user?.parishName || user?.parish_name || 'PARROQUIA';
 
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [ciudades, setCiudades] = useState([]);
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
     const [cloudParams, setCloudParams] = useState({});
     
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
+    // 🚀 ESTADO LIMPIO Y EXACTO AL JSON SOLICITADO
     const [formData, setFormData] = useState({
         Libro: '', 
         folio: '', 
@@ -48,16 +46,9 @@ const ConfirmationCelebratedPage = () => {
         sexo: '', 
         fechaNacimiento: '', 
         edad: '',
-        lugarNacimiento: '', 
-        tipoUnionPadres: '', 
         nombrePadre: '', 
-        cedulaPadre: '', 
         nombreMadre: '', 
-        cedulaMadre: '', 
         lugarBautismo: '',
-        libroBautismo: '',
-        folioBautismo: '',
-        numeroBautismo: '',
         padrinos: '', 
         ministro: '', 
         daFe: ''
@@ -83,9 +74,6 @@ const ConfirmationCelebratedPage = () => {
                 numero: String(p.ordinarioNumero || 1).padStart(4, '0')
             }));
 
-            const listaCruda = getCiudadesList(parishId) || [];
-            setCiudades(listaCruda.map(c => (c.nombre || '').toUpperCase()));
-
             const parrocos = getParrocos(parishId) || [];
             setListaSacerdotes(parrocos);
             
@@ -99,16 +87,16 @@ const ConfirmationCelebratedPage = () => {
         };
 
         loadInitialData();
-    }, [parishId, nombreParroquia, getMisDatosList, getCiudadesList, getParrocos]);
+    }, [parishId, nombreParroquia, getMisDatosList, getParrocos]);
 
-    // 🚀 MÁQUINA DEL TIEMPO: SINCRONIZA DA FE (Y cálculo de edad)
+    // 🚀 MÁQUINA DEL TIEMPO: SINCRONIZA DA FE Y CÁLCULO DE EDAD
     useEffect(() => {
         if (formData.fechaSacramento && listaSacerdotes.length > 0) {
             const fechaSeleccionada = new Date(formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`);
             const sacerdoteEncontrado = listaSacerdotes.find(s => {
                 if (!s.fechaIngreso && !s.fechaNombramiento) return false;
-                const inicio = new Date(s.fechaIngreso || s.fechaNombramiento);
-                const fin = s.fechaSalida ? new Date(s.fechaSalida) : new Date();
+                const inicio = new Date((s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`);
+                const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
                 return fechaSeleccionada >= inicio && fechaSeleccionada <= fin;
             });
 
@@ -118,29 +106,30 @@ const ConfirmationCelebratedPage = () => {
             }
         }
 
-        // Cálculo de Edad Dinámico
+        // Cálculo de Edad Dinámico y Blindado contra zonas horarias
         if (formData.fechaNacimiento && formData.fechaSacramento) {
-            const birth = new Date(formData.fechaNacimiento);
-            const conf = new Date(formData.fechaSacramento);
+            const birthStr = formData.fechaNacimiento.includes('T') ? formData.fechaNacimiento : `${formData.fechaNacimiento}T12:00:00`;
+            const confStr = formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`;
+            const birth = new Date(birthStr);
+            const conf = new Date(confStr);
             if (!isNaN(birth.getTime()) && !isNaN(conf.getTime())) {
                 let age = conf.getFullYear() - birth.getFullYear();
                 const m = conf.getMonth() - birth.getMonth();
-                if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) age--;
-                setFormData(prev => ({ ...prev, edad: age >= 0 ? age.toString() : '' }));
+                if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) {
+                    age--;
+                }
+                if (age >= 0 && formData.edad !== age.toString()) {
+                    setFormData(prev => ({ ...prev, edad: age.toString() }));
+                }
             }
         }
     }, [formData.fechaSacramento, formData.fechaNacimiento, listaSacerdotes]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        const uppercaseFields = ['nombres', 'apellidos', 'lugarNacimiento', 'lugarSacramento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe'];
+        const uppercaseFields = ['nombres', 'apellidos', 'lugarSacramento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
-    };
-
-    const handleCityChange = (data) => {
-        let value = data?.target?.value || data?.nombre || data || "";
-        setFormData(prev => ({ ...prev, lugarNacimiento: String(value).toUpperCase() }));
     };
 
     const handleSelectBaptismPartida = (partida) => {
@@ -151,21 +140,20 @@ const ConfirmationCelebratedPage = () => {
             else if (rawSex.startsWith('F')) normalizedSex = 'FEMENINO';
         }
 
+        const raw = partida.raw_data || partida || {};
+
         setFormData(prev => ({
             ...prev,
-            nombres: partida.nombres || partida.firstName || prev.nombres,
-            apellidos: partida.apellidos || partida.lastName || prev.apellidos,
-            fechaNacimiento: partida.fechaNacimiento || partida.birthDate || prev.fechaNacimiento,
+            nombres: partida.nombres || partida.firstName || raw.nombres || prev.nombres,
+            apellidos: partida.apellidos || partida.lastName || raw.apellidos || prev.apellidos,
+            fechaNacimiento: partida.fechaNacimiento || partida.birthDate || raw.fechaNacimiento || prev.fechaNacimiento,
             sexo: normalizedSex || prev.sexo,
-            nombrePadre: partida.nombrePadre || partida.nombre_padre || partida.fatherName || prev.nombrePadre,
-            nombreMadre: partida.nombreMadre || partida.nombre_madre || partida.motherName || prev.nombreMadre,
-            lugarBautismo: partida.lugarBautismo || partida.lugar_bautismo || prev.lugarBautismo,
-            libroBautismo: partida.book_number || partida.Libro || partida.libro || prev.libroBautismo,
-            folioBautismo: partida.page_number || partida.folio || prev.folioBautismo,
-            numeroBautismo: partida.entry_number || partida.numero || partida.numeroActa || prev.numeroBautismo
+            nombrePadre: partida.nombrePadre || partida.fatherName || raw.nombrePadre || raw.PADRE || prev.nombrePadre,
+            nombreMadre: partida.nombreMadre || partida.motherName || raw.nombreMadre || raw.MADRE || prev.nombreMadre,
+            lugarBautismo: partida.lugarBautismo || partida.baptismPlace || raw.lugarBautismo || raw.LUGBAU || prev.lugarBautismo
         }));
         
-        toast({ title: "Datos Importados", description: `Se han cargado los datos de ${partida.nombres} ${partida.apellidos}.`, className: "bg-blue-50 border-blue-200 text-blue-900" });
+        toast({ title: "Datos Importados", description: `Se han cargado los datos de la partida origen.`, className: "bg-red-50 border-red-200 text-red-900" });
         setIsSearchModalOpen(false);
     };
 
@@ -182,7 +170,27 @@ const ConfirmationCelebratedPage = () => {
 
         setIsSubmitting(true);
         try {
-            // 🚀 INYECCIÓN HÍBRIDA 100% DIRECTA PARA SOPORTAR LA NUEVA ARQUITECTURA
+            // 🚀 ESTRUCTURAMOS EL JSON EXACTAMENTE CON LAS LLAVES SOLICITADAS
+            const finalRawData = {
+                "LIBRO": formData.Libro,
+                "FOLIO": formData.folio,
+                "NÚMERO": formData.numero,
+                "FECHA DE CONFIRMACION": formData.fechaSacramento,
+                "LUGAR DE CONFIRMACION": formData.lugarSacramento,
+                "APELLIDOS": formData.apellidos,
+                "NOMBRES": formData.nombres,
+                "FECHA DE NACIMIENTO": formData.fechaNacimiento,
+                "EDAD": formData.edad ? `${formData.edad} AÑOS` : '',
+                "LUGAR DE BAUTISMO": formData.lugarBautismo,
+                "SEXO": formData.sexo,
+                "NOMBRE DEL PADRE": formData.nombrePadre,
+                "NOMBRE DE LA MADRE": formData.nombreMadre,
+                "PADRINO / MADRINA": formData.padrinos,
+                "MINISTRO": formData.ministro,
+                "DA FE": formData.daFe
+            };
+
+            // 🚀 INYECCIÓN DIRECTA PARA SOPORTAR LA ARQUITECTURA OFICIAL
             const { error: errConf } = await supabase.from('confirmations').insert([{
                 parish_id: parishId,
                 book_number: formData.Libro,
@@ -195,14 +203,12 @@ const ConfirmationCelebratedPage = () => {
                 nombres: formData.nombres || null,
                 sexo: formData.sexo || null,
                 fecha_nacimiento: formData.fechaNacimiento || null,
-                lugar_nacimiento: formData.lugarNacimiento || null,
                 nombre_padre: formData.nombrePadre || null,
                 nombre_madre: formData.nombreMadre || null,
-                tipo_union_padres: formData.tipoUnionPadres || null,
                 padrinos: formData.padrinos || null,
                 ministro: formData.ministro || null,
                 da_fe: formData.daFe || null,
-                raw_data: formData, // Conservamos toda la riqueza del documento
+                raw_data: finalRawData, // 🚀 JSON exacto guardado
                 created_at: new Date().toISOString()
             }]);
 
@@ -305,7 +311,7 @@ const ConfirmationCelebratedPage = () => {
                                 <div><label className={labelClass}>Apellidos</label><input name="apellidos" required value={formData.apellidos} onChange={handleChange} className={inputClass} /></div>
                                 <div><label className={labelClass}>Nombres</label><input name="nombres" required value={formData.nombres} onChange={handleChange} className={inputClass} /></div>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                                 <div>
                                     <label className={labelClass}>Sexo</label>
                                     <select name="sexo" required value={formData.sexo} onChange={handleChange} className={inputClass}>
@@ -321,10 +327,6 @@ const ConfirmationCelebratedPage = () => {
                                         <input type="number" name="edad" value={formData.edad} onChange={handleChange} className={`${inputClass} pr-12`} />
                                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">AÑOS</span>
                                     </div>
-                                </div>
-                                <div>
-                                    <label className={labelClass}>Lugar de Nac.</label>
-                                    <CityAutocomplete name="lugarNacimiento" value={formData.lugarNacimiento} onChange={handleCityChange} cities={ciudades} className={inputClass} />
                                 </div>
                             </div>
                         </section>
@@ -348,12 +350,7 @@ const ConfirmationCelebratedPage = () => {
                         <section>
                             <SectionHeader number="05" title="Registro de Bautismo Origen" icon={Droplet} />
                             <div className="space-y-6">
-                                <div><label className={labelClass}>Lugar y Parroquia de Bautismo</label><input name="lugarBautismo" value={formData.lugarBautismo} onChange={handleChange} className={inputClass} placeholder="EJ: P. SANTA TERESITA, BARRANQUILLA" /></div>
-                                <div className="grid grid-cols-3 gap-6 bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                                    <div><label className={labelClass}>Libro Baut.</label><input name="libroBautismo" value={formData.libroBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
-                                    <div><label className={labelClass}>Folio Baut.</label><input name="folioBautismo" value={formData.folioBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
-                                    <div><label className={labelClass}>Acta Baut.</label><input name="numeroBautismo" value={formData.numeroBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
-                                </div>
+                                <div><label className={labelClass}>Lugar y Parroquia de Bautismo</label><input name="lugarBautismo" value={formData.lugarBautismo} onChange={handleChange} className={inputClass} placeholder="EJ: PARROQUIA SAN JUAN BAUTISTA" /></div>
                             </div>
                         </section>
 
