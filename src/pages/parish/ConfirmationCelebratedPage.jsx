@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { 
     Save, Calendar, User, Users, 
     BookOpen, PenTool, Loader2, Fingerprint,
-    ShieldCheck, ArrowLeft, Search, Droplet
+    ShieldCheck, ArrowLeft, Search, Droplet, FileText
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
@@ -34,7 +34,7 @@ const ConfirmationCelebratedPage = () => {
     
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
-    // 🚀 ESTADO LIMPIO Y EXACTO AL JSON SOLICITADO
+    // 🚀 ESTADO ACTUALIZADO (Se añadió notaMarginal)
     const [formData, setFormData] = useState({
         Libro: '', 
         folio: '', 
@@ -51,7 +51,8 @@ const ConfirmationCelebratedPage = () => {
         lugarBautismo: '',
         padrinos: '', 
         ministro: '', 
-        daFe: ''
+        daFe: '',
+        notaMarginal: '' // Agregado
     });
 
     useEffect(() => {
@@ -106,7 +107,7 @@ const ConfirmationCelebratedPage = () => {
             }
         }
 
-        // Cálculo de Edad Dinámico y Blindado contra zonas horarias
+        // Cálculo de Edad Dinámico
         if (formData.fechaNacimiento && formData.fechaSacramento) {
             const birthStr = formData.fechaNacimiento.includes('T') ? formData.fechaNacimiento : `${formData.fechaNacimiento}T12:00:00`;
             const confStr = formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`;
@@ -127,7 +128,7 @@ const ConfirmationCelebratedPage = () => {
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        const uppercaseFields = ['nombres', 'apellidos', 'lugarSacramento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe'];
+        const uppercaseFields = ['nombres', 'apellidos', 'lugarSacramento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe', 'notaMarginal'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
@@ -170,7 +171,19 @@ const ConfirmationCelebratedPage = () => {
 
         setIsSubmitting(true);
         try {
-            // 🚀 ESTRUCTURAMOS EL JSON EXACTAMENTE CON LAS LLAVES SOLICITADAS
+            // 🚀 Helper para transformar vacíos en "---" y evitar huecos en el PDF
+            const safeString = (val) => (val && String(val).trim() !== '') ? String(val).trim() : '---';
+            const cleanDate = (d) => (d && String(d).trim() !== '') ? d : null;
+
+            // Preparamos los datos con el formato seguro
+            const dbNacimiento = cleanDate(formData.fechaNacimiento);
+            const dbPadre = safeString(formData.nombrePadre);
+            const dbMadre = safeString(formData.nombreMadre);
+            const dbLugarBau = safeString(formData.lugarBautismo);
+            const dbPadrinos = safeString(formData.padrinos);
+            const dbMinistro = safeString(formData.ministro);
+            const dbNotas = formData.notaMarginal.trim() !== '' ? formData.notaMarginal.trim() : null; // null permite que el PDF ponga su texto por defecto
+
             const finalRawData = {
                 "LIBRO": formData.Libro,
                 "FOLIO": formData.folio,
@@ -179,18 +192,18 @@ const ConfirmationCelebratedPage = () => {
                 "LUGAR DE CONFIRMACION": formData.lugarSacramento,
                 "APELLIDOS": formData.apellidos,
                 "NOMBRES": formData.nombres,
-                "FECHA DE NACIMIENTO": formData.fechaNacimiento,
+                "FECHA DE NACIMIENTO": dbNacimiento || '---',
                 "EDAD": formData.edad ? `${formData.edad} AÑOS` : '',
-                "LUGAR DE BAUTISMO": formData.lugarBautismo,
+                "LUGAR DE BAUTISMO": dbLugarBau,
                 "SEXO": formData.sexo,
-                "NOMBRE DEL PADRE": formData.nombrePadre,
-                "NOMBRE DE LA MADRE": formData.nombreMadre,
-                "PADRINO / MADRINA": formData.padrinos,
-                "MINISTRO": formData.ministro,
-                "DA FE": formData.daFe
+                "NOMBRE DEL PADRE": dbPadre,
+                "NOMBRE DE LA MADRE": dbMadre,
+                "PADRINO / MADRINA": dbPadrinos,
+                "MINISTRO": dbMinistro,
+                "DA FE": formData.daFe,
+                "NOTAS MARGINALES": dbNotas || ''
             };
 
-            // 🚀 INYECCIÓN DIRECTA PARA SOPORTAR LA ARQUITECTURA OFICIAL
             const { error: errConf } = await supabase.from('confirmations').insert([{
                 parish_id: parishId,
                 book_number: formData.Libro,
@@ -198,17 +211,18 @@ const ConfirmationCelebratedPage = () => {
                 number: formData.numero,
                 status: 'seated', 
                 celebration_date: formData.fechaSacramento || null,
-                lugar_bautismo: formData.lugarBautismo || null,
+                lugar_bautismo: dbLugarBau !== '---' ? dbLugarBau : null,
                 apellidos: formData.apellidos || null,
                 nombres: formData.nombres || null,
                 sexo: formData.sexo || null,
-                fecha_nacimiento: formData.fechaNacimiento || null,
-                nombre_padre: formData.nombrePadre || null,
-                nombre_madre: formData.nombreMadre || null,
-                padrinos: formData.padrinos || null,
-                ministro: formData.ministro || null,
+                fecha_nacimiento: dbNacimiento,
+                nombre_padre: dbPadre !== '---' ? dbPadre : null,
+                nombre_madre: dbMadre !== '---' ? dbMadre : null,
+                padrinos: dbPadrinos !== '---' ? dbPadrinos : null,
+                ministro: dbMinistro !== '---' ? dbMinistro : null,
                 da_fe: formData.daFe || null,
-                raw_data: finalRawData, // 🚀 JSON exacto guardado
+                nota_marginal: dbNotas, 
+                raw_data: finalRawData,
                 created_at: new Date().toISOString()
             }]);
 
@@ -358,10 +372,26 @@ const ConfirmationCelebratedPage = () => {
                         <section>
                             <SectionHeader number="06" title="Ministro y Autoridad" icon={PenTool} />
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input name="ministro" required value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} placeholder="EXCMO. MONS..." /></div>
+                                {/* Quitamos el 'required' estricto del Ministro para casos históricos */}
+                                <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input name="ministro" value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} placeholder="EXCMO. MONS..." /></div>
                                 <div><label className={labelClass}>Da Fe (Párroco)</label><input name="daFe" required value={formData.daFe} onChange={handleChange} list="lista-parrocos" className={inputClass} /></div>
                             </div>
                             <div><label className={labelClass}>Padrinos</label><input name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
+                        </section>
+                        
+                        {/* 07. NOTAS MARGINALES (NUEVO) */}
+                        <section>
+                            <SectionHeader number="07" title="Notas Marginales" icon={FileText} />
+                            <div>
+                                <label className={labelClass}>Anotaciones (Opcional)</label>
+                                <textarea 
+                                    name="notaMarginal" 
+                                    value={formData.notaMarginal} 
+                                    onChange={handleChange} 
+                                    className={`${inputClass} min-h-[100px] py-4 resize-y`} 
+                                    placeholder="REGISTRE CUALQUIER ANOTACIÓN ADICIONAL AQUÍ..." 
+                                />
+                            </div>
                         </section>
 
                         <div className="flex justify-end gap-4 border-t border-gray-100 pt-12">
