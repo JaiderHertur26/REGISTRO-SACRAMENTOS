@@ -10,7 +10,7 @@ import {
     ChevronLeft, ChevronRight, Save, 
     CheckCircle2, AlertCircle, Loader2, Printer,
     LayoutList, BookOpenCheck,
-    Layers, CheckSquare, Square, Lock
+    Layers, CheckSquare, Square, Lock, FileText
 } from 'lucide-react';
 import BaptismTicket from '@/components/BaptismTicket';
 import { supabase } from '@/lib/supabaseClient'; 
@@ -19,13 +19,11 @@ import { calculateNextConsecutive } from '@/services/sacramentParametersService'
 const BaptismSentarRegistrosPage = () => {
     const { user } = useAuth();
     const { 
-        seatBaptism, 
-        seatMultipleBaptisms, 
         getMisDatosList, 
         purificarRegistroBautismo,
         getBaptismParameters,
         saveBaptismParameters,
-        getParrocos // 🚀 Extraemos la lista de sacerdotes
+        getParrocos 
     } = useAppData();
     
     const { toast } = useToast();
@@ -33,10 +31,14 @@ const BaptismSentarRegistrosPage = () => {
 
     const [resolvedParishId, setResolvedParishId] = useState(null);
     const [nombreParroquia, setNombreParroquia] = useState('PARROQUIA PADRE MISERICORDIOSO');
+    
+    // 🚀 NUEVA PESTAÑA: 'reported'
     const [mode, setMode] = useState('individual'); 
     const [pendingBaptisms, setPendingBaptisms] = useState([]);
+    const [reportedBaptisms, setReportedBaptisms] = useState([]); // Historial
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedIds, setSelectedIds] = useState([]);
+    const [printingRecord, setPrintingRecord] = useState(null); // Para imprimir desde el historial
     
     const [nextNumbers, setNextNumbers] = useState({ book: '0001', page: '0001', entry: '0001' });
     const [fullParamsCache, setFullParamsCache] = useState(null); 
@@ -48,7 +50,7 @@ const BaptismSentarRegistrosPage = () => {
     const isDateInFuture = (dateString) => {
         if (!dateString) return false;
         const now = new Date();
-        const sacramentDate = new Date(dateString);
+        const sacramentDate = new Date(dateString.includes('T') ? dateString : `${dateString}T12:00:00`);
         return sacramentDate > now; 
     };
 
@@ -74,21 +76,18 @@ const BaptismSentarRegistrosPage = () => {
                 .order('created_at', { ascending: false });
 
             let recordsMapped = [];
-            const sacerdotes = getParrocos(resolvedParishId) || []; // 🚀 Máquina del tiempo
+            const sacerdotes = getParrocos(resolvedParishId) || []; 
             
             if (!tempError && tempData && tempData.length > 0) {
                 const cloudPending = tempData.map(pb => {
                     const raw = typeof pb.raw_data === 'string' ? JSON.parse(pb.raw_data) : (pb.raw_data || {});
-                    return { ...raw, id: pb.id, status: 'pending' };
+                    return { ...raw, id: pb.id, status: 'pending', reportado: pb.reportado }; // 🚀 Traemos la columna
                 });
                 
-                localStorage.setItem(`pendingBaptisms_${resolvedParishId}`, JSON.stringify(cloudPending));
-
                 recordsMapped = cloudPending.map(r => {
                     const purificado = purificarRegistroBautismo(r);
                     let fechaSac = r.fechaSacramento || r.sacramentDate || purificado.fechaSacramento;
 
-                    // 🚀 MÁQUINA DEL TIEMPO PARA CORRECCIÓN DE EXCEL Y VIEJOS DBF
                     let historicalPriest = null;
                     if (fechaSac && sacerdotes.length > 0) {
                         const fDate = new Date(fechaSac.includes('T') ? fechaSac : `${fechaSac}T12:00:00`);
@@ -101,13 +100,11 @@ const BaptismSentarRegistrosPage = () => {
                         if (sEpoca) historicalPriest = `${sEpoca.nombre} ${sEpoca.apellido || ''}`.trim().toUpperCase();
                     }
 
-                    // Corrección Ministro
                     let rawMin = purificado.ministro || r.ministro;
                     if (!rawMin || !isNaN(Number(String(rawMin).trim()))) {
                         rawMin = historicalPriest || '';
                     }
 
-                    // Corrección Da Fe (Clona del ministro o busca el histórico)
                     let rawDaFe = purificado.daFe || r.daFe || r.dafe || r.da_fe;
                     if (!rawDaFe || !isNaN(Number(String(rawDaFe).trim()))) {
                         rawDaFe = rawMin || historicalPriest || '';
@@ -115,18 +112,25 @@ const BaptismSentarRegistrosPage = () => {
 
                     return {
                         ...purificado,
+                        id: r.id,
+                        reportado: r.reportado, // 🚀 Conservamos el estatus
                         numeroRegistro: r.numeroRegistro || r.inscripcionNumero || purificado.numeroRegistro || '---',
                         direccion: r.direccion || purificado.direccion || '---',
                         nuip: r.nuip || purificado.nuip || '---',
                         oficinaRegistro: r.oficinaRegistro || purificado.oficinaRegistro || '---',
                         fechaSacramento: fechaSac,
                         ministro: rawMin,
-                        daFe: rawDaFe // 🚀 Inyectado con su valor histórico o clonado
+                        daFe: rawDaFe 
                     };
                 });
             }
             
-            setPendingBaptisms(recordsMapped);
+            // 🚀 SEPARAMOS PENDIENTES Y REPORTADOS
+            const pendientes = recordsMapped.filter(r => !r.reportado);
+            const reportados = recordsMapped.filter(r => r.reportado);
+
+            setPendingBaptisms(pendientes);
+            setReportedBaptisms(reportados);
 
             const p = await getBaptismParameters(resolvedParishId);
             setFullParamsCache(p);
@@ -203,23 +207,63 @@ const BaptismSentarRegistrosPage = () => {
 
     const handleReprint = () => {
         if (!currentBaptism) return;
+        setPrintingRecord(null); // Aseguramos que imprima el actual pendiente
         setTimeout(() => window.print(), 300);
     };
 
+    // 🚀 LÓGICA DIRECTA SUPABASE: Inserta y marca como Reportado
     const handleRegisterIndividual = async () => {
         if (!currentBaptism || isSaving || currentIsFuture) return;
 
         setIsSaving(true);
         try {
-            const result = await seatBaptism(currentBaptism.id, resolvedParishId, currentBaptism);
-            if (result.success) {
-                await incrementParameters(1, 'ordinario'); 
-                toast({ title: "Éxito", description: "Bautismo asentado permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
-                await loadData();
-                if (currentIndex >= pendingBaptisms.length - 1) setCurrentIndex(Math.max(0, pendingBaptisms.length - 2));
-            } else {
-                throw new Error(result.message);
-            }
+            const cleanDate = (d) => (d && String(d).trim() !== '' && String(d).trim() !== '---') ? d : null;
+
+            // 1. Insertar en tabla base
+            const finalData = {
+                parish_id: resolvedParishId,
+                book_number: nextNumbers.book,
+                folio: nextNumbers.page,
+                number: nextNumbers.entry,
+                numero_registro: currentBaptism.numeroRegistro,
+                status: 'seated',
+                celebration_date: cleanDate(currentBaptism.fechaSacramento),
+                lugar_bautismo: currentBaptism.lugarBautismo || null,
+                apellidos: currentBaptism.apellidos || null,
+                nombres: currentBaptism.nombres || null,
+                sexo: currentBaptism.sexo || null,
+                fecha_nacimiento: cleanDate(currentBaptism.fechaNacimiento),
+                lugar_nacimiento: currentBaptism.lugarNacimiento || null,
+                nombre_padre: currentBaptism.nombrePadre || null,
+                nombre_madre: currentBaptism.nombreMadre || null,
+                tipo_union_padres: currentBaptism.tipoUnionPadres || null,
+                padrinos: currentBaptism.padrinos || null,
+                abuelos_paternos: currentBaptism.abuelosPaternos || null,
+                abuelos_maternos: currentBaptism.abuelosMaternos || null,
+                ministro: currentBaptism.ministro || null,
+                da_fe: currentBaptism.daFe || null,
+                nuip: currentBaptism.nuip || null,
+                serial_registro: currentBaptism.serialRegistro || null,
+                oficina_registro: currentBaptism.oficinaRegistro || null,
+                fecha_expedicion_registro: cleanDate(currentBaptism.fechaExpedicionRegistro),
+                direccion: currentBaptism.direccion || null,
+                raw_data: { ...currentBaptism, Libro: nextNumbers.book, folio: nextNumbers.page, numero: nextNumbers.entry },
+                created_at: new Date().toISOString()
+            };
+
+            const { error: insertError } = await supabase.from('baptisms').insert([finalData]);
+            if (insertError) throw insertError;
+
+            // 2. Marcar como reportado en lugar de borrar
+            const { error: updateError } = await supabase.from('pending_baptisms').update({ reportado: true }).eq('id', currentBaptism.id);
+            if (updateError) throw updateError;
+
+            await incrementParameters(1, 'ordinario'); 
+            toast({ title: "Éxito", description: "Bautismo asentado y reportado permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
+            
+            await loadData();
+            if (currentIndex >= pendingBaptisms.length - 1) setCurrentIndex(Math.max(0, pendingBaptisms.length - 2));
+
         } catch (error) { 
             toast({ title: "Error", description: error.message, variant: "destructive" }); 
         } finally { 
@@ -244,29 +288,93 @@ const BaptismSentarRegistrosPage = () => {
         else setSelectedIds([...selectedIds, id]);
     };
 
+    // 🚀 LÓGICA DIRECTA SUPABASE PARA LOTE
     const handleBatchConfirm = async () => {
         if (selectedIds.length === 0 || isSaving) return;
         if (!window.confirm(`¿Asentar ${selectedIds.length} registros permanentemente?`)) return;
 
         setIsSaving(true);
         try {
-            // El backend ahora recibirá los registros de "pending_baptisms" que ya modificamos visualmente. 
-            // Para asegurarnos de que la Nube guarde la corrección, los guardamos individualmente
-            // o a través del batch modificado.
-            const result = await seatMultipleBaptisms(selectedIds, resolvedParishId);
-            if (result.success) {
-                await incrementParameters(selectedIds.length, 'ordinario'); 
-                toast({ title: "Lote Procesado", className: "bg-green-50 text-green-900 border-green-200" });
-                setSelectedIds([]);
-                await loadData();
-            } else {
-                throw new Error(result.message);
+            const cleanDate = (d) => (d && String(d).trim() !== '' && String(d).trim() !== '---') ? d : null;
+            const p = fullParamsCache || await getBaptismParameters(resolvedParishId);
+            let cFolio = parseInt(p.ordinarioFolio || 1, 10);
+            let cNumero = parseInt(p.ordinarioNumero || 1, 10);
+            let cLibro = parseInt(p.ordinarioLibro || 1, 10);
+            let pPorFolio = parseInt(p.ordinarioPartidas || 2, 10);
+            let restart = p.ordinarioRestartNumber;
+
+            const recordsToInsert = [];
+
+            for (const id of selectedIds) {
+                const b = pendingBaptisms.find(c => c.id === id);
+                const curBook = String(cLibro).padStart(4, '0');
+                const curFolio = String(cFolio).padStart(4, '0');
+                const curEntry = String(cNumero).padStart(4, '0');
+
+                recordsToInsert.push({
+                    parish_id: resolvedParishId,
+                    book_number: curBook,
+                    folio: curFolio,
+                    number: curEntry,
+                    numero_registro: b.numeroRegistro,
+                    status: 'seated',
+                    celebration_date: cleanDate(b.fechaSacramento),
+                    lugar_bautismo: b.lugarBautismo || null,
+                    apellidos: b.apellidos || null,
+                    nombres: b.nombres || null,
+                    sexo: b.sexo || null,
+                    fecha_nacimiento: cleanDate(b.fechaNacimiento),
+                    lugar_nacimiento: b.lugarNacimiento || null,
+                    nombre_padre: b.nombrePadre || null,
+                    nombre_madre: b.nombreMadre || null,
+                    tipo_union_padres: b.tipoUnionPadres || null,
+                    padrinos: b.padrinos || null,
+                    abuelos_paternos: b.abuelosPaternos || null,
+                    abuelos_maternos: b.abuelosMaternos || null,
+                    ministro: b.ministro || null,
+                    da_fe: b.daFe || null,
+                    nuip: b.nuip || null,
+                    serial_registro: b.serialRegistro || null,
+                    oficina_registro: b.oficinaRegistro || null,
+                    fecha_expedicion_registro: cleanDate(b.fechaExpedicionRegistro),
+                    direccion: b.direccion || null,
+                    raw_data: { ...b, Libro: curBook, folio: curFolio, numero: curEntry },
+                    created_at: new Date().toISOString()
+                });
+
+                const siguiente = calculateNextConsecutive(cNumero, cFolio, cLibro, pPorFolio, restart);
+                cNumero = parseInt(siguiente.numero, 10);
+                cFolio = parseInt(siguiente.folio, 10);
+                cLibro = parseInt(siguiente.libro, 10);
             }
+
+            // 1. Insertar Lote
+            const { error: insertError } = await supabase.from('baptisms').insert(recordsToInsert);
+            if (insertError) throw insertError;
+
+            // 2. Marcar Lote como Reportado (No borrar)
+            const { error: updateError } = await supabase.from('pending_baptisms').update({ reportado: true }).in('id', selectedIds);
+            if (updateError) throw updateError;
+
+            // 3. Guardar Parámetros
+            const updatedParams = { ...p, ordinarioFolio: cFolio, ordinarioNumero: cNumero, ordinarioLibro: cLibro };
+            await saveBaptismParameters(updatedParams, resolvedParishId);
+
+            toast({ title: "Lote Procesado", className: "bg-green-50 text-green-900 border-green-200" });
+            setSelectedIds([]);
+            await loadData();
+
         } catch (err) { 
             toast({ title: "Error", description: err.message, variant: "destructive" }); 
         } finally { 
             setIsSaving(false); 
         }
+    };
+
+    // 🚀 FUNCIÓN PARA IMPRIMIR DESDE EL HISTORIAL
+    const handlePrintReported = (record) => {
+        setPrintingRecord(record);
+        setTimeout(() => window.print(), 300);
     };
 
     if (isLoading) return (
@@ -275,21 +383,19 @@ const BaptismSentarRegistrosPage = () => {
         </DashboardLayout>
     );
 
-    if (pendingBaptisms.length === 0) return (
-        <DashboardLayout entityName={nombreParroquia}>
-            <div className="flex flex-col items-center justify-center min-h-[400px] bg-white rounded-[3rem] p-12 text-center border-2 border-dashed">
-                <CheckCircle2 className="w-16 h-16 text-green-200 mb-4" />
-                <h3 className="text-xl font-bold uppercase text-gray-400">Archivo al Día</h3>
-                <p className="text-xs text-gray-400 mt-1">No hay borradores pendientes en la nube.</p>
-                <Button variant="outline" className="mt-6 rounded-xl" onClick={() => navigate('/parroquia/bautismo/partidas')}>Ver Actas Permanentes</Button>
-            </div>
-        </DashboardLayout>
+    const EmptyState = ({ message, hideButton }) => (
+        <div className="flex flex-col items-center justify-center min-h-[400px] bg-white rounded-[3rem] p-12 text-center border-2 border-dashed shadow-sm">
+            <CheckCircle2 className="w-16 h-16 text-green-200 mb-4" />
+            <h3 className="text-xl font-bold uppercase text-gray-400">Archivo al Día</h3>
+            <p className="text-xs text-gray-400 mt-1">{message}</p>
+            {!hideButton && <Button variant="outline" className="mt-6 rounded-xl" onClick={() => navigate('/parroquia/bautismo/partidas')}>Ver Actas Permanentes</Button>}
+        </div>
     );
 
     return (
         <DashboardLayout entityName={nombreParroquia}>
             <div className="hidden print:block">
-                {currentBaptism && <BaptismTicket baptismData={currentBaptism} parishInfo={parishInfo} />}
+                {(printingRecord || currentBaptism) && <BaptismTicket baptismData={printingRecord || currentBaptism} parishInfo={parishInfo} />}
             </div>
 
             <div className="print:hidden max-w-7xl mx-auto px-4 pb-20">
@@ -298,21 +404,25 @@ const BaptismSentarRegistrosPage = () => {
                         <Button variant="ghost" onClick={() => navigate('/parroquia/bautismo/partidas')} className="rounded-2xl bg-white shadow-sm h-12 w-12 border"><ChevronLeft /></Button>
                         <div>
                             <h1 className="text-3xl font-black uppercase tracking-tighter">Asentamiento de Libros</h1>
-                            <p className="text-gray-400 text-[10px] font-black uppercase tracking-[0.3em] flex items-center gap-2"><Layers className="w-3 h-3 text-[#D4AF37]" /> Firma de Actas Temporales</p>
+                            <p className="text-gray-400 text-[10px] font-black uppercase tracking-[0.3em] flex items-center gap-2"><Layers className="w-3 h-3 text-[#4B7BA7]" /> Firma de Actas Temporales</p>
                         </div>
                     </div>
 
-                    <div className="bg-gray-200/50 p-1.5 rounded-[1.5rem] border flex items-center gap-1">
-                        <button onClick={() => setMode('individual')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all", mode === 'individual' ? "bg-white text-[#4B7BA7] shadow-lg" : "text-gray-500")}>
+                    <div className="bg-gray-200/50 p-1.5 rounded-[1.5rem] border flex items-center gap-1 overflow-x-auto">
+                        <button onClick={() => setMode('individual')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all whitespace-nowrap", mode === 'individual' ? "bg-white text-[#4B7BA7] shadow-lg" : "text-gray-500 hover:bg-gray-200")}>
                             <BookOpenCheck className="w-4 h-4 inline mr-2" /> Individual
                         </button>
-                        <button onClick={() => setMode('batch')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all", mode === 'batch' ? "bg-white text-[#4B7BA7] shadow-lg" : "text-gray-500")}>
+                        <button onClick={() => setMode('batch')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all whitespace-nowrap", mode === 'batch' ? "bg-white text-[#4B7BA7] shadow-lg" : "text-gray-500 hover:bg-gray-200")}>
                             <LayoutList className="w-4 h-4 inline mr-2" /> Por Lote
+                        </button>
+                        <button onClick={() => setMode('reported')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all whitespace-nowrap", mode === 'reported' ? "bg-[#4B7BA7] text-white shadow-lg shadow-blue-900/20" : "text-gray-500 hover:bg-gray-200")}>
+                            <FileText className="w-4 h-4 inline mr-2" /> Boletas Emitidas
                         </button>
                     </div>
                 </div>
 
                 {mode === 'individual' && (
+                    pendingBaptisms.length === 0 ? <EmptyState message="No hay borradores pendientes en la nube." /> :
                     <div className="animate-in fade-in duration-500 space-y-6">
                         <div className="bg-white p-4 rounded-t-[2rem] border shadow-sm flex items-center justify-between border-b-0">
                             <Button variant="outline" onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))} disabled={currentIndex === 0}><ChevronLeft /></Button>
@@ -348,7 +458,7 @@ const BaptismSentarRegistrosPage = () => {
                             </div>
 
                             <div className="flex justify-between items-center pt-8 border-t">
-                                <Button variant="outline" onClick={handleReprint} className="rounded-xl"><Printer className="mr-2 w-4 h-4" /> Re-imprimir Boleta</Button>
+                                <Button variant="outline" onClick={handleReprint} className="rounded-xl"><Printer className="mr-2 w-4 h-4" /> Imprimir Boleta Previa</Button>
                                 <Button 
                                     onClick={handleRegisterIndividual} 
                                     disabled={isSaving || currentIsFuture} 
@@ -366,6 +476,7 @@ const BaptismSentarRegistrosPage = () => {
                 )}
 
                 {mode === 'batch' && (
+                    pendingBaptisms.length === 0 ? <EmptyState message="No hay borradores pendientes en la nube para procesar por lote." /> :
                     <div className="animate-in fade-in duration-500 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden">
                         <table className="w-full text-left">
                             <thead className="bg-gray-50 border-b font-black text-[10px] text-gray-400 uppercase">
@@ -424,6 +535,51 @@ const BaptismSentarRegistrosPage = () => {
                                 {isSaving ? <Loader2 className="animate-spin mr-2" /> : <CheckCircle2 className="mr-2" />} Asentar Selección
                             </Button>
                         </div>
+                    </div>
+                )}
+
+                {/* 🚀 NUEVA SECCIÓN DE BOLETAS EMITIDAS */}
+                {mode === 'reported' && (
+                    reportedBaptisms.length === 0 ? <EmptyState message="Aún no tienes registros que hayan sido reportados/asentados." hideButton /> :
+                    <div className="animate-in fade-in duration-500 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-50 border-b font-black text-[10px] text-gray-400 uppercase">
+                                <tr>
+                                    <th className="px-8 py-6 w-24">Estado</th>
+                                    <th className="px-6 py-6">Bautizado</th>
+                                    <th className="px-6 py-6">Fecha Bautismo</th>
+                                    <th className="px-6 py-6 text-right">Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {reportedBaptisms.map(b => (
+                                    <tr key={b.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-8 py-4">
+                                            <span className="text-[8px] font-black bg-blue-50 text-[#4B7BA7] border border-blue-200 px-3 py-1.5 rounded-full uppercase flex items-center w-max gap-1">
+                                                <CheckCircle2 className="w-3 h-3" /> Reportado
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <p className="font-black uppercase text-xs text-gray-800">{b.apellidos}, {b.nombres}</p>
+                                            <p className="text-[9px] font-bold text-gray-400 uppercase">#{b.numeroRegistro || '---'}</p>
+                                        </td>
+                                        <td className="px-6 py-4 text-[11px] font-black uppercase text-gray-600">
+                                            {b.fechaSacramento}
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm" 
+                                                onClick={() => handlePrintReported(b)} 
+                                                className="text-[#4B7BA7] border-[#4B7BA7] hover:bg-blue-50 rounded-xl uppercase text-[10px] font-bold tracking-widest"
+                                            >
+                                                <Printer className="w-3 h-3 mr-2" /> Boleta
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 )}
             </div>
