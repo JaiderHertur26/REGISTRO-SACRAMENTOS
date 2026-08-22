@@ -170,37 +170,34 @@ const ConfirmationCelebratedPage = () => {
 
         setIsSubmitting(true);
         try {
-            // 🚀 SOLUCIÓN A LOS CAMPOS VACÍOS EN EL PDF:
-            // Si el campo está vacío, le asignamos "NO REGISTRA" para que la Partida se imprima perfectamente.
-            const fillEmpty = (value) => (value && String(value).trim() !== '') ? String(value).trim() : 'NO REGISTRA';
-
+            // 🚀 ESTRUCTURAMOS EL JSON EXACTAMENTE CON LAS LLAVES SOLICITADAS
             const finalRawData = {
-                "LIBRO": fillEmpty(formData.Libro),
-                "FOLIO": fillEmpty(formData.folio),
-                "NÚMERO": fillEmpty(formData.numero),
-                "FECHA DE CONFIRMACION": fillEmpty(formData.fechaSacramento),
-                "LUGAR DE CONFIRMACION": fillEmpty(formData.lugarSacramento),
-                "APELLIDOS": fillEmpty(formData.apellidos),
-                "NOMBRES": fillEmpty(formData.nombres),
-                "FECHA DE NACIMIENTO": fillEmpty(formData.fechaNacimiento),
-                "EDAD": formData.edad ? `${formData.edad} AÑOS` : 'NO REGISTRA',
-                "LUGAR DE BAUTISMO": fillEmpty(formData.lugarBautismo),
-                "SEXO": fillEmpty(formData.sexo),
-                "NOMBRE DEL PADRE": fillEmpty(formData.nombrePadre),
-                "NOMBRE DE LA MADRE": fillEmpty(formData.nombreMadre),
-                "PADRINO / MADRINA": fillEmpty(formData.padrinos),
-                "MINISTRO": fillEmpty(formData.ministro),
-                "DA FE": fillEmpty(formData.daFe)
+                "LIBRO": formData.Libro,
+                "FOLIO": formData.folio,
+                "NÚMERO": formData.numero,
+                "FECHA DE CONFIRMACION": formData.fechaSacramento,
+                "LUGAR DE CONFIRMACION": formData.lugarSacramento,
+                "APELLIDOS": formData.apellidos,
+                "NOMBRES": formData.nombres,
+                "FECHA DE NACIMIENTO": formData.fechaNacimiento,
+                "EDAD": formData.edad ? `${formData.edad} AÑOS` : '',
+                "LUGAR DE BAUTISMO": formData.lugarBautismo,
+                "SEXO": formData.sexo,
+                "NOMBRE DEL PADRE": formData.nombrePadre,
+                "NOMBRE DE LA MADRE": formData.nombreMadre,
+                "PADRINO / MADRINA": formData.padrinos,
+                "MINISTRO": formData.ministro,
+                "DA FE": formData.daFe
             };
 
-            // 🚀 INYECCIÓN DIRECTA A LA BASE DE DATOS
+            // 🚀 INYECCIÓN DIRECTA PARA SOPORTAR LA ARQUITECTURA OFICIAL
             const { error: errConf } = await supabase.from('confirmations').insert([{
                 parish_id: parishId,
                 book_number: formData.Libro,
                 folio: formData.folio,
                 number: formData.numero,
                 status: 'seated', 
-                celebration_date: formData.fechaSacramento || null, // Supabase sí maneja nulos en las columnas base
+                celebration_date: formData.fechaSacramento || null,
                 lugar_bautismo: formData.lugarBautismo || null,
                 apellidos: formData.apellidos || null,
                 nombres: formData.nombres || null,
@@ -211,7 +208,7 @@ const ConfirmationCelebratedPage = () => {
                 padrinos: formData.padrinos || null,
                 ministro: formData.ministro || null,
                 da_fe: formData.daFe || null,
-                raw_data: finalRawData, // El JSON ahora tiene los "NO REGISTRA" para la impresión del PDF
+                raw_data: finalRawData, // 🚀 JSON exacto guardado
                 created_at: new Date().toISOString()
             }]);
 
