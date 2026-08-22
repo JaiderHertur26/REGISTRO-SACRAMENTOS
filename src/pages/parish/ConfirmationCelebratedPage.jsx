@@ -30,11 +30,10 @@ const ConfirmationCelebratedPage = () => {
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
-    const [cloudParams, setCloudParams] = useState({});
     
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
-    // 🚀 ESTADO ACTUALIZADO (Con notas marginales incluidas)
+    // 🚀 ESTADO: Libro, Folio y Número inician en blanco para obligar la digitación manual
     const [formData, setFormData] = useState({
         Libro: '', 
         folio: '', 
@@ -61,17 +60,10 @@ const ConfirmationCelebratedPage = () => {
 
             const misDatos = getMisDatosList(parishId);
             const nombreOficial = misDatos && misDatos.length > 0 ? misDatos[0]?.nombre : nombreParroquia;
-            
-            const { data: paramData } = await supabase.from('parish_parameters').select('confirmaciones_params').eq('parish_id', parishId).maybeSingle();
-            const p = paramData?.confirmaciones_params || {};
-            setCloudParams(p);
 
             setFormData(prev => ({ 
                 ...prev, 
-                lugarSacramento: (nombreOficial || '').toUpperCase(),
-                Libro: String(p.ordinarioLibro || 1).padStart(4, '0'),
-                folio: String(p.ordinarioFolio || 1).padStart(4, '0'),
-                numero: String(p.ordinarioNumero || 1).padStart(4, '0')
+                lugarSacramento: (nombreOficial || '').toUpperCase()
             }));
 
             const parrocos = getParrocos(parishId) || [];
@@ -168,8 +160,6 @@ const ConfirmationCelebratedPage = () => {
 
         setIsSubmitting(true);
         try {
-            // 🚀 ESTA ES LA REPARACIÓN CLAVE: Las llaves deben ser exactas a como las mapea 
-            // el componente de Importación para que el PDF las detecte correctamente.
             const finalRawData = {
                 Libro: String(formData.Libro).padStart(4, '0'),
                 folio: String(formData.folio).padStart(4, '0'),
@@ -210,26 +200,13 @@ const ConfirmationCelebratedPage = () => {
                 ministro: formData.ministro || null,
                 da_fe: formData.daFe || null,
                 nota_marginal: formData.notaMarginal || null,
-                raw_data: finalRawData, // El JSON ahora coincide 100% con la plantilla del PDF
+                raw_data: finalRawData, 
                 created_at: new Date().toISOString()
             }]);
 
             if (errConf) throw errConf;
 
-            // Actualizar consecutivo
-            let nextNum = parseInt(formData.numero, 10) + 1;
-            let nextFol = parseInt(formData.folio, 10);
-            if (parseInt(formData.numero, 10) % (parseInt(cloudParams.ordinarioPartidas || 2, 10)) === 0) nextFol++;
-
-            await supabase.from('parish_parameters').upsert({
-                parish_id: parishId,
-                confirmaciones_params: {
-                    ...cloudParams,
-                    ordinarioNumero: nextNum,
-                    ordinarioFolio: nextFol,
-                    ordinarioLibro: parseInt(formData.Libro, 10)
-                }
-            }, { onConflict: 'parish_id' });
+            // 🚀 SE ELIMINÓ COMPLETAMENTE EL BLOQUE QUE ACTUALIZABA EL CONSECUTIVO EN PARISH_PARAMETERS
 
             toast({ title: "Asentamiento Exitoso", description: "La confirmación ha sido inyectada en la base de datos.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/parroquia/confirmacion/partidas');
@@ -282,9 +259,9 @@ const ConfirmationCelebratedPage = () => {
                         <section>
                             <SectionHeader number="01" title="Protocolo de Archivo" icon={BookOpen} />
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 bg-slate-50 p-8 rounded-[2rem] border border-slate-100 shadow-inner">
-                                <div><label className={labelClass}>Libro</label><input name="Libro" required value={formData.Libro} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-red-600 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
-                                <div><label className={labelClass}>Folio</label><input name="folio" required value={formData.folio} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-gray-800 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
-                                <div><label className={labelClass}>Número (Acta)</label><input name="numero" required value={formData.numero} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-gray-800 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
+                                <div><label className={labelClass}>Libro</label><input name="Libro" required placeholder="EJ: 0001" value={formData.Libro} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-red-600 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
+                                <div><label className={labelClass}>Folio</label><input name="folio" required placeholder="EJ: 0015" value={formData.folio} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-gray-800 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
+                                <div><label className={labelClass}>Número (Acta)</label><input name="numero" required placeholder="EJ: 0042" value={formData.numero} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-gray-800 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
                             </div>
                         </section>
 
