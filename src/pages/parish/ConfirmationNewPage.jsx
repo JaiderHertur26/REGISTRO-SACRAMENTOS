@@ -34,7 +34,7 @@ const ConfirmationNewPage = () => {
     const [listaSacerdotes, setListaSacerdotes] = useState([]); 
     const [fullParamsCache, setFullParamsCache] = useState(null); 
     
-    // Nuevo estado para el catálogo de iglesias
+    // Catálogo de iglesias para auto-completar el código
     const [listaIglesias, setListaIglesias] = useState([]);
 
     const [formData, setFormData] = useState({
@@ -63,7 +63,6 @@ const ConfirmationNewPage = () => {
             setListaSacerdotes(listaParrocos); 
             setParrocosSugeridos(listaParrocos.map(p => `${p.nombre} ${p.apellido || ''}`.trim().toUpperCase()));
 
-            // 🚀 Auto-asignar el Párroco Actual a "Da Fe" al cargar
             const parrocoActual = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
             if (parrocoActual) {
                 const nombreCompletoActual = `${parrocoActual.nombre} ${parrocoActual.apellido || ''}`.trim().toUpperCase();
@@ -79,10 +78,12 @@ const ConfirmationNewPage = () => {
                 setFormData(prev => ({ ...prev, numeroRegistro: p.numeroRegistroActual || '' }));
             }
 
-            // 🚀 Cargar catálogo de Iglesias para vincular el código automáticamente
-            const { data: iglesiasData } = await supabase.from('iglesias').select('nombre, codigo, ciudad');
-            if (iglesiasData) {
-                setListaIglesias(iglesiasData);
+            // 🚀 Cargar catálogo de Iglesias completo para la búsqueda inteligente del Código
+            try {
+                const { data: iglesiasData } = await supabase.from('iglesias').select('nombre, codigo, ciudad');
+                if (iglesiasData) setListaIglesias(iglesiasData);
+            } catch (err) {
+                console.error("Error cargando iglesias:", err);
             }
         };
         loadInitialData();
@@ -144,23 +145,23 @@ const ConfirmationNewPage = () => {
         });
     }, [formData.nombrePadre, formData.nombreMadre, formData.padrinos]);
 
-    // 🚀 INTELIGENCIA 4: Vinculación Automática del Código de Iglesia
+    // 🚀 INTELIGENCIA 4: Vinculación Automática del Código de Iglesia (Robusta)
     useEffect(() => {
         if (formData.lugarBautismo && listaIglesias.length > 0) {
             const searchStr = formData.lugarBautismo.toUpperCase().trim();
+            const searchNormalized = searchStr.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
             
             const matchedChurch = listaIglesias.find(iglesia => {
+                if (!iglesia.codigo) return false;
                 const nombre = (iglesia.nombre || '').toUpperCase().trim();
-                const ciudad = (iglesia.ciudad || '').toUpperCase().trim();
-                // Muchas veces el Autocomplete concatena el nombre con la ciudad (ej: SAN SILVESTRE - BOGOTA)
-                const fullMatch = ciudad ? `${nombre} - ${ciudad}` : nombre;
+                const nombreNorm = nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                 
-                return searchStr === nombre || searchStr === fullMatch || searchStr.startsWith(nombre);
+                // Coincidencia exacta o si el nombre normalizado está contenido en la búsqueda
+                return searchNormalized === nombreNorm || searchNormalized.includes(nombreNorm);
             });
 
             if (matchedChurch && matchedChurch.codigo) {
                 setFormData(prev => {
-                    // Solo actualizamos si el código es diferente para evitar renders infinitos
                     if (prev.codigoBautizo !== matchedChurch.codigo) {
                         return { ...prev, codigoBautizo: matchedChurch.codigo };
                     }
@@ -181,6 +182,7 @@ const ConfirmationNewPage = () => {
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
 
+    // 🚀 LECTURA DEFINITIVA DEL MODAL (Extractor a prueba de fallos para Libros)
     const handleSelectBaptismPartida = (partida) => {
         let normalizedSex = '';
         if (partida.sex || partida.sexo) {
@@ -189,7 +191,12 @@ const ConfirmationNewPage = () => {
             else if (rawSex.startsWith('F')) normalizedSex = 'FEMENINO';
         }
 
-        const raw = partida.raw_data || {};
+        const raw = partida.raw_data || partida || {};
+
+        // Extractor masivo que busca en todas las llaves posibles
+        const libroValue = partida.book_number || raw.book_number || partida.Libro || raw.Libro || partida.libro || raw.libro || raw.LIBRO || raw["LIBRO N°"] || formData.libroBautismo;
+        const folioValue = partida.folio || raw.folio || partida.page_number || raw.page_number || raw.FOLIO || raw["FOLIO N°"] || formData.folioBautismo;
+        const numeroValue = partida.number || raw.number || partida.numero || raw.numero || partida.entry_number || raw.entry_number || raw.NUMERO || raw["NÚMERO N°"] || formData.numeroBautismo;
 
         setFormData(prev => ({
             ...prev,
@@ -200,11 +207,11 @@ const ConfirmationNewPage = () => {
             nombrePadre: partida.nombrePadre || partida.fatherName || raw.nombrePadre || raw.PADRE || prev.nombrePadre,
             nombreMadre: partida.nombreMadre || partida.motherName || raw.nombreMadre || raw.MADRE || prev.nombreMadre,
             
-            // Datos del Sacramento Origen
+            // Datos del Sacramento Origen blindados
             lugarBautismo: partida.lugarBautismo || partida.baptismPlace || raw.lugarBautismo || raw.LUGBAU || prev.lugarBautismo,
-            libroBautismo: partida.book_number || partida.Libro || partida.libro || raw.Libro || raw.LIBRO || prev.libroBautismo,
-            folioBautismo: partida.folio || partida.page_number || raw.folio || raw.FOLIO || prev.folioBautismo,
-            numeroBautismo: partida.number || partida.numero || partida.entry_number || raw.numero || raw.NUMERO || prev.numeroBautismo,
+            libroBautismo: libroValue ? String(libroValue).padStart(4, '0') : prev.libroBautismo,
+            folioBautismo: folioValue ? String(folioValue).padStart(4, '0') : prev.folioBautismo,
+            numeroBautismo: numeroValue ? String(numeroValue).padStart(4, '0') : prev.numeroBautismo,
             codigoBautizo: partida.codigo || partida.codigoBautizo || raw.codigoBautizo || prev.codigoBautizo
         }));
         
