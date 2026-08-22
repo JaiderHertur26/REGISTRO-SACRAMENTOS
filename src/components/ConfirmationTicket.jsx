@@ -159,7 +159,7 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
                 
                 <div style={{ display: 'flex', gap: '15px' }}>
                     <FieldLine label="FECHA NAC." value={formatDate(confirmationData.fechaNacimiento || confirmationData.birthDate)} width="45%" />
-                    <FieldLine label="LUGAR NAC." value={formatData(confirmationData.lugarNacimiento || confirmationData.birthPlace)} width="55%" />
+                    <FieldLine label="FECHA CONFIRMACIÓN" value={formatDate(confirmationData.fechaSacramento || confirmationData.sacramentDate)} width="40%" />
                 </div>
 
                 <div style={{ display: 'flex', gap: '15px' }}>
@@ -175,8 +175,8 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
                 <FieldLine label="PADRINOS" value={padrinos} />
                 
                 <div style={{ display: 'flex', gap: '15px' }}>
-                    <FieldLine label="FECHA CONFIRMACIÓN" value={formatDate(confirmationData.fechaSacramento || confirmationData.sacramentDate)} width="40%" />
-                    <FieldLine label="LUGAR CELEBRACIÓN" value={lugarSacramento} width="60%" />
+                    <FieldLine label="LUGAR CELEBRACIÓN" value={lugarSacramento} width="40%" />
+                    
                 </div>
 
                 <FieldLine label="MINISTRO" value={ministro} />
