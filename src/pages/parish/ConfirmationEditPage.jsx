@@ -78,7 +78,7 @@ const ConfirmationEditPage = () => {
                 const parrocoActualObj = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
                 const nombreParrocoActual = parrocoActualObj ? `${parrocoActualObj.nombre} ${parrocoActualObj.apellido || ''}`.trim().toUpperCase() : '';
 
-                // 🚀 CARGA ESTRICTA HÍBRIDA (Mapeo Definitivo)
+                // 🚀 CARGA ESTRICTA
                 setFormData({
                     id: dbRecord.id,
                     status: dbRecord.status || 'seated',
@@ -91,7 +91,8 @@ const ConfirmationEditPage = () => {
                     nombres: dbRecord.nombres || raw.nombres || raw.firstName || '',
                     sexo: dbRecord.sexo || raw.sexo || raw.sex || '',
                     fechaNacimiento: dbRecord.fecha_nacimiento || raw.fechaNacimiento || raw.birthDate || '',
-                    edad: raw.edad || raw.metadata?.ageAtConfirmation || '',
+                    // Extracción correcta desde el raw_data (ya que no existe la columna en supabase)
+                    edad: raw.edad || raw.age || '', 
                     lugarNacimiento: dbRecord.lugar_nacimiento || raw.lugarNacimiento || '',
                     tipoUnionPadres: dbRecord.tipo_union_padres || raw.tipoUnionPadres || '',
                     nombrePadre: dbRecord.nombre_padre || raw.nombrePadre || raw.fatherName || '',
@@ -141,16 +142,29 @@ const ConfirmationEditPage = () => {
         }
     }, [formData?.fechaSacramento, listaSacerdotes, userChangedDate]);
 
-    // 🚀 INTELIGENCIA 2: Recalcular Edad Dinámicamente
+    // 🚀 INTELIGENCIA 2: Recalcular Edad Dinámicamente (Protegido contra zonas horarias y formatos)
     useEffect(() => {
         if (formData?.fechaNacimiento && formData?.fechaSacramento) {
-            const birth = new Date(formData.fechaNacimiento);
-            const conf = new Date(formData.fechaSacramento);
-            if (!isNaN(birth.getTime()) && !isNaN(conf.getTime())) {
-                let age = conf.getFullYear() - birth.getFullYear();
-                const m = conf.getMonth() - birth.getMonth();
-                if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) age--;
-                setFormData(prev => ({ ...prev, edad: age >= 0 ? age.toString() : '' }));
+            const birthStr = toInputDate(formData.fechaNacimiento);
+            const confStr = toInputDate(formData.fechaSacramento);
+            
+            if (birthStr && confStr) {
+                // Al agregar T12:00:00 evitamos que JavaScript asuma UTC y reste un día a las fechas
+                const birth = new Date(`${birthStr}T12:00:00`);
+                const conf = new Date(`${confStr}T12:00:00`);
+                
+                if (!isNaN(birth.getTime()) && !isNaN(conf.getTime())) {
+                    let age = conf.getFullYear() - birth.getFullYear();
+                    const m = conf.getMonth() - birth.getMonth();
+                    if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) {
+                        age--;
+                    }
+                    
+                    // Solo actualizamos si la edad es válida y distinta a la que ya tenemos, para evitar bucles
+                    if (age >= 0 && formData.edad !== age.toString()) {
+                        setFormData(prev => ({ ...prev, edad: age.toString() }));
+                    }
+                }
             }
         }
     }, [formData?.fechaNacimiento, formData?.fechaSacramento]);
@@ -203,7 +217,7 @@ const ConfirmationEditPage = () => {
                 ministro: formData.ministro || null,
                 da_fe: formData.daFe || null,
                 nota_marginal: formData.notaMarginal || null,
-                raw_data: payloadToSave,
+                raw_data: payloadToSave, // Aquí se empaca todo: EDAD, etc.
                 updated_at: new Date().toISOString()
             }).eq('id', recordId);
             
