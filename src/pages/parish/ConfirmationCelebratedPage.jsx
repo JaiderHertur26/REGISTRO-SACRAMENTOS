@@ -38,6 +38,7 @@ const ConfirmationCelebratedPage = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [ciudades, setCiudades] = useState([]);
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
+    const [parrocosSugeridos, setParrocosSugeridos] = useState([]); // 🚀 CORREGIDO: ESTADO FALTANTE
     const [cloudParams, setCloudParams] = useState(null);
     const [ticketData, setTicketData] = useState(null);
     const [parishInfo, setParishInfo] = useState(null); 
@@ -83,6 +84,7 @@ const ConfirmationCelebratedPage = () => {
 
             const parrocos = getParrocos(parishId) || [];
             setListaSacerdotes(parrocos);
+            setParrocosSugeridos(parrocos.map(priest => `${priest.nombre} ${priest.apellido || ''}`.trim().toUpperCase())); // 🚀 CORREGIDO: LLENADO DE LISTA
             
             const actual = parrocos.find(p => String(p.estado || p.Estado) === '1');
             if (actual) {
@@ -114,7 +116,7 @@ const ConfirmationCelebratedPage = () => {
         }
     }, [formData.fechaSacramento, listaSacerdotes]);
 
-    // 🚀 CÁLCULO DE EDAD DINÁMICO (No depende de columnas en DB, se calcula al vuelo)
+    // 🚀 CÁLCULO DE EDAD DINÁMICO
     useEffect(() => {
         if (formData.fechaNacimiento && formData.fechaSacramento) {
             const birth = new Date(formData.fechaNacimiento);
@@ -169,7 +171,7 @@ const ConfirmationCelebratedPage = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        // 🚀 Verificación de Duplicados
+        // Verificación de Duplicados
         if (typeof validateConfirmationNumbers === 'function') {
             const check = await validateConfirmationNumbers(formData.Libro, formData.folio, formData.numero, parishId);
             if (!check.valid) {
@@ -180,17 +182,15 @@ const ConfirmationCelebratedPage = () => {
 
         setIsSubmitting(true);
         try {
-            // 🚀 Calcular el Número de Registro Matemáticamente
+            // Calcular el Número de Registro Matemáticamente
             const currentRegistro = cloudParams?.numeroRegistroActual || "000000";
             const nextReg = calculateNextRegistro(currentRegistro);
             
             const dataToSave = { ...formData, numeroRegistro: nextReg };
 
-            // Usamos saveConfirmationToSource como 'pending' (borrador)
             const res = await saveConfirmationToSource(dataToSave, parishId, 'pending');
 
             if (res.success) {
-                // 🚀 ACTUALIZAR LA NUBE: Guardar el nuevo Número de Registro
                 if (cloudParams) {
                     const updatedParams = { ...cloudParams, numeroRegistroActual: nextReg };
                     await supabase.from('parish_parameters').upsert({
@@ -332,7 +332,18 @@ const ConfirmationCelebratedPage = () => {
 
                             {/* 04. FILIACIÓN */}
                             <section>
-                                <SectionHeader number="04" title="Filiación e Identidad" icon={Fingerprint} />
+                                <SectionHeader number="04" title="Filiación e Identidad" icon={Users} />
+                                <div className="mb-6">
+                                    <label className={labelClass}>Tipo de Unión de Padres</label>
+                                    <select name="tipoUnionPadres" value={formData.tipoUnionPadres} onChange={handleChange} className="w-full md:w-1/2 px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl font-black text-gray-600 uppercase outline-none shadow-sm focus:bg-white transition-all">
+                                        <option value="">SELECCIONE...</option>
+                                        <option value="MATRIMONIO CATÓLICO">MATRIMONIO CATÓLICO</option>
+                                        <option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option>
+                                        <option value="UNIÓN LIBRE">UNIÓN LIBRE</option>
+                                        <option value="MADRE SOLTERA">MADRE SOLTERA</option>
+                                        <option value="PADRE SOLTERO">PADRE SOLTERO</option>
+                                    </select>
+                                </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                     <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-5 shadow-sm">
                                         <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Padre</p>
@@ -369,10 +380,10 @@ const ConfirmationCelebratedPage = () => {
                             <section>
                                 <SectionHeader number="06" title="Ministro y Autoridad" icon={PenTool} />
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                    <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input type="text" name="ministro" required value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} placeholder="EXCMO. MONS..." /></div>
-                                    <div><label className={labelClass}>Da Fe (Párroco)</label><input type="text" name="daFe" required value={formData.daFe} onChange={handleChange} list="lista-parrocos" className={inputClass} /></div>
+                                    <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input name="ministro" required value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} placeholder="EXCMO. MONS..." /></div>
+                                    <div><label className={labelClass}>Da Fe (Párroco)</label><input name="daFe" required value={formData.daFe} onChange={handleChange} list="lista-parrocos" className={inputClass} /></div>
                                 </div>
-                                <div><label className={labelClass}>Padrinos</label><input type="text" name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
+                                <div><label className={labelClass}>Padrinos</label><input name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
                             </section>
 
                             {/* 07. OBSERVACIONES */}
@@ -386,7 +397,7 @@ const ConfirmationCelebratedPage = () => {
 
                             <div className="flex justify-end gap-4 border-t border-gray-100 pt-12">
                                 <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] hover:bg-gray-50 transition-all">Descartar</Button>
-                                <Button type="submit" disabled={isSubmitting} className="bg-gradient-to-r from-[#D4AF37] to-[#B4932A] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                                <Button type="submit" disabled={isSubmitting} className="bg-gradient-to-r from-red-600 to-[#8b0000] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
                                     {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Save className="w-5 h-5 mr-3" />} Generar Borrador
                                 </Button>
                             </div>
