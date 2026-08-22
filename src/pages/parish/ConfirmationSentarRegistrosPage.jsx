@@ -24,7 +24,7 @@ const ConfirmationSentarRegistrosPage = () => {
         getMisDatosList, 
         getConfirmationParameters,
         updateConfirmationParameters,
-        getParrocos // 🚀 Extraemos la lista de sacerdotes
+        getParrocos 
     } = useAppData();
     
     const { toast } = useToast();
@@ -66,12 +66,11 @@ const ConfirmationSentarRegistrosPage = () => {
         setIsLoading(true);
 
         try {
-            // 🚀 OBTENER BORRADORES DE LA NUBE (CORRECCIÓN: Buscamos en 'confirmations' con status 'pending')
+            // 🚀 OBTENER BORRADORES DE LA NUBE: Igual que Bautismo, desde la tabla dedicada
             const { data: tempData, error: tempError } = await supabase
-                .from('confirmations')
+                .from('pending_confirmations')
                 .select('*')
                 .eq('parish_id', resolvedParishId)
-                .eq('status', 'pending')
                 .order('created_at', { ascending: false });
 
             let recordsMapped = [];
@@ -94,8 +93,7 @@ const ConfirmationSentarRegistrosPage = () => {
                         const fDate = new Date(fechaSac.includes('T') ? fechaSac : `${fechaSac}T12:00:00`);
                         const sEpoca = sacerdotes.find(s => {
                             if (!s.fechaIngreso && !s.fechaNombramiento) return false;
-                            const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
-                            const inicio = new Date(iStr);
+                            const inicio = new Date((s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`);
                             const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
                             return fDate >= inicio && fDate <= fin;
                         });
