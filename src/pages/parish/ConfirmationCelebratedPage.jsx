@@ -6,14 +6,15 @@ import { Button } from '@/components/ui/button';
 import { 
     Save, Calendar, User, Users, 
     BookOpen, PenTool, Loader2, Fingerprint,
-    ShieldCheck, ArrowLeft, Search, Droplet
+    ShieldCheck, ArrowLeft, Search, Droplet, Hash
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
-import CityAutocomplete from '@/components/CityAutocomplete';
 import { supabase } from '@/lib/supabaseClient';
+import CityAutocomplete from '@/components/CityAutocomplete';
+import ChurchLocationAutocomplete from '@/components/ChurchLocationAutocomplete';
 import SearchBaptismPartidaModal from '@/components/modals/SearchBaptismPartidaModal';
-import { motion } from 'framer-motion';
+import { calculateNextRegistro } from '@/services/sacramentParametersService';
 
 const ConfirmationCelebratedPage = () => {
     const navigate = useNavigate();
@@ -24,7 +25,9 @@ const ConfirmationCelebratedPage = () => {
         validateConfirmationNumbers, 
         getMisDatosList, 
         getCiudadesList, 
-        getParrocos
+        getParrocos,
+        getConfirmationParameters,
+        saveConfirmationToSource
     } = useAppData();
 
     const parishId = user?.parish_id || user?.parishId;
@@ -33,16 +36,17 @@ const ConfirmationCelebratedPage = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [ciudades, setCiudades] = useState([]);
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
-    const [cloudParams, setCloudParams] = useState({});
+    const [cloudParams, setCloudParams] = useState(null);
     
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
     const [formData, setFormData] = useState({
+        numeroRegistro: '', // Corresponde al NUMINSC histórico
         Libro: '', 
         folio: '', 
         numero: '',
         fechaSacramento: '', 
-        lugarSacramento: '', 
+        lugarSacramento: nombreParroquia, 
         apellidos: '', 
         nombres: '', 
         sexo: '', 
@@ -60,7 +64,8 @@ const ConfirmationCelebratedPage = () => {
         numeroBautismo: '',
         padrinos: '', 
         ministro: '', 
-        daFe: ''
+        daFe: '',
+        notaMarginal: ''
     });
 
     useEffect(() => {
@@ -71,16 +76,16 @@ const ConfirmationCelebratedPage = () => {
             const nombreOficial = misDatos && misDatos.length > 0 ? misDatos[0]?.nombre : nombreParroquia;
             
             // Cargar Consecutivos desde Parameters
-            const { data: paramData } = await supabase.from('parish_parameters').select('confirmaciones_params').eq('parish_id', parishId).maybeSingle();
-            const p = paramData?.confirmaciones_params || {};
+            const p = await getConfirmationParameters(parishId);
             setCloudParams(p);
 
             setFormData(prev => ({ 
                 ...prev, 
                 lugarSacramento: (nombreOficial || '').toUpperCase(),
-                Libro: String(p.ordinarioLibro || 1).padStart(4, '0'),
-                folio: String(p.ordinarioFolio || 1).padStart(4, '0'),
-                numero: String(p.ordinarioNumero || 1).padStart(4, '0')
+                numeroRegistro: p?.numeroRegistroActual || '',
+                Libro: String(p?.ordinarioLibro || 1).padStart(4, '0'),
+                folio: String(p?.ordinarioFolio || 1).padStart(4, '0'),
+                numero: String(p?.ordinarioNumero || 1).padStart(4, '0')
             }));
 
             const listaCruda = getCiudadesList(parishId) || [];
@@ -99,9 +104,9 @@ const ConfirmationCelebratedPage = () => {
         };
 
         loadInitialData();
-    }, [parishId, nombreParroquia, getMisDatosList, getCiudadesList, getParrocos]);
+    }, [parishId, nombreParroquia, getMisDatosList, getCiudadesList, getParrocos, getConfirmationParameters]);
 
-    // 🚀 MÁQUINA DEL TIEMPO: SINCRONIZA DA FE (Y cálculo de edad)
+    // 🚀 MÁQUINA DEL TIEMPO: SINCRONIZA DA FE
     useEffect(() => {
         if (formData.fechaSacramento && listaSacerdotes.length > 0) {
             const fechaSeleccionada = new Date(formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`);
@@ -117,8 +122,10 @@ const ConfirmationCelebratedPage = () => {
                 setFormData(prev => ({ ...prev, daFe: nombreSacerdoteHistorico }));
             }
         }
+    }, [formData.fechaSacramento, listaSacerdotes]);
 
-        // Cálculo de Edad Dinámico
+    // 🚀 CÁLCULO DE EDAD DINÁMICO (EDAD)
+    useEffect(() => {
         if (formData.fechaNacimiento && formData.fechaSacramento) {
             const birth = new Date(formData.fechaNacimiento);
             const conf = new Date(formData.fechaSacramento);
@@ -129,11 +136,11 @@ const ConfirmationCelebratedPage = () => {
                 setFormData(prev => ({ ...prev, edad: age >= 0 ? age.toString() : '' }));
             }
         }
-    }, [formData.fechaSacramento, formData.fechaNacimiento, listaSacerdotes]);
+    }, [formData.fechaNacimiento, formData.fechaSacramento]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        const uppercaseFields = ['nombres', 'apellidos', 'lugarNacimiento', 'lugarSacramento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe'];
+        const uppercaseFields = ['nombres', 'apellidos', 'lugarNacimiento', 'lugarSacramento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe', 'notaMarginal'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
@@ -172,60 +179,44 @@ const ConfirmationCelebratedPage = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        if (typeof validateConfirmationNumbers === 'function') {
-            const check = await validateConfirmationNumbers(formData.Libro, formData.folio, formData.numero, parishId);
-            if (!check.valid) {
-                toast({ title: "Ubicación Ocupada", description: "Los números de Libro, Folio o Acta ya existen en Confirmaciones.", variant: "destructive" });
-                return;
-            }
+        const check = await validateConfirmationNumbers(formData.Libro, formData.folio, formData.numero, parishId);
+        if (!check.valid) {
+            toast({ title: "Ubicación Ocupada", description: "Los números de Libro, Folio o Acta ya existen.", variant: "destructive" });
+            return;
         }
 
         setIsSubmitting(true);
         try {
-            // 🚀 INYECCIÓN HÍBRIDA 100% DIRECTA PARA SOPORTAR LA NUEVA ARQUITECTURA
-            const { error: errConf } = await supabase.from('confirmations').insert([{
-                parish_id: parishId,
-                book_number: formData.Libro,
-                folio: formData.folio,
-                number: formData.numero,
-                status: 'seated', 
-                celebration_date: formData.fechaSacramento || null,
-                lugar_bautismo: formData.lugarBautismo || null,
-                apellidos: formData.apellidos || null,
-                nombres: formData.nombres || null,
-                sexo: formData.sexo || null,
-                fecha_nacimiento: formData.fechaNacimiento || null,
-                lugar_nacimiento: formData.lugarNacimiento || null,
-                nombre_padre: formData.nombrePadre || null,
-                nombre_madre: formData.nombreMadre || null,
-                tipo_union_padres: formData.tipoUnionPadres || null,
-                padrinos: formData.padrinos || null,
-                ministro: formData.ministro || null,
-                da_fe: formData.daFe || null,
-                raw_data: formData, // Conservamos toda la riqueza del documento
-                created_at: new Date().toISOString()
-            }]);
+            // Calcular el Número de Inscripción (NUMINSC)
+            const currentRegistro = cloudParams?.numeroRegistroActual || "000000";
+            const nextReg = calculateNextRegistro(currentRegistro);
+            
+            const dataToSave = { ...formData, numeroRegistro: nextReg };
 
-            if (errConf) throw errConf;
+            const res = await saveConfirmationToSource(dataToSave, parishId, 'seated');
 
-            // Actualizar consecutivo
-            let nextNum = parseInt(formData.numero, 10) + 1;
-            let nextFol = parseInt(formData.folio, 10);
-            if (parseInt(formData.numero, 10) % (parseInt(cloudParams.ordinarioPartidas || 2, 10)) === 0) nextFol++;
+            if (res.success) {
+                // Actualizar consecutivos en la base de datos central
+                let nextNum = parseInt(formData.numero, 10) + 1;
+                let nextFol = parseInt(formData.folio, 10);
+                if (parseInt(formData.numero, 10) % (parseInt(cloudParams.ordinarioPartidas || 2, 10)) === 0) nextFol++;
 
-            await supabase.from('parish_parameters').upsert({
-                parish_id: parishId,
-                confirmaciones_params: {
-                    ...cloudParams,
-                    ordinarioNumero: nextNum,
-                    ordinarioFolio: nextFol,
-                    ordinarioLibro: parseInt(formData.Libro, 10)
-                }
-            }, { onConflict: 'parish_id' });
+                await supabase.from('parish_parameters').upsert({
+                    parish_id: parishId,
+                    confirmaciones_params: {
+                        ...cloudParams,
+                        ordinarioNumero: nextNum,
+                        ordinarioFolio: nextFol,
+                        ordinarioLibro: parseInt(formData.Libro, 10),
+                        numeroRegistroActual: nextReg
+                    }
+                }, { onConflict: 'parish_id' });
 
-            toast({ title: "Asentamiento Exitoso", description: "La confirmación ha sido inyectada en la base de datos.", className: "bg-green-50 text-green-900 border-green-200" });
-            navigate('/parroquia/confirmacion/partidas');
-
+                toast({ title: "Asentamiento Exitoso", description: "El registro histórico ha sido inyectado en la base de datos.", className: "bg-green-50 text-green-900 border-green-200" });
+                navigate('/parroquia/confirmacion/partidas');
+            } else {
+                throw new Error(res.message);
+            }
         } catch (error) {
             toast({ title: "Error de Guardado", description: error.message, variant: "destructive" });
         } finally {
@@ -245,10 +236,7 @@ const ConfirmationCelebratedPage = () => {
 
     return (
         <DashboardLayout entityName={nombreParroquia}>
-            <motion.div 
-                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
-                className="max-w-5xl mx-auto pb-20 pt-6"
-            >
+            <div className="max-w-5xl mx-auto pb-20 pt-6">
                 <datalist id="lista-parrocos">
                     {listaSacerdotes.map((s, idx) => <option key={idx} value={`${s.nombre} ${s.apellido || ''}`.trim().toUpperCase()} />)}
                 </datalist>
@@ -270,13 +258,14 @@ const ConfirmationCelebratedPage = () => {
                     <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-red-600 via-[#D4AF37] to-red-600"></div>
 
                     <div className="p-12 space-y-10">
-                        {/* 01. UBICACIÓN FÍSICA */}
+                        {/* 01. UBICACIÓN FÍSICA Y CONTROL */}
                         <section>
-                            <SectionHeader number="01" title="Protocolo de Archivo" icon={BookOpen} />
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 bg-slate-50 p-8 rounded-[2rem] border border-slate-100 shadow-inner">
-                                <div><label className={labelClass}>Libro</label><input name="Libro" required value={formData.Libro} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-red-600 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
-                                <div><label className={labelClass}>Folio</label><input name="folio" required value={formData.folio} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-gray-800 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
-                                <div><label className={labelClass}>Número (Acta)</label><input name="numero" required value={formData.numero} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-gray-800 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
+                            <SectionHeader number="01" title="Protocolo de Archivo (NUMINSC)" icon={Hash} />
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-8 bg-slate-50 p-8 rounded-[2rem] border border-slate-100 shadow-inner">
+                                <div><label className={labelClass}>Nº Inscripción</label><input name="numeroRegistro" value={formData.numeroRegistro} disabled className={`${inputClass} opacity-70 text-red-600 font-mono`} /></div>
+                                <div><label className={labelClass}>Libro</label><input name="Libro" required value={formData.Libro} onChange={handleChange} className={`${inputClass} font-mono text-2xl font-black text-red-600 focus:ring-red-600/10`} /></div>
+                                <div><label className={labelClass}>Folio</label><input name="folio" required value={formData.folio} onChange={handleChange} className={`${inputClass} font-mono text-2xl font-black text-gray-800 focus:ring-red-600/10`} /></div>
+                                <div><label className={labelClass}>Acta Nº</label><input name="numero" required value={formData.numero} onChange={handleChange} className={`${inputClass} font-mono text-2xl font-black text-gray-800 focus:ring-red-600/10`} /></div>
                             </div>
                         </section>
 
@@ -297,7 +286,7 @@ const ConfirmationCelebratedPage = () => {
                                     <h3 className="text-sm font-black text-gray-800 uppercase tracking-[0.2em] flex items-center gap-2"><User className="w-4 h-4 text-[#D4AF37]" /> Identidad del Confirmado</h3>
                                 </div>
                                 <Button type="button" variant="outline" onClick={() => setIsSearchModalOpen(true)} className="border-[#D4AF37] text-[#D4AF37] hover:bg-yellow-50 h-8 text-xs font-bold uppercase tracking-widest px-4 rounded-xl shadow-sm">
-                                    <Search className="w-3.5 h-3.5 mr-2" /> Buscar Partida Origen
+                                    <Search className="w-3.5 h-3.5 mr-2" /> Buscar Partida Bautismo
                                 </Button>
                             </div>
                             
@@ -323,7 +312,7 @@ const ConfirmationCelebratedPage = () => {
                                     </div>
                                 </div>
                                 <div>
-                                    <label className={labelClass}>Lugar de Nac.</label>
+                                    <label className={labelClass}>Lugar de Nacimiento</label>
                                     <CityAutocomplete name="lugarNacimiento" value={formData.lugarNacimiento} onChange={handleCityChange} cities={ciudades} className={inputClass} />
                                 </div>
                             </div>
@@ -331,7 +320,7 @@ const ConfirmationCelebratedPage = () => {
 
                         {/* 04. FILIACIÓN */}
                         <section>
-                            <SectionHeader number="04" title="Filiación e Identidad" icon={Fingerprint} />
+                            <SectionHeader number="04" title="Filiación e Identidad" icon={Users} />
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                 <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-5 shadow-sm">
                                     <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Padre</p>
@@ -348,7 +337,7 @@ const ConfirmationCelebratedPage = () => {
                         <section>
                             <SectionHeader number="05" title="Registro de Bautismo Origen" icon={Droplet} />
                             <div className="space-y-6">
-                                <div><label className={labelClass}>Lugar y Parroquia de Bautismo</label><input name="lugarBautismo" value={formData.lugarBautismo} onChange={handleChange} className={inputClass} placeholder="EJ: P. SANTA TERESITA, BARRANQUILLA" /></div>
+                                <div><label className={labelClass}>Lugar y Parroquia de Bautismo</label><ChurchLocationAutocomplete value={formData.lugarBautismo} onChange={(val) => setFormData(prev => ({...prev, lugarBautismo: val}))} placeholder="Buscar iglesia y ciudad..." /></div>
                                 <div className="grid grid-cols-3 gap-6 bg-slate-50 p-6 rounded-3xl border border-slate-100">
                                     <div><label className={labelClass}>Libro Baut.</label><input name="libroBautismo" value={formData.libroBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
                                     <div><label className={labelClass}>Folio Baut.</label><input name="folioBautismo" value={formData.folioBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
@@ -367,17 +356,25 @@ const ConfirmationCelebratedPage = () => {
                             <div><label className={labelClass}>Padrinos</label><input name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
                         </section>
 
+                        {/* 07. OBSERVACIONES */}
+                        <section>
+                            <SectionHeader number="07" title="Observaciones" icon={BookOpen} />
+                            <div>
+                                <label className={labelClass}>Nota Marginal / Observaciones</label>
+                                <textarea name="notaMarginal" value={formData.notaMarginal} onChange={handleChange} className={`${inputClass} h-24 resize-none font-mono text-xs`} />
+                            </div>
+                        </section>
+
                         <div className="flex justify-end gap-4 border-t border-gray-100 pt-12">
                             <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] hover:bg-gray-50 transition-all">Descartar</Button>
-                            <Button type="submit" disabled={isSubmitting} className="bg-gradient-to-r from-red-600 to-[#2C3E50] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                            <Button type="submit" disabled={isSubmitting} className="bg-gradient-to-r from-red-600 to-[#8b0000] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
                                 {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Save className="w-5 h-5 mr-3" />} Asentar Permanentemente
                             </Button>
                         </div>
                     </div>
                 </form>
-            </motion.div>
-
-            {/* Modal Buscador de Partidas */}
+            </div>
+            
             <SearchBaptismPartidaModal 
                 isOpen={isSearchModalOpen}
                 onClose={() => setIsSearchModalOpen(false)}
