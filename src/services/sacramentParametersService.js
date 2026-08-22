@@ -86,6 +86,25 @@ export const getNextBaptismNumbers = async (parishId) => {
 // ============================================================================
 // 🕊️ CONFIRMACIONES
 // ============================================================================
+export const getDefaultConfirmationParameters = () => ({
+    ordinarioLibro: 1,
+    ordinarioFolio: 1,
+    ordinarioNumero: 1,
+    ordinarioPartidas: 2,
+    ordinarioRestartNumber: false,
+    ordinarioBlocked: false,
+    numeroRegistroActual: "000001",
+    suplementarioLibro: 1,
+    suplementarioFolio: 1,
+    suplementarioNumero: 1,
+    suplementarioPartidas: 2,
+    suplementarioReiniciar: false,
+    suplementarioBlocked: false,
+    registroRegularEn: 'ordinario',
+    registroDecretoEn: 'suplementario',
+    generarNotaMarginal: true
+});
+
 export const getConfirmationParameters = async (parishId) => {
     if (!parishId) return getDefaultConfirmationParameters();
     
@@ -100,7 +119,9 @@ export const getConfirmationParameters = async (parishId) => {
             localStorage.setItem(`confirmationParameters_${parishId}`, JSON.stringify(data.confirmaciones_params));
             return { ...getDefaultConfirmationParameters(), ...data.confirmaciones_params };
         }
-    } catch (e) {}
+    } catch (e) {
+        console.warn("Error leyendo parámetros de confirmación:", e);
+    }
 
     const stored = localStorage.getItem(`confirmationParameters_${parishId}`);
     return stored ? { ...getDefaultConfirmationParameters(), ...JSON.parse(stored) } : getDefaultConfirmationParameters();
