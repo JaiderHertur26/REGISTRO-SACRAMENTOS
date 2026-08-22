@@ -60,7 +60,6 @@ const ConfirmationNewPage = () => {
             setListaSacerdotes(listaParrocos); 
             setParrocosSugeridos(listaParrocos.map(p => `${p.nombre} ${p.apellido || ''}`.trim().toUpperCase()));
 
-            // 🚀 Auto-asignar el Párroco Actual a "Da Fe" al cargar
             const parrocoActual = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
             if (parrocoActual) {
                 const nombreCompletoActual = `${parrocoActual.nombre} ${parrocoActual.apellido || ''}`.trim().toUpperCase();
@@ -79,7 +78,6 @@ const ConfirmationNewPage = () => {
         loadInitialData();
     }, [parishId, nombreParroquia, getMisDatosList, getParrocos, getConfirmationParameters]);
 
-    // 🚀 INTELIGENCIA 1: Máquina del tiempo para el Párroco que Da Fe
     useEffect(() => {
         if (!formData.fechaSacramento || listaSacerdotes.length === 0) return;
 
@@ -98,7 +96,6 @@ const ConfirmationNewPage = () => {
         }
     }, [formData.fechaSacramento, listaSacerdotes]);
 
-    // 🚀 INTELIGENCIA 2: Cálculo Dinámico de Edad (Blindado contra zonas horarias)
     useEffect(() => {
         if (formData.fechaNacimiento && formData.fechaSacramento) {
             const birthStr = formData.fechaNacimiento.includes('T') ? formData.fechaNacimiento : `${formData.fechaNacimiento}T12:00:00`;
@@ -120,14 +117,11 @@ const ConfirmationNewPage = () => {
         }
     }, [formData.fechaNacimiento, formData.fechaSacramento]);
 
-    // 🚀 INTELIGENCIA 3: Asignación en cascada del "Responsable"
     useEffect(() => {
         setFormData(prev => {
             const possibleResponsables = [prev.nombrePadre, prev.nombreMadre, prev.padrinos].filter(v => v && v.trim() !== '');
             const topPriority = possibleResponsables[0] || '';
             
-            // Solo lo actualizamos automáticamente si la casilla está vacía o si contiene alguno de los valores jerárquicos anteriores
-            // (Esto permite que si el usuario escribe "ABUELA MARIA", el sistema respete esa escritura manual).
             if (!prev.responsable || possibleResponsables.includes(prev.responsable)) {
                  if (prev.responsable !== topPriority) {
                      return { ...prev, responsable: topPriority };
@@ -148,6 +142,7 @@ const ConfirmationNewPage = () => {
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
 
+    // 🚀 LECTURA DEFINITIVA DEL MODAL (Evita campos en blanco)
     const handleSelectBaptismPartida = (partida) => {
         let normalizedSex = '';
         if (partida.sex || partida.sexo) {
@@ -156,21 +151,28 @@ const ConfirmationNewPage = () => {
             else if (rawSex.startsWith('F')) normalizedSex = 'FEMENINO';
         }
 
+        const raw = partida.raw_data || {};
+
         setFormData(prev => ({
             ...prev,
-            nombres: partida.nombres || partida.firstName || prev.nombres,
-            apellidos: partida.apellidos || partida.lastName || prev.apellidos,
-            fechaNacimiento: partida.fechaNacimiento || partida.birthDate || prev.fechaNacimiento,
+            nombres: partida.nombres || partida.firstName || raw.nombres || prev.nombres,
+            apellidos: partida.apellidos || partida.lastName || raw.apellidos || prev.apellidos,
+            fechaNacimiento: partida.fechaNacimiento || partida.birthDate || raw.fechaNacimiento || prev.fechaNacimiento,
             sexo: normalizedSex || prev.sexo,
-            nombrePadre: partida.nombrePadre || partida.fatherName || prev.nombrePadre,
-            nombreMadre: partida.nombreMadre || partida.motherName || prev.nombreMadre,
-            lugarBautismo: partida.lugarBautismo || partida.baptismPlace || prev.lugarBautismo,
-            libroBautismo: partida.book_number || partida.libro || partida.baptismBook || prev.libroBautismo,
-            folioBautismo: partida.page_number || partida.folio || partida.baptismFolio || prev.folioBautismo,
-            numeroBautismo: partida.entry_number || partida.numero || partida.baptismNumber || prev.numeroBautismo
+            nombrePadre: partida.nombrePadre || partida.fatherName || raw.nombrePadre || raw.PADRE || prev.nombrePadre,
+            nombreMadre: partida.nombreMadre || partida.motherName || raw.nombreMadre || raw.MADRE || prev.nombreMadre,
+            
+            // Datos del Sacramento Origen
+            lugarBautismo: partida.lugarBautismo || partida.baptismPlace || raw.lugarBautismo || raw.LUGBAU || prev.lugarBautismo,
+            libroBautismo: partida.book_number || partida.Libro || partida.libro || raw.Libro || raw.LIBRO || prev.libroBautismo,
+            folioBautismo: partida.folio || partida.page_number || raw.folio || raw.FOLIO || prev.folioBautismo,
+            numeroBautismo: partida.number || partida.numero || partida.entry_number || raw.numero || raw.NUMERO || prev.numeroBautismo,
+            codigoBautizo: partida.codigo || partida.codigoBautizo || raw.codigoBautizo || prev.codigoBautizo
         }));
         
-        toast({ title: "Datos Importados", description: `Se han cargado los datos de ${partida.nombres} ${partida.apellidos}.`, className: "bg-red-50 border-red-200 text-red-900" });
+        const nombreAviso = partida.nombres || raw.nombres || '';
+        const apellidoAviso = partida.apellidos || raw.apellidos || '';
+        toast({ title: "Datos Importados", description: `Se han cargado los datos de ${nombreAviso} ${apellidoAviso}.`, className: "bg-red-50 border-red-200 text-red-900" });
         setIsSearchModalOpen(false);
     };
 
@@ -179,17 +181,14 @@ const ConfirmationNewPage = () => {
         setIsSubmitting(true);
         
         try {
-            // 🚀 Calcular el Número de Registro Matemáticamente
             const currentRegistro = fullParamsCache?.numeroRegistroActual || "000000";
             const nextReg = calculateNextRegistro(currentRegistro);
             
             const dataToSave = { ...formData, numeroRegistro: nextReg };
 
-            // Usamos saveConfirmationToSource
             const res = await saveConfirmationToSource(dataToSave, parishId, 'pending');
 
             if (res.success) {
-                // 🚀 ACTUALIZAR LA NUBE: Guardar el nuevo Número de Registro
                 if (fullParamsCache) {
                     const updatedParams = { ...fullParamsCache, numeroRegistroActual: nextReg };
                     await supabase.from('parish_parameters').upsert({
@@ -377,7 +376,7 @@ const ConfirmationNewPage = () => {
                             </section>
 
                             <section>
-                                <SectionHeader number="07" title="Observaciones" icon={BookOpen} />
+                                <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 07. Observaciones</h3>
                                 <div>
                                     <label className={labelClass}>Nota Marginal / Observaciones</label>
                                     <textarea name="notaMarginal" value={formData.notaMarginal} onChange={handleChange} className={`${inputClass} h-24 resize-none font-mono text-xs`} />
