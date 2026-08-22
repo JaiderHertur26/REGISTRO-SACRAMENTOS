@@ -47,7 +47,7 @@ const ConfirmationSentarRegistrosPage = () => {
     const isDateInFuture = (dateString) => {
         if (!dateString) return false;
         const now = new Date();
-        const sacramentDate = new Date(dateString);
+        const sacramentDate = new Date(dateString.includes('T') ? dateString : `${dateString}T12:00:00`);
         return sacramentDate > now; 
     };
 
@@ -66,11 +66,12 @@ const ConfirmationSentarRegistrosPage = () => {
         setIsLoading(true);
 
         try {
-            // 🚀 OBTENER BORRADORES DE LA NUBE
+            // 🚀 OBTENER BORRADORES DE LA NUBE (CORRECCIÓN: Buscamos en 'confirmations' con status 'pending')
             const { data: tempData, error: tempError } = await supabase
-                .from('pending_confirmations')
+                .from('confirmations')
                 .select('*')
                 .eq('parish_id', resolvedParishId)
+                .eq('status', 'pending')
                 .order('created_at', { ascending: false });
 
             let recordsMapped = [];
@@ -85,7 +86,7 @@ const ConfirmationSentarRegistrosPage = () => {
                 localStorage.setItem(`pendingConfirmations_${resolvedParishId}`, JSON.stringify(cloudPending));
 
                 recordsMapped = cloudPending.map(r => {
-                    let fechaSac = r.fechaSacramento || r.sacramentDate;
+                    let fechaSac = r.fechaSacramento || r.celebration_date || r.sacramentDate;
 
                     // 🚀 MÁQUINA DEL TIEMPO PARA CORRECCIÓN (Da Fe)
                     let historicalPriest = null;
@@ -93,7 +94,8 @@ const ConfirmationSentarRegistrosPage = () => {
                         const fDate = new Date(fechaSac.includes('T') ? fechaSac : `${fechaSac}T12:00:00`);
                         const sEpoca = sacerdotes.find(s => {
                             if (!s.fechaIngreso && !s.fechaNombramiento) return false;
-                            const inicio = new Date((s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`);
+                            const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                            const inicio = new Date(iStr);
                             const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
                             return fDate >= inicio && fDate <= fin;
                         });

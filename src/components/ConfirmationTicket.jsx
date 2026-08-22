@@ -38,12 +38,12 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
     const formatDate = (dateString) => {
         if (!dateString) return '';
         try {
-            const date = new Date(dateString);
+            const date = new Date(dateString.includes('T') ? dateString : `${dateString}T12:00:00`);
             if (isNaN(date.getTime())) return String(dateString).toUpperCase();
             
-            const day = date.getUTCDate();
-            const month = date.toLocaleString('es-CO', { month: 'long', timeZone: 'UTC' }).toUpperCase();
-            const year = date.getUTCFullYear();
+            const day = date.getDate();
+            const month = date.toLocaleString('es-CO', { month: 'long' }).toUpperCase();
+            const year = date.getFullYear();
             
             return `${day} DE ${month} DE ${year}`;
         } catch (e) {
@@ -65,10 +65,16 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
     const lugarSacramento = formatData(confirmationData.lugarSacramento || confirmationData.place || nombreP);
     
     const lugarBautismo = formatData(confirmationData.lugarBautismo || confirmationData.baptismPlace || '');
-    const datosBautismo = `L:${formatData(confirmationData.libroBautismo || '---')} F:${formatData(confirmationData.folioBautismo || '---')} N:${formatData(confirmationData.numeroBautismo || '---')}`;
+    
+    // Evitar que imprima null o undefined si faltan datos
+    const lBaut = formatData(confirmationData.libroBautismo || '---');
+    const fBaut = formatData(confirmationData.folioBautismo || '---');
+    const nBaut = formatData(confirmationData.numeroBautismo || '---');
+    const datosBautismo = (lBaut !== '---' || fBaut !== '---' || nBaut !== '---') ? `L:${lBaut} F:${fBaut} N:${nBaut}` : '';
     
     // 🚀 LÓGICA EN CASCADA PARA LA FIRMA DEL RESPONSABLE
     const getResponsable = () => {
+        if (confirmationData.responsable && confirmationData.responsable.trim() !== '') return formatData(confirmationData.responsable);
         if (nombrePadre) return nombrePadre;
         if (nombreMadre) return nombreMadre;
         if (padrinos) return padrinos;
@@ -77,25 +83,33 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
     const nombreResponsable = getResponsable();
 
     // --- 4. COMPONENTES ESTRUCTURALES ---
-    const FieldLine = ({ label, value, width = "100%" }) => (
-        <div style={{ display: 'flex', alignItems: 'flex-end', width: width, marginBottom: '6px' }}>
-            <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '6px', whiteSpace: 'nowrap' }}>
-                {label}:
-            </span>
-            <span style={{ 
-                flex: 1, 
-                borderBottom: '1px solid black', 
-                fontSize: '12px', 
-                lineHeight: '1.2', 
-                paddingBottom: '1px',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis'
-            }}>
-                {value}
-            </span>
-        </div>
-    );
+    const FieldLine = ({ label, value, width = "100%" }) => {
+        const valStr = value || '';
+        // 🚀 Ajuste dinámico de fuente para textos muy largos
+        const isLong = valStr.length > 28;
+        const isVeryLong = valStr.length > 40;
+
+        return (
+            <div style={{ display: 'flex', alignItems: 'flex-end', width: width, marginBottom: '6px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '6px', whiteSpace: 'nowrap' }}>
+                    {label}:
+                </span>
+                <span style={{ 
+                    flex: 1, 
+                    borderBottom: '1px solid black', 
+                    fontSize: isVeryLong ? '9px' : (isLong ? '10px' : '12px'), 
+                    letterSpacing: isVeryLong ? '-0.2px' : 'normal',
+                    lineHeight: '1.2', 
+                    paddingBottom: '1px',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                }}>
+                    {valStr}
+                </span>
+            </div>
+        );
+    };
 
     const TicketHalf = ({ isArchive }) => (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0.25in 0.6in', position: 'relative', overflow: 'hidden' }}>
@@ -144,8 +158,8 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
                 <FieldLine label="CONFIRMANDO" value={confirmando} />
                 
                 <div style={{ display: 'flex', gap: '15px' }}>
-                    <FieldLine label="FECHA NAC." value={formatDate(confirmationData.fechaNacimiento || confirmationData.birthDate)} width="50%" />
-                    <FieldLine label="LUGAR NAC." value={formatData(confirmationData.lugarNacimiento || confirmationData.birthPlace)} width="50%" />
+                    <FieldLine label="FECHA NAC." value={formatDate(confirmationData.fechaNacimiento || confirmationData.birthDate)} width="45%" />
+                    <FieldLine label="LUGAR NAC." value={formatData(confirmationData.lugarNacimiento || confirmationData.birthPlace)} width="55%" />
                 </div>
 
                 <div style={{ display: 'flex', gap: '15px' }}>
@@ -159,15 +173,15 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
                 </div>
 
                 <div style={{ display: 'flex', gap: '15px' }}>
-                    <FieldLine label="LUGAR BAUTISMO" value={lugarBautismo} width="60%" />
-                    <FieldLine label="DATOS BAUT." value={datosBautismo} width="40%" />
+                    <FieldLine label="LUGAR BAUTISMO" value={lugarBautismo} width="65%" />
+                    <FieldLine label="DATOS BAUT." value={datosBautismo} width="35%" />
                 </div>
 
                 <FieldLine label="PADRINOS" value={padrinos} />
                 
                 <div style={{ display: 'flex', gap: '15px' }}>
-                    <FieldLine label="FECHA CONFIRMACIÓN" value={formatDate(confirmationData.fechaSacramento || confirmationData.sacramentDate)} width="45%" />
-                    <FieldLine label="LUGAR CELEBRACIÓN" value={lugarSacramento} width="55%" />
+                    <FieldLine label="FECHA CONFIRMACIÓN" value={formatDate(confirmationData.fechaSacramento || confirmationData.sacramentDate)} width="40%" />
+                    <FieldLine label="LUGAR CELEBRACIÓN" value={lugarSacramento} width="60%" />
                 </div>
 
                 <FieldLine label="MINISTRO" value={ministro} />
