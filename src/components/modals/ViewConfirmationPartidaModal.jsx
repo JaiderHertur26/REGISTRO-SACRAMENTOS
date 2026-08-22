@@ -1,102 +1,212 @@
 import React, { useRef } from 'react';
-import { X, Printer, BookOpen, AlertTriangle } from 'lucide-react';
+import { 
+    X, Printer, BookOpen, Fingerprint, 
+    ShieldCheck, CheckCircle2, AlertCircle
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ConfirmationPrintTemplate from '@/components/ConfirmationPrintTemplate';
 import { motion, AnimatePresence } from 'framer-motion';
+import { cn } from '@/lib/utils';
+import { useAppData } from '@/context/AppDataContext'; 
 
+// --- COMPONENTES UI REUTILIZABLES ---
+const Badge = ({ color, icon: Icon, label }) => {
+    const colors = {
+        red: "bg-red-50 text-red-700 border-red-100",
+        amber: "bg-amber-50 text-amber-700 border-amber-100",
+        green: "bg-green-50 text-green-700 border-green-100"
+    };
+    return (
+        <div className={cn("px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter border flex items-center gap-1.5 shadow-sm", colors[color])}>
+            <Icon className="w-3 h-3" /> {label}
+        </div>
+    );
+};
+
+const InfoCard = ({ label, val, icon: Icon }) => (
+    <div className="bg-white/80 backdrop-blur-sm p-5 rounded-[2rem] border border-white shadow-sm flex items-center gap-4">
+        <div className="bg-red-50 p-2.5 rounded-xl text-red-600"><Icon className="w-4 h-4"/></div>
+        <div className="text-left">
+            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-0.5">{label}</span>
+            <span className="text-xs font-black text-gray-800 uppercase tracking-tight">{val}</span>
+        </div>
+    </div>
+);
+
+// --- COMPONENTE PRINCIPAL (MODAL DE INSPECCIÓN) ---
 const ViewConfirmationPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) => {
-    const printComponentRef = useRef();
+    const componenteImpresionRef = useRef();
+    const { getParrocos } = useAppData(); 
 
     if (!isOpen || !partida) return null;
 
-    // --- LÓGICA LIMPIA ---
-    let rawMarginText = partida.notaMarginal || partida.marginNote || partida.notaAlMargen || partida.observaciones || partida.observations || "";
-    if (typeof rawMarginText === 'object') {
-        rawMarginText = rawMarginText.text || JSON.stringify(rawMarginText);
+    const parishId = partida.parishId || partida.parish_id || auxiliaryData?.entity_id || auxiliaryData?.id;
+
+    // 🚀 OBTENEMOS EL "DA FE" HISTÓRICO PARA INYECTARLO AL PDF (Máquina del tiempo)
+    let rawDaFe = partida.daFe || partida.dafe || partida.da_fe || partida.ministerFaith;
+    
+    if (!rawDaFe || rawDaFe === '---' || rawDaFe.includes('ENCARGADO') || !isNaN(Number(String(rawDaFe).trim()))) {
+        if (parishId && getParrocos) {
+            const sacerdotes = getParrocos(parishId) || [];
+            const fechaSacramento = partida.fechaSacramento || partida.celebration_date || partida.sacramentDate;
+            
+            if (fechaSacramento) {
+                const fechaSac = new Date(fechaSacramento.includes('T') ? fechaSacramento : `${fechaSacramento}T12:00:00`);
+                const sacerdoteEpoca = sacerdotes.find(s => {
+                    if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                    const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
+                    const inicio = new Date(iStr);
+                    const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                    return fechaSac >= inicio && fechaSac <= fin;
+                });
+                if (sacerdoteEpoca) rawDaFe = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
+            }
+        }
     }
     
-    // UI Banners
-    const isDecreto = partida.isSupplementary || partida.correctionDecreeRef || partida.type === 'replacement' || partida.createdByDecree === 'replacement' || partida.creadoPorDecreto;
-    const isAnulada = partida.status === 'anulada' || partida.isAnnulled || partida.estado === 'anulada';
-    
-    const displayNote = rawMarginText.trim() !== "" ? rawMarginText : "PARTIDA ESTÁNDAR (La nota oficial se generará al imprimir)";
+    // Inyectamos el Sacerdote Histórico calculado temporalmente al objeto partida para que el PDF lo lea
+    const partidaParaImprimir = { ...partida, daFe: rawDaFe };
 
-    const handlePrint = () => {
-        const printContent = printComponentRef.current;
-        if (!printContent) return;
+    const notaVisual = partida.notaMarginal && partida.notaMarginal !== "---" 
+        ? partida.notaMarginal 
+        : "SIN NOTAS MARGINALES ADICIONALES HASTA LA FECHA.";
+
+    const estaAnulada = partida.tipoIdentidad === 'id_anulada_correccion' || partida.status === 'anulada' || partida.estado === 'anulada';
+    const esReposicion = partida.tipoIdentidad === 'id_creada_reposicion' || partida.newBaptismIdRepo || partida.isSupplementary;
+
+    const ejecutarImpresion = () => {
+        const contenido = componenteImpresionRef.current;
+        if (!contenido) return;
 
         const iframe = document.createElement('iframe');
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
-        iframe.style.border = '0';
+        iframe.style.display = 'none';
         document.body.appendChild(iframe);
 
         const doc = iframe.contentWindow.document;
         doc.open();
-        doc.write('<html><head><title>Imprimir Partida</title>');
+        doc.write('<html><head><title>Impresión Oficial - Confirmación</title>');
         
-        const styles = document.querySelectorAll('style, link[rel="stylesheet"]');
-        styles.forEach((style) => { doc.write(style.outerHTML); });
-
-        doc.write('</head><body class="bg-white" style="margin: 0; padding: 0;">');
-        doc.write(printContent.innerHTML);
+        const estilos = document.querySelectorAll('style, link[rel="stylesheet"]');
+        estilos.forEach(s => doc.write(s.outerHTML));
+        
+        doc.write('</head><body style="margin:0; padding:0; background:white; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">');
+        doc.write(contenido.innerHTML);
         doc.write('</body></html>');
         doc.close();
 
+        iframe.contentWindow.focus();
         setTimeout(() => {
-            iframe.contentWindow.focus();
             iframe.contentWindow.print();
-            setTimeout(() => { if (document.body.contains(iframe)) document.body.removeChild(iframe); }, 3000);
+            setTimeout(() => document.body.removeChild(iframe), 1000);
         }, 500);
     };
 
     return (
         <AnimatePresence>
             {isOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 md:p-8">
                     <motion.div 
-                        initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.2 }}
-                        className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col"
+                        initial={{ opacity: 0, scale: 0.9, y: 30 }} 
+                        animate={{ opacity: 1, scale: 1, y: 0 }} 
+                        exit={{ opacity: 0, scale: 0.9, y: 30 }}
+                        className="bg-white rounded-[3rem] shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden border border-white/20"
                     >
-                        <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gray-50 rounded-t-lg shrink-0">
-                            <h2 className="text-lg font-bold text-gray-800 flex items-center flex-wrap gap-2">
-                                <span className="bg-[#4B7BA7] text-white p-1.5 rounded-md text-xs font-bold uppercase tracking-wider">DOCUMENTO OFICIAL</span>
-                                Partida de Confirmación
-                                {isDecreto && <span className="bg-amber-100 text-amber-800 p-1.5 rounded-md text-xs border border-amber-200 shadow-sm font-bold">PARTIDA SUPLETORIA</span>}
-                                {isAnulada && <span className="bg-red-100 text-red-800 p-1.5 rounded-md text-xs border border-red-200 shadow-sm flex items-center gap-1 font-bold"><AlertTriangle className="w-3 h-3"/> REGISTRO ANULADO</span>}
-                            </h2>
-                            <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full hover:bg-gray-200"><X className="w-5 h-5 text-gray-500" /></Button>
+                        {/* CABECERA DE CONTROL */}
+                        <div className="flex items-center justify-between px-8 py-6 bg-white border-b border-gray-100 shrink-0">
+                            <div className="flex items-center gap-5">
+                                <div className={cn(
+                                    "p-3 rounded-2xl text-white shadow-lg",
+                                    estaAnulada ? "bg-red-500 shadow-red-500/20" : "bg-red-600 shadow-red-900/20"
+                                )}>
+                                    <Fingerprint className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-3">
+                                        <h2 className="text-2xl font-black text-gray-900 tracking-tighter uppercase">Inspección de Partida</h2>
+                                        <div className="flex gap-2">
+                                            {estaAnulada && <Badge color="red" icon={AlertCircle} label="Anulada" />}
+                                            {esReposicion && <Badge color="amber" icon={ShieldCheck} label="Reposición" />}
+                                            {!estaAnulada && <Badge color="green" icon={CheckCircle2} label="Vigente" />}
+                                        </div>
+                                    </div>
+                                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.3em] mt-1">Sincronizado con Base de Datos Central</p>
+                                </div>
+                            </div>
+                            <button onClick={onClose} className="p-3 hover:bg-gray-100 rounded-full transition-all text-gray-400 hover:text-gray-900">
+                                <X className="w-7 h-7" />
+                            </button>
                         </div>
 
-                        <div className="flex-1 overflow-auto bg-gray-100 p-8 flex flex-col items-center gap-6">
-                            <div className={`w-[8.5in] border-l-4 ${isAnulada ? 'border-red-500 bg-red-50' : 'border-blue-500 bg-blue-50'} p-4 rounded-r-lg shadow-sm print:hidden mb-2 relative overflow-hidden`}>
-                                 <div className={`absolute top-0 right-0 -mr-6 -mt-6 opacity-10 pointer-events-none ${isAnulada ? 'text-red-900' : 'text-blue-900'}`}><BookOpen className="w-32 h-32" /></div>
-                                 <h4 className={`text-sm font-bold uppercase tracking-wider mb-2 flex items-center gap-2 ${isAnulada ? 'text-red-800' : 'text-blue-800'}`}>
-                                     <BookOpen className="w-4 h-4" /> Notas Originales en Base de Datos
-                                 </h4>
-                                 <div className={`relative z-10 font-mono text-sm leading-relaxed whitespace-pre-wrap ${isAnulada ? 'text-red-900' : 'text-blue-900'}`}>
-                                     {displayNote}
-                                 </div>
+                        {/* VISUALIZADOR DE DOCUMENTO */}
+                        <div className="flex-1 overflow-y-auto bg-slate-200/50 p-6 md:p-12 flex flex-col items-center gap-10 custom-scrollbar">
+                            
+                            {/* Panel de Ubicación Física */}
+                            <div className="w-full max-w-[8.5in] grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <InfoCard 
+                                    label="Ubicación en Archivo" 
+                                    val={`Libro ${partida.Libro || partida.book_number || '---'} • Folio ${partida.folio || partida.page_number || '---'} • Acta ${partida.numero || partida.entry_number || '---'}`} 
+                                    icon={BookOpen}
+                                />
+                                <div className="md:col-span-2 bg-white/80 backdrop-blur-sm p-5 rounded-[2rem] border border-white shadow-sm flex items-start gap-4">
+                                    <div className="bg-amber-100 p-2 rounded-xl text-amber-600"><AlertCircle className="w-4 h-4"/></div>
+                                    <div className="flex-1">
+                                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-1">Nota Marginal Proyectada</span>
+                                        <p className="text-[11px] font-bold text-gray-600 leading-relaxed italic line-clamp-2 uppercase">"{notaVisual}"</p>
+                                    </div>
+                                </div>
                             </div>
 
-                            <div className="shadow-2xl bg-white print:shadow-none min-h-[11in] w-[8.5in] relative">
-                                {isAnulada && (
-                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 overflow-hidden">
-                                        <div className="transform -rotate-45 text-[8rem] font-black text-red-600 opacity-20 border-8 border-red-600 p-8 rounded-3xl">ANULADA</div>
+                            {/* EL DOCUMENTO (VISTA PREVIA DE IMPRESIÓN) */}
+                            <div className="relative group">
+                                <div className="absolute -inset-4 bg-gradient-to-tr from-red-600/10 to-transparent blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+                                <div className="relative shadow-[0_30px_100px_rgba(0,0,0,0.18)] bg-white w-full max-w-[8.5in] min-h-[11in] transform transition-transform duration-700">
+                                    
+                                    {estaAnulada && (
+                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 overflow-hidden select-none">
+                                            <div className="transform -rotate-45 text-[12rem] font-black text-red-600/5 border-[30px] border-red-600/5 p-20 rounded-[100px] uppercase tracking-tighter">
+                                                Anulada
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Componente de Impresión Final */}
+                                    <div ref={componenteImpresionRef} className="print-root">
+                                        <ConfirmationPrintTemplate 
+                                            data={partidaParaImprimir} // 🚀 Pasamos el objeto con el Sacerdote Histórico Inyectado
+                                            parroquiaInfo={auxiliaryData} 
+                                        />
                                     </div>
-                                )}
-                                <div ref={printComponentRef} className="relative z-10">
-                                    <ConfirmationPrintTemplate data={partida} parrocoNombre={auxiliaryData?.parroco || 'PÁRROCO ENCARGADO'} cargo={'Párroco'} parroquiaInfo={auxiliaryData} />
                                 </div>
                             </div>
                         </div>
 
-                        <div className="p-4 border-t border-gray-100 bg-white rounded-b-lg flex justify-end gap-3 shrink-0">
-                            <Button variant="outline" onClick={onClose} className="border-gray-300">Cerrar</Button>
-                            <Button onClick={handlePrint} className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm gap-2"><Printer className="w-4 h-4" /> Imprimir Partida</Button>
+                        {/* ACCIONES FINALES */}
+                        <div className="px-10 py-8 bg-white border-t border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-6 shrink-0">
+                            <div className="flex items-center gap-6 text-left">
+                                <div className="flex flex-col">
+                                    <span className="text-[9px] font-black text-gray-300 uppercase tracking-widest leading-none mb-1">Estado de Integridad</span>
+                                    <span className="text-xs font-bold text-green-500 flex items-center gap-1.5 uppercase">
+                                        <CheckCircle2 className="w-3.5 h-3.5" /> Registro Firmado
+                                    </span>
+                                </div>
+                                <div className="h-8 w-px bg-gray-100 hidden md:block"></div>
+                                <div className="hidden md:flex flex-col">
+                                    <span className="text-[9px] font-black text-gray-300 uppercase tracking-widest leading-none mb-1">Identificador Nube</span>
+                                    <span className="text-[10px] font-mono font-bold text-gray-400 uppercase tracking-tighter">{partida.id?.substring(0, 20)}...</span>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-4 w-full sm:w-auto">
+                                <Button variant="ghost" onClick={onClose} className="px-10 py-7 rounded-2xl font-black uppercase text-[10px] text-gray-400 hover:text-gray-600">
+                                    Cerrar Vista
+                                </Button>
+                                <Button 
+                                    onClick={ejecutarImpresion} 
+                                    className="flex-1 sm:flex-none bg-red-600 hover:bg-red-800 text-white shadow-xl shadow-red-900/20 font-black px-12 py-7 rounded-2xl gap-3 transition-all transform active:scale-95 text-[11px] uppercase tracking-widest"
+                                >
+                                    <Printer className="w-5 h-5" /> Imprimir Acta
+                                </Button>
+                            </div>
                         </div>
                     </motion.div>
                 </div>

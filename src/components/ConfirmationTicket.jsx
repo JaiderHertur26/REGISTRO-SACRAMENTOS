@@ -1,188 +1,229 @@
 import React from 'react';
-import { Scissors } from 'lucide-react';
+import { BookOpen, Scissors } from 'lucide-react';
 
 const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
-  if (!confirmationData) return null;
+    if (!confirmationData) return null;
 
-  // Formatting helpers
-  const formatDate = (dateString) => {
-    if (!dateString) return '_________________';
-    try {
-        const date = new Date(dateString);
-        if (isNaN(date.getTime())) return dateString || '_________________';
-        
-        return date.toLocaleDateString('es-CO', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            timeZone: 'UTC' 
-        });
-    } catch (e) {
-        return dateString;
+    // --- 1. RESOLUCIÓN DE DATOS INSTITUCIONALES ---
+    const formatData = (val) => {
+        if (!val || val === '---' || String(val).trim() === '') return '';
+        return String(val).trim().toUpperCase();
+    };
+
+    const header = parishInfo || {};
+    const diocesis = formatData(header.diocesis || 'ARQUIDIÓCESIS DE BARRANQUILLA');
+    const nombreP = formatData(header.nombre || 'PARROQUIA');
+    const direccion = formatData(header.direccion || '');
+    const telefono = formatData(header.telefono || '');
+    const ciudad = formatData(header.ciudad || 'BARRANQUILLA');
+    const region = formatData(header.region || 'ATLÁNTICO');
+
+    let ubicacionFinal = ciudad;
+    // Normalizamos para evitar duplicar si la ciudad ya incluye el departamento
+    const ciudadNorm = ciudad.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const regionNorm = region.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+
+    if (region && !ciudadNorm.includes(regionNorm)) {
+        ubicacionFinal += `, ${region}`;
     }
-  };
+    if (!ciudadNorm.includes('COLOMBIA')) {
+        ubicacionFinal += ' - COLOMBIA';
+    }
 
-  // Helper to safely render complex fields
-  const formatList = (data) => {
-      if (!data) return '';
-      if (typeof data === 'string') return data;
-      if (Array.isArray(data)) {
-          return data.map(item => (typeof item === 'object' ? (item.name || JSON.stringify(item)) : item)).join(', ');
-      }
-      return '';
-  };
+    const contactLine = [direccion, telefono ? `TEL: ${telefono}` : '', ubicacionFinal]
+        .filter(Boolean)
+        .join(' — ');
 
-  const Section = ({ title, content, className = "" }) => (
-    <div className={`flex items-baseline mb-0.5 text-[10px] ${className}`}>
-      <span className="font-bold uppercase mr-1 min-w-[90px] text-gray-800">{title}:</span>
-      <span className="border-b border-gray-400 px-1 flex-grow font-medium text-black leading-tight">
-        {typeof content === 'object' ? formatList(content) : (content || '_________________')}
-      </span>
-    </div>
-  );
+    // --- 2. FORMATEADORES DE FECHA ---
+    const formatDate = (dateString) => {
+        if (!dateString) return '';
+        try {
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return String(dateString).toUpperCase();
+            
+            const day = date.getUTCDate();
+            const month = date.toLocaleString('es-CO', { month: 'long', timeZone: 'UTC' }).toUpperCase();
+            const year = date.getUTCFullYear();
+            
+            return `${day} DE ${month} DE ${year}`;
+        } catch (e) {
+            return String(dateString).toUpperCase();
+        }
+    };
 
-  const Header = ({ title }) => (
-    <div className="text-center mb-2">
-      <h2 className="text-xs font-bold uppercase tracking-[0.2em] border-b border-black inline-block pb-0.5 mb-1">{title}</h2>
-      <h3 className="text-sm font-bold uppercase text-black">{parishInfo?.name || 'PARROQUIA'}</h3>
-      <div className="text-[9px] text-gray-600 flex flex-col items-center leading-tight">
-          <span>{parishInfo?.address || 'Dirección no disponible'}</span>
-          <span>{parishInfo?.phone ? `Tel: ${parishInfo.phone}` : ''} {parishInfo?.city ? `- ${parishInfo.city}` : ''}</span>
-      </div>
-    </div>
-  );
+    // --- 3. MAPEO DE DATOS DE LA CONFIRMACIÓN ---
+    const nroReg = formatData(confirmationData.numeroRegistro || confirmationData.registration_number || '');
+    const confirmando = `${formatData(confirmationData.nombres || confirmationData.firstName)} ${formatData(confirmationData.apellidos || confirmationData.lastName)}`.trim();
+    const sexoReal = formatData(confirmationData.sexo || confirmationData.sex) || '';
+    const edad = formatData(confirmationData.edad || '');
+    
+    const nombrePadre = formatData(confirmationData.nombrePadre || confirmationData.fatherName);
+    const nombreMadre = formatData(confirmationData.nombreMadre || confirmationData.motherName);
+    const padrinos = formatData(confirmationData.padrinos || confirmationData.godparents);
+    const ministro = formatData(confirmationData.ministro || confirmationData.minister);
+    
+    const lugarSacramento = formatData(confirmationData.lugarSacramento || confirmationData.place || nombreP);
+    
+    const lugarBautismo = formatData(confirmationData.lugarBautismo || confirmationData.baptismPlace || '');
+    const datosBautismo = `L:${formatData(confirmationData.libroBautismo || '---')} F:${formatData(confirmationData.folioBautismo || '---')} N:${formatData(confirmationData.numeroBautismo || '---')}`;
+    
+    // 🚀 LÓGICA EN CASCADA PARA LA FIRMA DEL RESPONSABLE
+    const getResponsable = () => {
+        if (nombrePadre) return nombrePadre;
+        if (nombreMadre) return nombreMadre;
+        if (padrinos) return padrinos;
+        return '';
+    };
+    const nombreResponsable = getResponsable();
 
-  return (
-    <div className="w-[8.5in] h-[11in] bg-white text-black p-[0.3in] font-serif flex flex-col text-[10px] mx-auto print:m-0 print:p-[0.3in]">
-      
-      {/* ----------------- TOP SECTION (ARCHIVE) - 48% height ----------------- */}
-      <div className="h-[48%] flex flex-col relative border border-gray-100 p-2">
-        <div className="absolute top-2 right-2 border border-black px-1.5 py-0.5 bg-white z-10">
-          <p className="text-[10px] font-bold">N° {confirmationData.numero || 'PEND'}</p>
+    // --- 4. COMPONENTES ESTRUCTURALES ---
+    const FieldLine = ({ label, value, width = "100%" }) => (
+        <div style={{ display: 'flex', alignItems: 'flex-end', width: width, marginBottom: '6px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '6px', whiteSpace: 'nowrap' }}>
+                {label}:
+            </span>
+            <span style={{ 
+                flex: 1, 
+                borderBottom: '1px solid black', 
+                fontSize: '12px', 
+                lineHeight: '1.2', 
+                paddingBottom: '1px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+            }}>
+                {value}
+            </span>
         </div>
+    );
 
-        <Header title="BOLETA PARA ARCHIVO PARROQUIAL - CONFIRMACIÓN" />
+    const TicketHalf = ({ isArchive }) => (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0.25in 0.6in', position: 'relative', overflow: 'hidden' }}>
+            
+            {/* Marca de agua sutil */}
+            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: 0.03, pointerEvents: 'none' }}>
+                <BookOpen size={300} strokeWidth={1} />
+            </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-2 mt-1">
-            <Section title="Fecha Conf." content={formatDate(confirmationData.sacramentDate)} />
-            <Section title="Ministro" content={confirmationData.minister} />
-        </div>
+            {/* ENCABEZADO INSTITUCIONAL UNIFICADO */}
+            <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+                <div style={{ fontSize: '14px', fontWeight: '900' }}>{diocesis}</div>
+                <div style={{ fontSize: '14px', fontWeight: '900', marginTop: '2px' }}>{nombreP}</div>
+                <div style={{ fontSize: '9px', marginTop: '4px', fontWeight: 'bold' }}>{contactLine}</div>
+            </div>
 
-        <div className="space-y-0.5 mb-2 border-t border-gray-100 pt-1">
-            <h4 className="text-[9px] font-bold uppercase bg-gray-50 px-1 py-0.5 mb-0.5 text-center border border-gray-200">Datos del Confirmado</h4>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                <Section title="Apellidos" content={confirmationData.lastName} />
-                <Section title="Nombres" content={confirmationData.firstName} />
-                <Section title="Fecha Nac." content={formatDate(confirmationData.birthDate)} />
-                <Section title="Lugar Nac." content={confirmationData.birthPlace} />
-                <Section title="Sexo" content={confirmationData.sex === 'M' ? 'Masculino' : confirmationData.sex === 'F' ? 'Femenino' : confirmationData.sex} />
+            {/* TÍTULO DE LA BOLETA */}
+            <div style={{ textAlign: 'center', margin: '8px 0' }}>
+                <span style={{ 
+                    fontSize: '12px', 
+                    fontWeight: '900', 
+                    letterSpacing: '1.5px', // Espaciado seguro para evitar saltos de línea
+                    borderBottom: isArchive ? 'none' : '1px solid #000',
+                    paddingBottom: '2px'
+                }}>
+                    {isArchive ? 'BOLETA PARA ARCHIVO PARROQUIAL' : 'CONSTANCIA DE INSCRIPCIÓN (FAMILIA)'}
+                </span>
+            </div>
+
+            {/* BARRA DE CONTROL */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '11px', fontWeight: 'bold' }}>
+                <div>REGISTRO Nº: {nroReg}</div>
+                <div>FECHA TRÁMITE: {formatDate(new Date().toISOString())}</div>
+            </div>
+
+            {/* ADVERTENCIA FAMILIA */}
+            {!isArchive && (
+                <div style={{ textAlign: 'center', fontSize: '10px', fontWeight: 'bold', marginBottom: '8px' }}>
+                    ESTA BOLETA NO ES UNA PARTIDA DE CONFIRMACIÓN VÁLIDA PARA TRÁMITES CIVILES O ECLESIÁSTICOS.
+                </div>
+            )}
+
+            {/* CUERPO DEL DOCUMENTO */}
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                
+                <FieldLine label="CONFIRMANDO" value={confirmando} />
+                
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="FECHA NAC." value={formatDate(confirmationData.fechaNacimiento || confirmationData.birthDate)} width="50%" />
+                    <FieldLine label="LUGAR NAC." value={formatData(confirmationData.lugarNacimiento || confirmationData.birthPlace)} width="50%" />
+                </div>
+
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="SEXO" value={sexoReal} width="50%" />
+                    <FieldLine label="EDAD CONF." value={edad ? `${edad} AÑOS` : ''} width="50%" />
+                </div>
+
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="PADRE" value={nombrePadre} width="50%" />
+                    <FieldLine label="MADRE" value={nombreMadre} width="50%" />
+                </div>
+
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="LUGAR BAUTISMO" value={lugarBautismo} width="60%" />
+                    <FieldLine label="DATOS BAUT." value={datosBautismo} width="40%" />
+                </div>
+
+                <FieldLine label="PADRINOS" value={padrinos} />
+                
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="FECHA CONFIRMACIÓN" value={formatDate(confirmationData.fechaSacramento || confirmationData.sacramentDate)} width="45%" />
+                    <FieldLine label="LUGAR CELEBRACIÓN" value={lugarSacramento} width="55%" />
+                </div>
+
+                <FieldLine label="MINISTRO" value={ministro} />
+
+                {/* SECCIÓN DE FIRMA */}
+                <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', paddingTop: '10px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '8px' }}>Firma responsable:</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', width: '300px' }}>
+                        <div style={{ borderBottom: '1px solid black', height: '15px' }}></div>
+                        <span style={{ fontSize: '11px', textAlign: 'center', marginTop: '3px', fontWeight: 'bold' }}>{nombreResponsable}</span>
+                    </div>
+                </div>
+
+            </div>
+
+            {/* NOTA DE PIE */}
+            <div style={{ fontSize: '9px', fontWeight: 'bold', paddingTop: '8px', minHeight: '14px' }}>
+                {isArchive 
+                    ? '* USO INTERNO. VERIFIQUE DATOS ANTES DE ASENTAR EL ACTA DEFINITIVA.'
+                    : ''}
             </div>
         </div>
+    );
 
-        <div className="space-y-0.5 mb-2">
-            <h4 className="text-[9px] font-bold uppercase bg-gray-50 px-1 py-0.5 mb-0.5 text-center border border-gray-200">Padres</h4>
-            <Section title="Padre" content={confirmationData.fatherName} />
-            <Section title="Madre" content={confirmationData.motherName} />
-        </div>
+    return (
+        <div style={{ 
+            width: '8.5in', 
+            height: '11in', 
+            backgroundColor: 'white', 
+            color: 'black', 
+            fontFamily: 'Arial, sans-serif',
+            margin: '0 auto',
+            display: 'flex',
+            flexDirection: 'column',
+            boxSizing: 'border-box'
+        }}>
+            <style dangerouslySetInnerHTML={{ __html: `
+                @media print {
+                    @page { size: letter portrait; margin: 0; }
+                    body { margin: 0; background: white; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                }
+            `}} />
 
-        <div className="grid grid-cols-1 gap-4 mb-1">
-            <div>
-                 <h4 className="text-[9px] font-bold uppercase bg-gray-50 px-1 py-0.5 mb-0.5 text-center border border-gray-200">Padrinos</h4>
-                 <div className="text-[9px] border-b border-gray-300 min-h-[2.5em] p-0.5 leading-tight">
-                    {formatList(confirmationData.godparents)}
-                 </div>
-            </div>
-        </div>
-        
-        <div className="mt-auto flex justify-end pt-2">
-            <div className="text-center w-32">
-                <div className="border-b border-black mb-1 h-6"></div>
-                <p className="text-[8px] font-bold uppercase">Firma Párroco / Ministro</p>
-            </div>
-        </div>
-      </div>
-
-      {/* ----------------- CUT LINE - 4% height ----------------- */}
-      <div className="h-[4%] flex items-center justify-center relative my-1">
-        <div className="absolute w-full border-t border-dashed border-gray-400"></div>
-        <div className="bg-white px-2 z-10 flex items-center gap-1 text-[8px] font-bold text-gray-400 uppercase">
-             <Scissors size={10} /> CORTE AQUÍ <Scissors size={10} />
-        </div>
-      </div>
-
-      {/* ----------------- BOTTOM SECTION (FAMILY) - 48% height ----------------- */}
-      <div className="h-[48%] flex flex-col relative border border-gray-100 p-2">
-        <Header title="CONSTANCIA DE CONFIRMACIÓN (FAMILIA)" />
-        
-        <div className="border border-gray-300 bg-gray-50 p-1 mb-3 text-center">
-            <p className="text-[8px] font-bold uppercase leading-tight">Esta boleta NO es una partida de confirmación válida para trámites civiles o eclesiásticos.</p>
-            <p className="text-[8px] leading-tight">Conserve este documento para solicitar la partida oficial en el despacho parroquial.</p>
-        </div>
-
-        <div className="flex justify-between items-center mb-2 px-1">
-            <div className="flex gap-2 text-[10px]">
-                <span className="font-bold">No. Inscripción:</span>
-                <span className="font-mono bg-gray-100 px-2 rounded-sm">{confirmationData.numero || 'PENDIENTE'}</span>
-            </div>
-            <div className="flex gap-2 text-[10px]">
-                <span className="font-bold">Fecha Inscripción:</span>
-                <span>{formatDate(confirmationData.inscriptionDate || confirmationData.createdAt)}</span>
-            </div>
-        </div>
-
-        <div className="flex-grow space-y-1">
-            <div className="text-center mb-3">
-                <p className="text-[10px] italic mb-0.5">Certificamos que se ha inscrito la confirmación de:</p>
-                <p className="text-base font-bold uppercase border-b border-black inline-block px-4">{confirmationData.firstName} {confirmationData.lastName}</p>
+            <TicketHalf isArchive={true} />
+            
+            {/* LÍNEA DE CORTE */}
+            <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: '1px dashed black', position: 'relative' }}>
+                <div style={{ position: 'absolute', backgroundColor: 'white', padding: '0 10px', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold', color: '#666' }}>
+                    <Scissors size={12} /> CORTE AQUÍ <Scissors size={12} />
+                </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-4 text-[10px]">
-                 <div className="flex gap-1 items-baseline">
-                    <span className="font-bold whitespace-nowrap">Nacido el:</span>
-                    <span className="border-b border-gray-300 flex-1 pl-1">{formatDate(confirmationData.birthDate)}</span>
-                 </div>
-                 <div className="flex gap-1 items-baseline">
-                    <span className="font-bold whitespace-nowrap">En:</span>
-                    <span className="border-b border-gray-300 flex-1 pl-1 truncate">{confirmationData.birthPlace}</span>
-                 </div>
-            </div>
+            <TicketHalf isArchive={false} />
 
-            <div className="grid grid-cols-2 gap-6 mt-2 text-[10px]">
-                <div>
-                    <span className="font-bold block mb-0.5 bg-gray-50 text-center text-[9px] uppercase border border-gray-200">Padres</span>
-                    <div className="flex gap-1 mb-1">
-                        <span className="font-bold w-10 text-[9px]">Padre:</span>
-                        <p className="border-b border-gray-300 flex-1 leading-none">{confirmationData.fatherName}</p>
-                    </div>
-                    <div className="flex gap-1">
-                         <span className="font-bold w-10 text-[9px]">Madre:</span>
-                        <p className="border-b border-gray-300 flex-1 leading-none">{confirmationData.motherName}</p>
-                    </div>
-                </div>
-                 <div>
-                    <span className="font-bold block mb-0.5 bg-gray-50 text-center text-[9px] uppercase border border-gray-200">Padrinos</span>
-                    <p className="border-b border-gray-300 h-8 overflow-hidden text-[9px] leading-tight">{formatList(confirmationData.godparents)}</p>
-                </div>
-            </div>
-
-             <div className="mt-2 text-[10px] flex gap-2">
-                <span className="font-bold">Ministro:</span>
-                <span className="border-b border-gray-300 flex-1">{confirmationData.minister}</span>
-            </div>
         </div>
-
-        <div className="mt-auto pt-2 flex justify-between items-end">
-            <div className="text-[8px] text-gray-500 w-1/2 leading-tight">
-                <p>Nota: Verifique los datos cuidadosamente. Cualquier error ortográfico o de fecha debe ser notificado antes de asentar el libro oficial.</p>
-            </div>
-            <div className="text-center w-32">
-                <div className="border-b border-black mb-1 h-6"></div>
-                <p className="text-[8px] font-bold uppercase">Firma / Sello Parroquial</p>
-            </div>
-        </div>
-      </div>
-    </div>
-  );
+    );
 };
 
 export default ConfirmationTicket;
