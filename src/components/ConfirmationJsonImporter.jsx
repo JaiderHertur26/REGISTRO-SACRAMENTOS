@@ -12,10 +12,11 @@ import { generateUUID } from '@/utils/supabaseHelpers';
 import Table from '@/components/ui/Table';
 import { cn } from '@/lib/utils';
 
-// 🚀 FUNCIÓN LIMPIADORA DE TÍTULOS
+// 🚀 FUNCIÓN LIMPIADORA DE TÍTULOS (Actualizada)
 const cleanTitle = (nameStr) => {
     if (!nameStr) return '';
-    return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|EXCMO\.?\s*|SACERDOTE\s*)/i, '').trim();
+    // Quitamos el '^' e incluimos la 'g' global para que limpie títulos al inicio, medio o final de la cadena
+    return String(nameStr).replace(/(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|EXCMO\.?\s*|SACERDOTE\s*)/ig, '').trim();
 };
 
 // 🚀 FUNCIÓN PURIFICADORA INTERNA
@@ -155,10 +156,9 @@ const ConfirmationJsonImporter = () => {
                         mappedItem.ministro = sacerdoteEpoca || '';
                     } else {
                         let original = String(mappedItem.ministro).toUpperCase();
-                        if (original.includes('PBRO')) {
+                        // Asignación segura del título correcto
+                        if (original.includes('PBRO') || original.includes('PADRE') || original.includes('FRAY') || original.includes('SACERDOTE')) {
                             mappedItem.ministro = `PBRO. ${minClean}`;
-                        } else if (!original.includes('MONS')) {
-                            mappedItem.ministro = `MONS. ${minClean}`;
                         } else {
                             mappedItem.ministro = `MONS. ${minClean}`;
                         }
