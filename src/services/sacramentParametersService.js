@@ -14,12 +14,24 @@ export const getDefaultBaptismParameters = () => ({
     numeroRegistroActual: "000001"
 });
 
+// 🚀 REEMPLAZADO: Este es el único lugar donde debe estar este default
 export const getDefaultConfirmationParameters = () => ({
     ordinarioLibro: 1,
     ordinarioFolio: 1,
     ordinarioNumero: 1,
     ordinarioPartidas: 2,
-    ordinarioRestartNumber: false
+    ordinarioRestartNumber: false,
+    ordinarioBlocked: false,
+    numeroRegistroActual: "000001",
+    suplementarioLibro: 1,
+    suplementarioFolio: 1,
+    suplementarioNumero: 1,
+    suplementarioPartidas: 2,
+    suplementarioReiniciar: false,
+    suplementarioBlocked: false,
+    registroRegularEn: 'ordinario',
+    registroDecretoEn: 'suplementario',
+    generarNotaMarginal: true
 });
 
 export const getDefaultMatrimonioParameters = () => ({
@@ -86,25 +98,6 @@ export const getNextBaptismNumbers = async (parishId) => {
 // ============================================================================
 // 🕊️ CONFIRMACIONES
 // ============================================================================
-export const getDefaultConfirmationParameters = () => ({
-    ordinarioLibro: 1,
-    ordinarioFolio: 1,
-    ordinarioNumero: 1,
-    ordinarioPartidas: 2,
-    ordinarioRestartNumber: false,
-    ordinarioBlocked: false,
-    numeroRegistroActual: "000001",
-    suplementarioLibro: 1,
-    suplementarioFolio: 1,
-    suplementarioNumero: 1,
-    suplementarioPartidas: 2,
-    suplementarioReiniciar: false,
-    suplementarioBlocked: false,
-    registroRegularEn: 'ordinario',
-    registroDecretoEn: 'suplementario',
-    generarNotaMarginal: true
-});
-
 export const getConfirmationParameters = async (parishId) => {
     if (!parishId) return getDefaultConfirmationParameters();
     
