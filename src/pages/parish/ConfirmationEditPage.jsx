@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { 
     Save, ArrowLeft, Loader2, BookOpen, 
-    Calendar, User, Fingerprint, PenTool, Droplet, ShieldCheck, Hash
+    Calendar, User, Fingerprint, PenTool, Droplet, ShieldCheck 
 } from 'lucide-react';
 import CityAutocomplete from '@/components/CityAutocomplete';
 import ChurchLocationAutocomplete from '@/components/ChurchLocationAutocomplete';
@@ -78,37 +78,36 @@ const ConfirmationEditPage = () => {
                 const parrocoActualObj = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
                 const nombreParrocoActual = parrocoActualObj ? `${parrocoActualObj.nombre} ${parrocoActualObj.apellido || ''}`.trim().toUpperCase() : '';
 
-                // 🚀 CARGA ESTRICTA HÍBRIDA (Mapeo Definitivo DBF + Supabase)
+                // 🚀 CARGA ESTRICTA HÍBRIDA (Mapeo Definitivo)
                 setFormData({
                     id: dbRecord.id,
                     status: dbRecord.status || 'seated',
-                    numeroRegistro: dbRecord.numero_registro || raw.NUMINSC || raw.numeroRegistro || raw.inscripcionNumero || '',
-                    Libro: dbRecord.book_number || raw.LIBRO || raw.Libro || raw.libro || '',
-                    folio: dbRecord.folio || raw.FOLIO || raw.folio || raw.page_number || '',
-                    numero: dbRecord.number || raw.NUMERO || raw.numero || raw.entry_number || '',
-                    fechaSacramento: dbRecord.celebration_date || raw.FECCON || raw.fechaSacramento || raw.fechaConfirmacion || '',
-                    lugarSacramento: raw.LUGCON || raw.lugarSacramento || raw.lugar || raw.place || nombreParroquia,
-                    apellidos: dbRecord.apellidos || raw.APELLIDOS || raw.apellidos || raw.lastName || '',
-                    nombres: dbRecord.nombres || raw.NOMBRES || raw.nombres || raw.firstName || '',
-                    sexo: dbRecord.sexo || raw.SEXO || raw.sexo || raw.sex || '',
-                    fechaNacimiento: dbRecord.fecha_nacimiento || raw.FECNAC || raw.fechaNacimiento || raw.birthDate || '',
-                    edad: raw.EDAD || raw.edad || raw.metadata?.ageAtConfirmation || '',
+                    Libro: dbRecord.book_number || raw.Libro || raw.libro || '',
+                    folio: dbRecord.folio || raw.folio || raw.page_number || '',
+                    numero: dbRecord.number || raw.numero || raw.entry_number || '',
+                    fechaSacramento: dbRecord.celebration_date || raw.fechaSacramento || raw.fechaConfirmacion || '',
+                    lugarSacramento: raw.lugarSacramento || raw.lugar || raw.place || nombreParroquia,
+                    apellidos: dbRecord.apellidos || raw.apellidos || raw.lastName || '',
+                    nombres: dbRecord.nombres || raw.nombres || raw.firstName || '',
+                    sexo: dbRecord.sexo || raw.sexo || raw.sex || '',
+                    fechaNacimiento: dbRecord.fecha_nacimiento || raw.fechaNacimiento || raw.birthDate || '',
+                    edad: raw.edad || raw.metadata?.ageAtConfirmation || '',
                     lugarNacimiento: dbRecord.lugar_nacimiento || raw.lugarNacimiento || '',
                     tipoUnionPadres: dbRecord.tipo_union_padres || raw.tipoUnionPadres || '',
-                    nombrePadre: dbRecord.nombre_padre || raw.PADRE || raw.nombrePadre || raw.fatherName || '',
+                    nombrePadre: dbRecord.nombre_padre || raw.nombrePadre || raw.fatherName || '',
                     cedulaPadre: raw.cedulaPadre || '',
-                    nombreMadre: dbRecord.nombre_madre || raw.MADRE || raw.nombreMadre || raw.motherName || '',
+                    nombreMadre: dbRecord.nombre_madre || raw.nombreMadre || raw.motherName || '',
                     cedulaMadre: raw.cedulaMadre || '',
                     
                     // Datos de Bautismo
-                    lugarBautismo: dbRecord.lugar_bautismo || raw.LUGBAU || raw.lugarBautismo || raw.baptismPlace || raw.baptismData?.place || '',
-                    libroBautismo: raw.LIBBAU || raw.libroBautismo || raw.baptismBook || raw.baptismData?.book || '',
-                    folioBautismo: raw.FOLBAU || raw.folioBautismo || raw.baptismFolio || raw.baptismData?.folio || '',
-                    numeroBautismo: raw.NUMBAU || raw.numeroBautismo || raw.baptismNumber || raw.baptismData?.number || '',
+                    lugarBautismo: dbRecord.lugar_bautismo || raw.lugarBautismo || raw.baptismPlace || raw.baptismData?.place || '',
+                    libroBautismo: raw.libroBautismo || raw.baptismBook || raw.baptismData?.book || '',
+                    folioBautismo: raw.folioBautismo || raw.baptismFolio || raw.baptismData?.folio || '',
+                    numeroBautismo: raw.numeroBautismo || raw.baptismNumber || raw.baptismData?.number || '',
 
-                    padrinos: dbRecord.padrinos || raw.PADRI || raw.padrinos || raw.godparents || '',
-                    ministro: dbRecord.ministro || raw.MINISTRO || raw.ministro || raw.minister || '',
-                    daFe: dbRecord.da_fe || raw.DAFE || raw.daFe || raw.ministerFaith || nombreParrocoActual,
+                    padrinos: dbRecord.padrinos || raw.padrinos || raw.godparents || '',
+                    ministro: dbRecord.ministro || raw.ministro || raw.minister || '',
+                    daFe: dbRecord.da_fe || raw.daFe || raw.ministerFaith || nombreParrocoActual,
                     notaMarginal: dbRecord.nota_marginal || raw.notaMarginal || raw.observations || ''
                 });
 
@@ -142,7 +141,7 @@ const ConfirmationEditPage = () => {
         }
     }, [formData?.fechaSacramento, listaSacerdotes, userChangedDate]);
 
-    // 🚀 INTELIGENCIA 2: Recalcular Edad Dinámicamente (solo si cambia la fecha y es posible calcularla)
+    // 🚀 INTELIGENCIA 2: Recalcular Edad Dinámicamente
     useEffect(() => {
         if (formData?.fechaNacimiento && formData?.fechaSacramento) {
             const birth = new Date(formData.fechaNacimiento);
@@ -151,7 +150,6 @@ const ConfirmationEditPage = () => {
                 let age = conf.getFullYear() - birth.getFullYear();
                 const m = conf.getMonth() - birth.getMonth();
                 if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) age--;
-                // Actualizamos la edad calculada si es válida
                 setFormData(prev => ({ ...prev, edad: age >= 0 ? age.toString() : '' }));
             }
         }
@@ -205,7 +203,7 @@ const ConfirmationEditPage = () => {
                 ministro: formData.ministro || null,
                 da_fe: formData.daFe || null,
                 nota_marginal: formData.notaMarginal || null,
-                raw_data: payloadToSave, // Aquí se empaca todo: EDAD, NUMINSC, etc.
+                raw_data: payloadToSave,
                 updated_at: new Date().toISOString()
             }).eq('id', recordId);
             
@@ -256,8 +254,7 @@ const ConfirmationEditPage = () => {
                     
                     <section>
                         <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 01. Localización Física</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                            <div><label className={labelClass}>Nº Inscripción</label><input type="text" name="numeroRegistro" onChange={handleChange} className={`${inputClass} text-red-600 font-mono`} value={formData.numeroRegistro || ''} /></div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
                             <div><label className={labelClass}>Libro</label><input type="text" name="Libro" onChange={handleChange} className={`${inputClass} font-mono text-lg text-red-600`} value={formData.Libro || ''} required /></div>
                             <div><label className={labelClass}>Folio</label><input type="text" name="folio" onChange={handleChange} className={`${inputClass} font-mono text-lg`} value={formData.folio || ''} required /></div>
                             <div><label className={labelClass}>Número (Acta)</label><input type="text" name="numero" onChange={handleChange} className={`${inputClass} font-mono text-lg`} value={formData.numero || ''} required /></div>
