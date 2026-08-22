@@ -19,8 +19,6 @@ import { calculateNextConsecutive } from '@/services/sacramentParametersService'
 const ConfirmationSentarRegistrosPage = () => {
     const { user } = useAuth();
     const { 
-        seatConfirmation, 
-        seatMultipleConfirmations, 
         getMisDatosList, 
         getConfirmationParameters,
         updateConfirmationParameters,
@@ -66,7 +64,7 @@ const ConfirmationSentarRegistrosPage = () => {
         setIsLoading(true);
 
         try {
-            // 🚀 OBTENER BORRADORES DE LA NUBE: Igual que Bautismo, desde la tabla dedicada
+            // 🚀 AHORA SÍ: Consulta directa a la nueva tabla de borradores (pending_confirmations)
             const { data: tempData, error: tempError } = await supabase
                 .from('pending_confirmations')
                 .select('*')
@@ -82,12 +80,9 @@ const ConfirmationSentarRegistrosPage = () => {
                     return { ...raw, id: pb.id, status: 'pending' };
                 });
                 
-                localStorage.setItem(`pendingConfirmations_${resolvedParishId}`, JSON.stringify(cloudPending));
-
                 recordsMapped = cloudPending.map(r => {
                     let fechaSac = r.fechaSacramento || r.celebration_date || r.sacramentDate;
 
-                    // 🚀 MÁQUINA DEL TIEMPO PARA CORRECCIÓN (Da Fe)
                     let historicalPriest = null;
                     if (fechaSac && sacerdotes.length > 0) {
                         const fDate = new Date(fechaSac.includes('T') ? fechaSac : `${fechaSac}T12:00:00`);
@@ -100,7 +95,6 @@ const ConfirmationSentarRegistrosPage = () => {
                         if (sEpoca) historicalPriest = `${sEpoca.nombre} ${sEpoca.apellido || ''}`.trim().toUpperCase();
                     }
 
-                    // Corrección Da Fe
                     let rawDaFe = r.daFe || r.ministerFaith || r.dafe || r.da_fe;
                     if (!rawDaFe || !isNaN(Number(String(rawDaFe).trim()))) {
                         rawDaFe = historicalPriest || '';
@@ -119,7 +113,6 @@ const ConfirmationSentarRegistrosPage = () => {
             
             setPendingConfirmations(recordsMapped);
 
-            // Cargar Consecutivos desde Parameters
             const p = await getConfirmationParameters(resolvedParishId);
             setFullParamsCache(p);
             setNextNumbers({
@@ -151,45 +144,6 @@ const ConfirmationSentarRegistrosPage = () => {
         }
     }, [resolvedParishId]);
 
-    const incrementParameters = async (count, bookType = 'ordinario') => {
-        if (!resolvedParishId) return;
-
-        try {
-            const p = fullParamsCache || await getConfirmationParameters(resolvedParishId);
-            const prefix = bookType;
-
-            let cFolio = parseInt(p[`${prefix}Folio`], 10) || 1;
-            let cNumero = parseInt(p[`${prefix}Numero`], 10) || 1;
-            let cLibro = parseInt(p[`${prefix}Libro`], 10) || 1;
-            let pPorFolio = parseInt(p[`${prefix}Partidas`], 10) || 2;
-            let restart = p[`${prefix}RestartNumber`];
-
-            for (let i = 0; i < count; i++) {
-                const siguiente = calculateNextConsecutive(cNumero, cFolio, cLibro, pPorFolio, restart);
-                cNumero = parseInt(siguiente.numero, 10);
-                cFolio = parseInt(siguiente.folio, 10);
-                cLibro = parseInt(siguiente.libro, 10);
-            }
-
-            const updatedParams = { 
-                ...p, 
-                [`${prefix}Folio`]: cFolio, 
-                [`${prefix}Numero`]: cNumero, 
-                [`${prefix}Libro`]: cLibro 
-            };
-
-            await updateConfirmationParameters(resolvedParishId, updatedParams);
-            setFullParamsCache(updatedParams);
-            setNextNumbers({
-                book: String(cLibro).padStart(4, '0'),
-                page: String(cFolio).padStart(4, '0'),
-                entry: String(cNumero).padStart(4, '0')
-            });
-        } catch (err) {
-            console.error("Error al incrementar parámetros:", err);
-        }
-    };
-
     const currentConfirmation = pendingConfirmations[currentIndex];
     const currentIsFuture = currentConfirmation ? isDateInFuture(currentConfirmation.fechaSacramento) : false;
 
@@ -198,20 +152,71 @@ const ConfirmationSentarRegistrosPage = () => {
         setTimeout(() => window.print(), 300);
     };
 
+    // 🚀 LÓGICA DIRECTA A BASE DE DATOS (Mueve de Pending a Oficial sin depender del Context)
     const handleRegisterIndividual = async () => {
         if (!currentConfirmation || isSaving || currentIsFuture) return;
 
         setIsSaving(true);
         try {
-            const result = await seatConfirmation(currentConfirmation.id, resolvedParishId, currentConfirmation);
-            if (result.success) {
-                await incrementParameters(1, 'ordinario'); 
-                toast({ title: "Éxito", description: "Confirmación asentada permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
-                await loadData();
-                if (currentIndex >= pendingConfirmations.length - 1) setCurrentIndex(Math.max(0, pendingConfirmations.length - 2));
-            } else {
-                throw new Error(result.message);
-            }
+            const cleanDate = (d) => (d && String(d).trim() !== '' && String(d).trim() !== '---') ? d : null;
+
+            // 1. Preparar el objeto perfecto para "confirmations"
+            const finalData = {
+                parish_id: resolvedParishId,
+                book_number: nextNumbers.book,
+                folio: nextNumbers.page,
+                number: nextNumbers.entry,
+                numero_registro: currentConfirmation.numeroRegistro,
+                status: 'seated',
+                celebration_date: cleanDate(currentConfirmation.fechaSacramento),
+                lugar_bautismo: currentConfirmation.lugarBautismo || null,
+                apellidos: currentConfirmation.apellidos || null,
+                nombres: currentConfirmation.nombres || null,
+                sexo: currentConfirmation.sexo || null,
+                fecha_nacimiento: cleanDate(currentConfirmation.fechaNacimiento),
+                lugar_nacimiento: currentConfirmation.lugarNacimiento || null,
+                nombre_padre: currentConfirmation.nombrePadre || null,
+                nombre_madre: currentConfirmation.nombreMadre || null,
+                tipo_union_padres: currentConfirmation.tipoUnionPadres || null,
+                padrinos: currentConfirmation.padrinos || null,
+                ministro: currentConfirmation.ministro || null,
+                da_fe: currentConfirmation.daFe || null,
+                nota_marginal: currentConfirmation.notaMarginal || null,
+                raw_data: { ...currentConfirmation, Libro: nextNumbers.book, folio: nextNumbers.page, numero: nextNumbers.entry },
+                created_at: new Date().toISOString()
+            };
+
+            // 2. Insertar en la tabla oficial
+            const { error: insertError } = await supabase.from('confirmations').insert([finalData]);
+            if (insertError) throw insertError;
+
+            // 3. Borrar de la tabla de pendientes
+            const { error: deleteError } = await supabase.from('pending_confirmations').delete().eq('id', currentConfirmation.id);
+            if (deleteError) throw deleteError;
+
+            // 4. Actualizar Consecutivos
+            const p = fullParamsCache || await getConfirmationParameters(resolvedParishId);
+            const siguiente = calculateNextConsecutive(
+                parseInt(nextNumbers.entry, 10), 
+                parseInt(nextNumbers.page, 10), 
+                parseInt(nextNumbers.book, 10), 
+                parseInt(p.ordinarioPartidas || 2, 10), 
+                p.ordinarioRestartNumber
+            );
+
+            const updatedParams = { 
+                ...p, 
+                ordinarioFolio: parseInt(siguiente.folio, 10), 
+                ordinarioNumero: parseInt(siguiente.numero, 10), 
+                ordinarioLibro: parseInt(siguiente.libro, 10) 
+            };
+
+            await updateConfirmationParameters(resolvedParishId, updatedParams);
+            
+            toast({ title: "Éxito", description: "Confirmación asentada permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
+            await loadData();
+            if (currentIndex >= pendingConfirmations.length - 1) setCurrentIndex(Math.max(0, pendingConfirmations.length - 2));
+
         } catch (error) { 
             toast({ title: "Error", description: error.message, variant: "destructive" }); 
         } finally { 
@@ -242,15 +247,69 @@ const ConfirmationSentarRegistrosPage = () => {
 
         setIsSaving(true);
         try {
-            const result = await seatMultipleConfirmations(selectedIds, resolvedParishId);
-            if (result.success) {
-                await incrementParameters(selectedIds.length, 'ordinario'); 
-                toast({ title: "Lote Procesado", className: "bg-green-50 text-green-900 border-green-200" });
-                setSelectedIds([]);
-                await loadData();
-            } else {
-                throw new Error(result.message);
+            const cleanDate = (d) => (d && String(d).trim() !== '' && String(d).trim() !== '---') ? d : null;
+            const p = fullParamsCache || await getConfirmationParameters(resolvedParishId);
+            let cFolio = parseInt(p.ordinarioFolio || 1, 10);
+            let cNumero = parseInt(p.ordinarioNumero || 1, 10);
+            let cLibro = parseInt(p.ordinarioLibro || 1, 10);
+            let pPorFolio = parseInt(p.ordinarioPartidas || 2, 10);
+            let restart = p.ordinarioRestartNumber;
+
+            const recordsToInsert = [];
+
+            for (const id of selectedIds) {
+                const conf = pendingConfirmations.find(c => c.id === id);
+                const curBook = String(cLibro).padStart(4, '0');
+                const curFolio = String(cFolio).padStart(4, '0');
+                const curEntry = String(cNumero).padStart(4, '0');
+
+                recordsToInsert.push({
+                    parish_id: resolvedParishId,
+                    book_number: curBook,
+                    folio: curFolio,
+                    number: curEntry,
+                    numero_registro: conf.numeroRegistro,
+                    status: 'seated',
+                    celebration_date: cleanDate(conf.fechaSacramento),
+                    lugar_bautismo: conf.lugarBautismo || null,
+                    apellidos: conf.apellidos || null,
+                    nombres: conf.nombres || null,
+                    sexo: conf.sexo || null,
+                    fecha_nacimiento: cleanDate(conf.fechaNacimiento),
+                    lugar_nacimiento: conf.lugarNacimiento || null,
+                    nombre_padre: conf.nombrePadre || null,
+                    nombre_madre: conf.nombreMadre || null,
+                    tipo_union_padres: conf.tipoUnionPadres || null,
+                    padrinos: conf.padrinos || null,
+                    ministro: conf.ministro || null,
+                    da_fe: conf.daFe || null,
+                    nota_marginal: conf.notaMarginal || null,
+                    raw_data: { ...conf, Libro: curBook, folio: curFolio, numero: curEntry },
+                    created_at: new Date().toISOString()
+                });
+
+                const siguiente = calculateNextConsecutive(cNumero, cFolio, cLibro, pPorFolio, restart);
+                cNumero = parseInt(siguiente.numero, 10);
+                cFolio = parseInt(siguiente.folio, 10);
+                cLibro = parseInt(siguiente.libro, 10);
             }
+
+            // 1. Insertar Lote en Confirmaciones
+            const { error: insertError } = await supabase.from('confirmations').insert(recordsToInsert);
+            if (insertError) throw insertError;
+
+            // 2. Eliminar Lote de Pendientes
+            const { error: deleteError } = await supabase.from('pending_confirmations').delete().in('id', selectedIds);
+            if (deleteError) throw deleteError;
+
+            // 3. Actualizar Parámetros
+            const updatedParams = { ...p, ordinarioFolio: cFolio, ordinarioNumero: cNumero, ordinarioLibro: cLibro };
+            await updateConfirmationParameters(resolvedParishId, updatedParams);
+
+            toast({ title: "Lote Procesado", className: "bg-green-50 text-green-900 border-green-200" });
+            setSelectedIds([]);
+            await loadData();
+
         } catch (err) { 
             toast({ title: "Error", description: err.message, variant: "destructive" }); 
         } finally { 

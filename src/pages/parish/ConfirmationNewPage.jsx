@@ -17,7 +17,7 @@ import { supabase } from '@/lib/supabaseClient';
 
 const ConfirmationNewPage = () => {
     const { user } = useAuth(); 
-    const { getMisDatosList, getParrocos, saveConfirmationToSource, getConfirmationParameters } = useAppData();
+    const { getMisDatosList, getParrocos, getConfirmationParameters } = useAppData();
     const navigate = useNavigate();
     const { toast } = useToast();
     
@@ -33,8 +33,6 @@ const ConfirmationNewPage = () => {
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
     const [listaSacerdotes, setListaSacerdotes] = useState([]); 
     const [fullParamsCache, setFullParamsCache] = useState(null); 
-    
-    // Catálogo de iglesias para auto-completar el código
     const [listaIglesias, setListaIglesias] = useState([]);
 
     const [formData, setFormData] = useState({
@@ -66,10 +64,7 @@ const ConfirmationNewPage = () => {
             const parrocoActual = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
             if (parrocoActual) {
                 const nombreCompletoActual = `${parrocoActual.nombre} ${parrocoActual.apellido || ''}`.trim().toUpperCase();
-                setFormData(prev => ({ 
-                    ...prev, 
-                    daFe: nombreCompletoActual
-                }));
+                setFormData(prev => ({ ...prev, daFe: nombreCompletoActual }));
             }
 
             const p = await getConfirmationParameters(parishId);
@@ -78,51 +73,37 @@ const ConfirmationNewPage = () => {
                 setFormData(prev => ({ ...prev, numeroRegistro: p.numeroRegistroActual || '' }));
             }
 
-            // 🚀 Cargar catálogo de Iglesias completo para la búsqueda inteligente del Código
             try {
                 const { data: iglesiasData } = await supabase.from('iglesias').select('nombre, codigo, ciudad');
                 if (iglesiasData) setListaIglesias(iglesiasData);
-            } catch (err) {
-                console.error("Error cargando iglesias:", err);
-            }
+            } catch (err) { console.error("Error cargando iglesias", err); }
         };
         loadInitialData();
     }, [parishId, nombreParroquia, getMisDatosList, getParrocos, getConfirmationParameters]);
 
-    // 🚀 INTELIGENCIA 1: Máquina del tiempo para el Párroco que Da Fe
     useEffect(() => {
         if (!formData.fechaSacramento || listaSacerdotes.length === 0) return;
-
         const fechaSeleccionada = new Date(formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`);
         const sacerdoteEncontrado = listaSacerdotes.find(s => {
             const inicio = new Date(s.fechaIngreso || s.fechaNombramiento);
             const fin = s.fechaSalida ? new Date(s.fechaSalida) : new Date();
             return fechaSeleccionada >= inicio && fechaSeleccionada <= fin;
         });
-
         if (sacerdoteEncontrado) {
-            setFormData(prev => ({ 
-                ...prev, 
-                daFe: `${sacerdoteEncontrado.nombre} ${sacerdoteEncontrado.apellido || ''}`.trim().toUpperCase() 
-            }));
+            setFormData(prev => ({ ...prev, daFe: `${sacerdoteEncontrado.nombre} ${sacerdoteEncontrado.apellido || ''}`.trim().toUpperCase() }));
         }
     }, [formData.fechaSacramento, listaSacerdotes]);
 
-    // 🚀 INTELIGENCIA 2: Cálculo Dinámico de Edad (Blindado contra zonas horarias)
     useEffect(() => {
         if (formData.fechaNacimiento && formData.fechaSacramento) {
             const birthStr = formData.fechaNacimiento.includes('T') ? formData.fechaNacimiento : `${formData.fechaNacimiento}T12:00:00`;
             const confStr = formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`;
-            
             const birth = new Date(birthStr);
             const conf = new Date(confStr);
-            
             if (!isNaN(birth.getTime()) && !isNaN(conf.getTime())) {
                 let age = conf.getFullYear() - birth.getFullYear();
                 const m = conf.getMonth() - birth.getMonth();
-                if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) {
-                    age--;
-                }
+                if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) age--;
                 if (age >= 0 && formData.edad !== age.toString()) {
                     setFormData(prev => ({ ...prev, edad: age.toString() }));
                 }
@@ -130,59 +111,39 @@ const ConfirmationNewPage = () => {
         }
     }, [formData.fechaNacimiento, formData.fechaSacramento]);
 
-    // 🚀 INTELIGENCIA 3: Asignación en cascada del "Responsable"
     useEffect(() => {
         setFormData(prev => {
             const possibleResponsables = [prev.nombrePadre, prev.nombreMadre, prev.padrinos].filter(v => v && v.trim() !== '');
             const topPriority = possibleResponsables[0] || '';
-            
             if (!prev.responsable || possibleResponsables.includes(prev.responsable)) {
-                 if (prev.responsable !== topPriority) {
-                     return { ...prev, responsable: topPriority };
-                 }
+                 if (prev.responsable !== topPriority) return { ...prev, responsable: topPriority };
             }
             return prev;
         });
     }, [formData.nombrePadre, formData.nombreMadre, formData.padrinos]);
 
-    // 🚀 INTELIGENCIA 4: Vinculación Automática del Código de Iglesia (Robusta)
     useEffect(() => {
         if (formData.lugarBautismo && listaIglesias.length > 0) {
             const searchStr = formData.lugarBautismo.toUpperCase().trim();
             const searchNormalized = searchStr.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            
             const matchedChurch = listaIglesias.find(iglesia => {
                 if (!iglesia.codigo) return false;
-                const nombre = (iglesia.nombre || '').toUpperCase().trim();
-                const nombreNorm = nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                
-                // Coincidencia exacta o si el nombre normalizado está contenido en la búsqueda
+                const nombreNorm = (iglesia.nombre || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
                 return searchNormalized === nombreNorm || searchNormalized.includes(nombreNorm);
             });
-
             if (matchedChurch && matchedChurch.codigo) {
-                setFormData(prev => {
-                    if (prev.codigoBautizo !== matchedChurch.codigo) {
-                        return { ...prev, codigoBautizo: matchedChurch.codigo };
-                    }
-                    return prev;
-                });
+                setFormData(prev => prev.codigoBautizo !== matchedChurch.codigo ? { ...prev, codigoBautizo: matchedChurch.codigo } : prev);
             }
         }
     }, [formData.lugarBautismo, listaIglesias]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        const uppercaseFields = [
-            'nombres', 'apellidos', 'lugarSacramento', 'lugarBautismo', 
-            'padrinos', 'responsable', 'nombrePadre', 'nombreMadre', 
-            'ministro', 'daFe', 'direccion', 'notaMarginal', 'codigoBautizo'
-        ];
+        const uppercaseFields = ['nombres', 'apellidos', 'lugarSacramento', 'lugarBautismo', 'padrinos', 'responsable', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe', 'direccion', 'notaMarginal', 'codigoBautizo'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
 
-    // 🚀 LECTURA DEFINITIVA DEL MODAL (Extractor a prueba de fallos para Libros)
     const handleSelectBaptismPartida = (partida) => {
         let normalizedSex = '';
         if (partida.sex || partida.sexo) {
@@ -190,10 +151,7 @@ const ConfirmationNewPage = () => {
             if (rawSex.startsWith('M')) normalizedSex = 'MASCULINO';
             else if (rawSex.startsWith('F')) normalizedSex = 'FEMENINO';
         }
-
         const raw = partida.raw_data || partida || {};
-
-        // Extractor masivo que busca en todas las llaves posibles
         const libroValue = partida.book_number || raw.book_number || partida.Libro || raw.Libro || partida.libro || raw.libro || raw.LIBRO || raw["LIBRO N°"] || formData.libroBautismo;
         const folioValue = partida.folio || raw.folio || partida.page_number || raw.page_number || raw.FOLIO || raw["FOLIO N°"] || formData.folioBautismo;
         const numeroValue = partida.number || raw.number || partida.numero || raw.numero || partida.entry_number || raw.entry_number || raw.NUMERO || raw["NÚMERO N°"] || formData.numeroBautismo;
@@ -206,8 +164,6 @@ const ConfirmationNewPage = () => {
             sexo: normalizedSex || prev.sexo,
             nombrePadre: partida.nombrePadre || partida.fatherName || raw.nombrePadre || raw.PADRE || prev.nombrePadre,
             nombreMadre: partida.nombreMadre || partida.motherName || raw.nombreMadre || raw.MADRE || prev.nombreMadre,
-            
-            // Datos del Sacramento Origen blindados
             lugarBautismo: partida.lugarBautismo || partida.baptismPlace || raw.lugarBautismo || raw.LUGBAU || prev.lugarBautismo,
             libroBautismo: libroValue ? String(libroValue).padStart(4, '0') : prev.libroBautismo,
             folioBautismo: folioValue ? String(folioValue).padStart(4, '0') : prev.folioBautismo,
@@ -228,27 +184,30 @@ const ConfirmationNewPage = () => {
         try {
             const currentRegistro = fullParamsCache?.numeroRegistroActual || "000000";
             const nextReg = calculateNextRegistro(currentRegistro);
-            
             const dataToSave = { ...formData, numeroRegistro: nextReg };
 
-            const res = await saveConfirmationToSource(dataToSave, parishId, 'pending');
+            // 🚀 INYECCIÓN DIRECTA A LA TABLA DE PENDIENTES
+            const { error: insertError } = await supabase.from('pending_confirmations').insert([{
+                parish_id: parishId,
+                raw_data: dataToSave,
+                status: 'pending'
+            }]);
 
-            if (res.success) {
-                if (fullParamsCache) {
-                    const updatedParams = { ...fullParamsCache, numeroRegistroActual: nextReg };
-                    await supabase.from('parish_parameters').upsert({
-                        parish_id: parishId,
-                        confirmaciones_params: updatedParams
-                    }, { onConflict: 'parish_id' });
-                }
+            if (insertError) throw insertError;
 
-                setTicketData(dataToSave);
-                setIsSuccess(true);
-                toast({ title: "Guardado Exitoso", description: "Borrador de confirmación enviado a la nube.", className: "bg-green-50 text-green-900 border-green-200" });
-                setTimeout(() => window.print(), 500);
-            } else {
-                throw new Error(res.message);
+            // 🚀 ACTUALIZAR LA NUBE: Guardar el nuevo Número de Registro
+            if (fullParamsCache) {
+                const updatedParams = { ...fullParamsCache, numeroRegistroActual: nextReg };
+                await supabase.from('parish_parameters').upsert({
+                    parish_id: parishId,
+                    confirmaciones_params: updatedParams
+                }, { onConflict: 'parish_id' });
             }
+
+            setTicketData(dataToSave);
+            setIsSuccess(true);
+            toast({ title: "Guardado Exitoso", description: "Borrador de confirmación enviado a la nube.", className: "bg-green-50 text-green-900 border-green-200" });
+            setTimeout(() => window.print(), 500);
         } catch (error) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
         } finally {

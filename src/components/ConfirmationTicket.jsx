@@ -170,12 +170,7 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
                 <div style={{ display: 'flex', gap: '15px' }}>
                     <FieldLine label="PADRE" value={nombrePadre} width="50%" />
                     <FieldLine label="MADRE" value={nombreMadre} width="50%" />
-                </div>
-
-                <div style={{ display: 'flex', gap: '15px' }}>
-                    <FieldLine label="LUGAR BAUTISMO" value={lugarBautismo} width="65%" />
-                    <FieldLine label="DATOS BAUT." value={datosBautismo} width="35%" />
-                </div>
+                </div>                
 
                 <FieldLine label="PADRINOS" value={padrinos} />
                 
