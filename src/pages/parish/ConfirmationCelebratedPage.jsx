@@ -6,14 +6,12 @@ import { Button } from '@/components/ui/button';
 import { 
     Save, Calendar, User, Users, 
     BookOpen, PenTool, Loader2, Fingerprint,
-    ShieldCheck, ArrowLeft, Search, Droplet, Hash
+    ShieldCheck, ArrowLeft, Search, Droplet
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabaseClient';
 import SearchBaptismPartidaModal from '@/components/modals/SearchBaptismPartidaModal';
-import ChurchLocationAutocomplete from '@/components/ChurchLocationAutocomplete';
-import { calculateNextRegistro } from '@/services/sacramentParametersService';
 import { motion } from 'framer-motion';
 
 const ConfirmationCelebratedPage = () => {
@@ -32,12 +30,11 @@ const ConfirmationCelebratedPage = () => {
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
-    const [listaIglesias, setListaIglesias] = useState([]);
     const [cloudParams, setCloudParams] = useState({});
     
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
-    // 🚀 ESTADO LIMPIO Y EXACTO A LA LISTA SOLICITADA
+    // 🚀 ESTADO LIMPIO Y EXACTO AL JSON SOLICITADO
     const [formData, setFormData] = useState({
         Libro: '', 
         folio: '', 
@@ -54,15 +51,7 @@ const ConfirmationCelebratedPage = () => {
         lugarBautismo: '',
         padrinos: '', 
         ministro: '', 
-        daFe: '',
-        numeroRegistro: '',
-        fechaInscripcion: new Date().toISOString().split('T')[0],
-        codigoBautizo: '',
-        libroBautismo: '',
-        folioBautismo: '',
-        numeroBautismo: '',
-        direccion: '',
-        responsable: ''
+        daFe: ''
     });
 
     useEffect(() => {
@@ -82,8 +71,7 @@ const ConfirmationCelebratedPage = () => {
                 lugarSacramento: (nombreOficial || '').toUpperCase(),
                 Libro: String(p.ordinarioLibro || 1).padStart(4, '0'),
                 folio: String(p.ordinarioFolio || 1).padStart(4, '0'),
-                numero: String(p.ordinarioNumero || 1).padStart(4, '0'),
-                numeroRegistro: p.numeroRegistroActual || ''
+                numero: String(p.ordinarioNumero || 1).padStart(4, '0')
             }));
 
             const parrocos = getParrocos(parishId) || [];
@@ -96,17 +84,12 @@ const ConfirmationCelebratedPage = () => {
                     daFe: `${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase() 
                 }));
             }
-
-            try {
-                const { data: iglesiasData } = await supabase.from('iglesias').select('nombre, codigo, ciudad');
-                if (iglesiasData) setListaIglesias(iglesiasData);
-            } catch (err) { console.error("Error cargando iglesias", err); }
         };
 
         loadInitialData();
     }, [parishId, nombreParroquia, getMisDatosList, getParrocos]);
 
-    // 🚀 MÁQUINA DEL TIEMPO: SINCRONIZA DA FE 
+    // 🚀 MÁQUINA DEL TIEMPO: SINCRONIZA DA FE Y CÁLCULO DE EDAD
     useEffect(() => {
         if (formData.fechaSacramento && listaSacerdotes.length > 0) {
             const fechaSeleccionada = new Date(formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`);
@@ -122,10 +105,8 @@ const ConfirmationCelebratedPage = () => {
                 setFormData(prev => ({ ...prev, daFe: nombreSacerdoteHistorico }));
             }
         }
-    }, [formData.fechaSacramento, listaSacerdotes]);
 
-    // 🚀 INTELIGENCIA: Cálculo de Edad Blindado
-    useEffect(() => {
+        // Cálculo de Edad Dinámico y Blindado contra zonas horarias
         if (formData.fechaNacimiento && formData.fechaSacramento) {
             const birthStr = formData.fechaNacimiento.includes('T') ? formData.fechaNacimiento : `${formData.fechaNacimiento}T12:00:00`;
             const confStr = formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`;
@@ -142,41 +123,11 @@ const ConfirmationCelebratedPage = () => {
                 }
             }
         }
-    }, [formData.fechaSacramento, formData.fechaNacimiento]);
-
-    // 🚀 INTELIGENCIA: Asignación en cascada del Responsable
-    useEffect(() => {
-        setFormData(prev => {
-            const possibleResponsables = [prev.nombrePadre, prev.nombreMadre, prev.padrinos].filter(v => v && v.trim() !== '');
-            const topPriority = possibleResponsables[0] || '';
-            if (!prev.responsable || possibleResponsables.includes(prev.responsable)) {
-                 if (prev.responsable !== topPriority) return { ...prev, responsable: topPriority };
-            }
-            return prev;
-        });
-    }, [formData.nombrePadre, formData.nombreMadre, formData.padrinos]);
-
-    // 🚀 INTELIGENCIA: Vinculación Automática del Código de Bautizo
-    useEffect(() => {
-        if (formData.lugarBautismo && listaIglesias.length > 0) {
-            const searchStr = formData.lugarBautismo.toUpperCase().trim();
-            const searchNormalized = searchStr.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            
-            const matchedChurch = listaIglesias.find(iglesia => {
-                if (!iglesia.codigo) return false;
-                const nombreNorm = (iglesia.nombre || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                return searchNormalized === nombreNorm || searchNormalized.includes(nombreNorm);
-            });
-
-            if (matchedChurch && matchedChurch.codigo) {
-                setFormData(prev => prev.codigoBautizo !== matchedChurch.codigo ? { ...prev, codigoBautizo: matchedChurch.codigo } : prev);
-            }
-        }
-    }, [formData.lugarBautismo, listaIglesias]);
+    }, [formData.fechaSacramento, formData.fechaNacimiento, listaSacerdotes]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        const uppercaseFields = ['nombres', 'apellidos', 'lugarSacramento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe', 'direccion', 'responsable', 'codigoBautizo'];
+        const uppercaseFields = ['nombres', 'apellidos', 'lugarSacramento', 'lugarBautismo', 'padrinos', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe'];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
@@ -190,9 +141,6 @@ const ConfirmationCelebratedPage = () => {
         }
 
         const raw = partida.raw_data || partida || {};
-        const libroValue = partida.book_number || raw.book_number || partida.Libro || raw.Libro || partida.libro || raw.libro || raw.LIBRO || raw["LIBRO N°"] || formData.libroBautismo;
-        const folioValue = partida.folio || raw.folio || partida.page_number || raw.page_number || raw.FOLIO || raw["FOLIO N°"] || formData.folioBautismo;
-        const numeroValue = partida.number || raw.number || partida.numero || raw.numero || partida.entry_number || raw.entry_number || raw.NUMERO || raw["NÚMERO N°"] || formData.numeroBautismo;
 
         setFormData(prev => ({
             ...prev,
@@ -202,11 +150,7 @@ const ConfirmationCelebratedPage = () => {
             sexo: normalizedSex || prev.sexo,
             nombrePadre: partida.nombrePadre || partida.fatherName || raw.nombrePadre || raw.PADRE || prev.nombrePadre,
             nombreMadre: partida.nombreMadre || partida.motherName || raw.nombreMadre || raw.MADRE || prev.nombreMadre,
-            lugarBautismo: partida.lugarBautismo || partida.baptismPlace || raw.lugarBautismo || raw.LUGBAU || prev.lugarBautismo,
-            libroBautismo: libroValue ? String(libroValue).padStart(4, '0') : prev.libroBautismo,
-            folioBautismo: folioValue ? String(folioValue).padStart(4, '0') : prev.folioBautismo,
-            numeroBautismo: numeroValue ? String(numeroValue).padStart(4, '0') : prev.numeroBautismo,
-            codigoBautizo: partida.codigo || partida.codigoBautizo || raw.codigoBautizo || prev.codigoBautizo
+            lugarBautismo: partida.lugarBautismo || partida.baptismPlace || raw.lugarBautismo || raw.LUGBAU || prev.lugarBautismo
         }));
         
         toast({ title: "Datos Importados", description: `Se han cargado los datos de la partida origen.`, className: "bg-red-50 border-red-200 text-red-900" });
@@ -226,16 +170,13 @@ const ConfirmationCelebratedPage = () => {
 
         setIsSubmitting(true);
         try {
-            const currentRegistro = cloudParams?.numeroRegistroActual || "000000";
-            const nextReg = formData.numeroRegistro || calculateNextRegistro(currentRegistro);
-
             // 🚀 ESTRUCTURAMOS EL JSON EXACTAMENTE CON LAS LLAVES SOLICITADAS
             const finalRawData = {
                 "LIBRO": formData.Libro,
                 "FOLIO": formData.folio,
                 "NÚMERO": formData.numero,
-                "FECHA DE CONFIRMACIÓN": formData.fechaSacramento,
-                "LUGAR DE CONFIRMACIÓN": formData.lugarSacramento,
+                "FECHA DE CONFIRMACION": formData.fechaSacramento,
+                "LUGAR DE CONFIRMACION": formData.lugarSacramento,
                 "APELLIDOS": formData.apellidos,
                 "NOMBRES": formData.nombres,
                 "FECHA DE NACIMIENTO": formData.fechaNacimiento,
@@ -246,25 +187,15 @@ const ConfirmationCelebratedPage = () => {
                 "NOMBRE DE LA MADRE": formData.nombreMadre,
                 "PADRINO / MADRINA": formData.padrinos,
                 "MINISTRO": formData.ministro,
-                "DA FE": formData.daFe,
-                "Nº REGISTRO PREVIO": nextReg,
-                "FECHA DE INSCRIPCIÓN": formData.fechaInscripcion,
-                "CODIGO DE BAUTIZO": formData.codigoBautizo,
-                "LIBRO DE BAUTIZO": formData.libroBautismo,
-                "FOLIO DE BAUTIZO": formData.folioBautismo,
-                "NÚMERO DE BAUTIZO": formData.numeroBautismo,
-                "LUGAR": formData.lugarSacramento,
-                "DIRECCION": formData.direccion,
-                "RESPONSABLE": formData.responsable
+                "DA FE": formData.daFe
             };
 
-            // 🚀 INYECCIÓN DIRECTA A LA BASE DE DATOS PERMANENTE
+            // 🚀 INYECCIÓN DIRECTA PARA SOPORTAR LA ARQUITECTURA OFICIAL
             const { error: errConf } = await supabase.from('confirmations').insert([{
                 parish_id: parishId,
                 book_number: formData.Libro,
                 folio: formData.folio,
                 number: formData.numero,
-                numero_registro: nextReg,
                 status: 'seated', 
                 celebration_date: formData.fechaSacramento || null,
                 lugar_bautismo: formData.lugarBautismo || null,
@@ -283,7 +214,7 @@ const ConfirmationCelebratedPage = () => {
 
             if (errConf) throw errConf;
 
-            // Actualizar consecutivos
+            // Actualizar consecutivo
             let nextNum = parseInt(formData.numero, 10) + 1;
             let nextFol = parseInt(formData.folio, 10);
             if (parseInt(formData.numero, 10) % (parseInt(cloudParams.ordinarioPartidas || 2, 10)) === 0) nextFol++;
@@ -292,7 +223,6 @@ const ConfirmationCelebratedPage = () => {
                 parish_id: parishId,
                 confirmaciones_params: {
                     ...cloudParams,
-                    numeroRegistroActual: nextReg,
                     ordinarioNumero: nextNum,
                     ordinarioFolio: nextFol,
                     ordinarioLibro: parseInt(formData.Libro, 10)
@@ -346,15 +276,13 @@ const ConfirmationCelebratedPage = () => {
                     <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-red-600 via-[#D4AF37] to-red-600"></div>
 
                     <div className="p-12 space-y-10">
-                        {/* 01. UBICACIÓN FÍSICA Y CONTROL */}
+                        {/* 01. UBICACIÓN FÍSICA */}
                         <section>
-                            <SectionHeader number="01" title="Protocolo y Control" icon={Hash} />
-                            <div className="grid grid-cols-1 md:grid-cols-5 gap-6 bg-slate-50 p-6 rounded-[2rem] border border-slate-100 shadow-inner">
+                            <SectionHeader number="01" title="Protocolo de Archivo" icon={BookOpen} />
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 bg-slate-50 p-8 rounded-[2rem] border border-slate-100 shadow-inner">
                                 <div><label className={labelClass}>Libro</label><input name="Libro" required value={formData.Libro} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-red-600 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
                                 <div><label className={labelClass}>Folio</label><input name="folio" required value={formData.folio} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-gray-800 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
                                 <div><label className={labelClass}>Número (Acta)</label><input name="numero" required value={formData.numero} onChange={handleChange} className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl font-mono text-2xl font-black text-gray-800 shadow-sm outline-none focus:ring-4 focus:ring-red-600/10 transition-all" /></div>
-                                <div><label className={labelClass}>Nº Reg. Previo</label><input name="numeroRegistro" value={formData.numeroRegistro} onChange={handleChange} className={inputClass} /></div>
-                                <div><label className={labelClass}>Fecha Inscrip.</label><input type="date" name="fechaInscripcion" value={formData.fechaInscripcion} onChange={handleChange} className={inputClass} /></div>
                             </div>
                         </section>
 
@@ -383,7 +311,7 @@ const ConfirmationCelebratedPage = () => {
                                 <div><label className={labelClass}>Apellidos</label><input name="apellidos" required value={formData.apellidos} onChange={handleChange} className={inputClass} /></div>
                                 <div><label className={labelClass}>Nombres</label><input name="nombres" required value={formData.nombres} onChange={handleChange} className={inputClass} /></div>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                                 <div>
                                     <label className={labelClass}>Sexo</label>
                                     <select name="sexo" required value={formData.sexo} onChange={handleChange} className={inputClass}>
@@ -400,7 +328,6 @@ const ConfirmationCelebratedPage = () => {
                                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">AÑOS</span>
                                     </div>
                                 </div>
-                                <div><label className={labelClass}>Dirección</label><input type="text" name="direccion" value={formData.direccion} onChange={handleChange} className={inputClass} /></div>
                             </div>
                         </section>
 
@@ -423,46 +350,18 @@ const ConfirmationCelebratedPage = () => {
                         <section>
                             <SectionHeader number="05" title="Registro de Bautismo Origen" icon={Droplet} />
                             <div className="space-y-6">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div>
-                                        <label className={labelClass}>Lugar y Parroquia de Bautismo</label>
-                                        <ChurchLocationAutocomplete 
-                                            value={formData.lugarBautismo} 
-                                            onChange={(val) => {
-                                                if (typeof val === 'object' && val !== null) {
-                                                    setFormData(prev => ({
-                                                        ...prev, 
-                                                        lugarBautismo: (val.nombre || val.name || '').toUpperCase(),
-                                                        codigoBautizo: (val.codigo || val.code || prev.codigoBautizo)
-                                                    }));
-                                                } else {
-                                                    setFormData(prev => ({...prev, lugarBautismo: String(val).toUpperCase()}));
-                                                }
-                                            }}
-                                            placeholder="Buscar iglesia y ciudad..."
-                                        />
-                                    </div>
-                                    <div><label className={labelClass}>Código de Bautizo</label><input type="text" name="codigoBautizo" value={formData.codigoBautizo} onChange={handleChange} className={inputClass} placeholder="Ej. 000000" /></div>
-                                </div>
-                                <div className="grid grid-cols-3 gap-6 bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                                    <div><label className={labelClass}>Libro Baut.</label><input name="libroBautismo" value={formData.libroBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
-                                    <div><label className={labelClass}>Folio Baut.</label><input name="folioBautismo" value={formData.folioBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
-                                    <div><label className={labelClass}>Acta Baut.</label><input name="numeroBautismo" value={formData.numeroBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
-                                </div>
+                                <div><label className={labelClass}>Lugar y Parroquia de Bautismo</label><input name="lugarBautismo" value={formData.lugarBautismo} onChange={handleChange} className={inputClass} placeholder="EJ: PARROQUIA SAN JUAN BAUTISTA" /></div>
                             </div>
                         </section>
 
                         {/* 06. AUTORIDAD */}
                         <section>
-                            <SectionHeader number="06" title="Ministros y Testigos" icon={PenTool} />
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-6">
+                            <SectionHeader number="06" title="Ministro y Autoridad" icon={PenTool} />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
                                 <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input name="ministro" required value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} placeholder="EXCMO. MONS..." /></div>
                                 <div><label className={labelClass}>Da Fe (Párroco)</label><input name="daFe" required value={formData.daFe} onChange={handleChange} list="lista-parrocos" className={inputClass} /></div>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                <div><label className={labelClass}>Padrino / Madrina</label><input name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
-                                <div><label className={labelClass}>Responsable</label><input type="text" name="responsable" value={formData.responsable} onChange={handleChange} className={`${inputClass} py-5`} placeholder="QUIEN SOLICITA / ACUDIENTE" /></div>
-                            </div>
+                            <div><label className={labelClass}>Padrinos</label><input name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
                         </section>
 
                         <div className="flex justify-end gap-4 border-t border-gray-100 pt-12">
