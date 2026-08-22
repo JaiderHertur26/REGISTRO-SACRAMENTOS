@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { 
     Search, Edit, Trash2, Info, 
     CheckCircle as CircleCheckBig, XCircle, Eye, AlertOctagon, 
-    BookOpen, Loader2, User, Users, MapPin, PenTool, Scroll, ShieldCheck, Droplet 
+    BookOpen, Loader2, User, Users, MapPin, PenTool, Scroll, ShieldCheck, Droplet, Calendar 
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import ViewConfirmationPartidaModal from '@/components/modals/ViewConfirmationPartidaModal';
