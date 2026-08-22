@@ -79,11 +79,11 @@ const ConfirmationNewPage = () => {
         loadInitialData();
     }, [parishId, nombreParroquia, getMisDatosList, getParrocos, getConfirmationParameters]);
 
-    // 🚀 INTELIGENCIA: Máquina del tiempo para el Párroco que Da Fe
+    // 🚀 INTELIGENCIA 1: Máquina del tiempo para el Párroco que Da Fe
     useEffect(() => {
         if (!formData.fechaSacramento || listaSacerdotes.length === 0) return;
 
-        const fechaSeleccionada = new Date(formData.fechaSacramento);
+        const fechaSeleccionada = new Date(formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`);
         const sacerdoteEncontrado = listaSacerdotes.find(s => {
             const inicio = new Date(s.fechaIngreso || s.fechaNombramiento);
             const fin = s.fechaSalida ? new Date(s.fechaSalida) : new Date();
@@ -98,19 +98,44 @@ const ConfirmationNewPage = () => {
         }
     }, [formData.fechaSacramento, listaSacerdotes]);
 
-    // 🚀 INTELIGENCIA: Cálculo Dinámico de Edad
+    // 🚀 INTELIGENCIA 2: Cálculo Dinámico de Edad (Blindado contra zonas horarias)
     useEffect(() => {
         if (formData.fechaNacimiento && formData.fechaSacramento) {
-            const birth = new Date(formData.fechaNacimiento);
-            const conf = new Date(formData.fechaSacramento);
+            const birthStr = formData.fechaNacimiento.includes('T') ? formData.fechaNacimiento : `${formData.fechaNacimiento}T12:00:00`;
+            const confStr = formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`;
+            
+            const birth = new Date(birthStr);
+            const conf = new Date(confStr);
+            
             if (!isNaN(birth.getTime()) && !isNaN(conf.getTime())) {
                 let age = conf.getFullYear() - birth.getFullYear();
                 const m = conf.getMonth() - birth.getMonth();
-                if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) age--;
-                setFormData(prev => ({ ...prev, edad: age >= 0 ? age.toString() : '' }));
+                if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) {
+                    age--;
+                }
+                if (age >= 0 && formData.edad !== age.toString()) {
+                    setFormData(prev => ({ ...prev, edad: age.toString() }));
+                }
             }
         }
     }, [formData.fechaNacimiento, formData.fechaSacramento]);
+
+    // 🚀 INTELIGENCIA 3: Asignación en cascada del "Responsable"
+    useEffect(() => {
+        setFormData(prev => {
+            const possibleResponsables = [prev.nombrePadre, prev.nombreMadre, prev.padrinos].filter(v => v && v.trim() !== '');
+            const topPriority = possibleResponsables[0] || '';
+            
+            // Solo lo actualizamos automáticamente si la casilla está vacía o si contiene alguno de los valores jerárquicos anteriores
+            // (Esto permite que si el usuario escribe "ABUELA MARIA", el sistema respete esa escritura manual).
+            if (!prev.responsable || possibleResponsables.includes(prev.responsable)) {
+                 if (prev.responsable !== topPriority) {
+                     return { ...prev, responsable: topPriority };
+                 }
+            }
+            return prev;
+        });
+    }, [formData.nombrePadre, formData.nombreMadre, formData.padrinos]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -252,7 +277,7 @@ const ConfirmationNewPage = () => {
                             <section>
                                 <SectionHeader number="02" title="Datos de la Celebración" icon={Calendar} />
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                    <div><label className={labelClass}>Fecha y Hora Sacramento</label><input type="datetime-local" name="fechaSacramento" required value={formData.fechaSacramento} onChange={handleChange} className={inputClass} /></div>
+                                    <div><label className={labelClass}>Fecha Confirmación</label><input type="date" name="fechaSacramento" required value={formData.fechaSacramento} onChange={handleChange} className={inputClass} /></div>
                                     <div><label className={labelClass}>Parroquia / Lugar</label><input type="text" name="lugarSacramento" required value={formData.lugarSacramento} onChange={handleChange} className={inputClass} /></div>
                                 </div>
                             </section>
@@ -315,7 +340,17 @@ const ConfirmationNewPage = () => {
                                             <label className={labelClass}>Lugar y Parroquia de Bautismo</label>
                                             <ChurchLocationAutocomplete 
                                                 value={formData.lugarBautismo} 
-                                                onChange={(val) => setFormData(prev => ({...prev, lugarBautismo: val}))}
+                                                onChange={(val) => {
+                                                    if (typeof val === 'object' && val !== null) {
+                                                        setFormData(prev => ({
+                                                            ...prev, 
+                                                            lugarBautismo: (val.nombre || val.name || '').toUpperCase(),
+                                                            codigoBautizo: (val.codigo || val.code || prev.codigoBautizo)
+                                                        }));
+                                                    } else {
+                                                        setFormData(prev => ({...prev, lugarBautismo: String(val).toUpperCase()}));
+                                                    }
+                                                }}
                                                 placeholder="Buscar iglesia y ciudad..."
                                             />
                                         </div>
