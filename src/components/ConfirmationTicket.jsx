@@ -174,8 +174,8 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
 
                 <FieldLine label="PADRINOS" value={padrinos} />
                 
-                <div style={{ display: 'flex', gap: '15px' }}>
-                    <FieldLine label="LUGAR CELEBRACIÓN" value={lugarSacramento} width="40%" />
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                    <FieldLine label="LUGAR CELEBRACIÓN" value={lugarSacramento}  />
                     
                 </div>
 
