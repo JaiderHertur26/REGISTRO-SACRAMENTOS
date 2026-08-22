@@ -1,673 +1,422 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
+import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
-import ConfirmationTicket from '@/components/ConfirmationTicket';
+import { cn } from '@/lib/utils';
 import { 
-    ChevronLeft, 
-    ChevronRight, 
-    ChevronsLeft, 
-    ChevronsRight, 
-    Save, 
-    LogOut, 
-    Printer,
-    Users,
-    User,
-    CheckCircle2
+    ChevronLeft, ChevronRight, Save, 
+    CheckCircle2, AlertCircle, Loader2, Printer,
+    LayoutList, BookOpenCheck,
+    Layers, CheckSquare, Square, Lock
 } from 'lucide-react';
-
-// --- HELPER FUNCTIONS ---
-
-const toStorageDate = (dateStr) => {
-    if (!dateStr) return '';
-    const [y, m, d] = dateStr.split('-');
-    return `${d}/${m}/${y}`;
-};
-
-const toInputDate = (dateStr) => {
-    if (!dateStr) return '';
-    if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) return dateStr.split('T')[0];
-    if (dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-        const [d, m, y] = dateStr.split('/');
-        return `${y}-${m}-${d}`;
-    }
-    return '';
-};
-
-const isDateValid = (dateString) => {
-    if (!dateString) return true; 
-    const checkStr = toInputDate(dateString) || dateString;
-    const [y, m, d] = checkStr.split('-').map(Number);
-    const date = new Date(y, m - 1, d);
-    if (isNaN(date.getTime())) return false;
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    return checkDate <= today;
-};
-
-// --- LOGIC HELPERS ---
-
-const getPartidaParameters = (entityId) => {
-    const key = `confirmationParameters_${entityId}`;
-    const params = JSON.parse(localStorage.getItem(key) || '{}');
-    return {
-        libro: parseInt(params.ordinarioLibro || 1),
-        folio: parseInt(params.ordinarioFolio || 1),
-        numero: parseInt(params.ordinarioNumero || 1),
-        partidasPerFolio: parseInt(params.ordinarioPartidas || 1),
-        numeroIncrement: 1 
-    };
-};
-
-const updatePartidaParameters = (entityId, newLibro, newFolio, newNumero) => {
-    const key = `confirmationParameters_${entityId}`;
-    const current = JSON.parse(localStorage.getItem(key) || '{}');
-    const updated = {
-        ...current,
-        ordinarioLibro: newLibro,
-        ordinarioFolio: newFolio,
-        ordinarioNumero: newNumero
-    };
-    localStorage.setItem(key, JSON.stringify(updated));
-};
-
-const calculateNextPartidaValues = (entityId, currentLibro, currentFolio, currentNumero, partidasPerFolio) => {
-    const key = `confirmations_${entityId}`;
-    const allRecords = JSON.parse(localStorage.getItem(key) || '[]');
-    
-    const countInFolio = allRecords.filter(r => 
-        parseInt(r.book_number) === parseInt(currentLibro) && 
-        parseInt(r.page_number) === parseInt(currentFolio)
-    ).length;
-
-    let newLibro = currentLibro;
-    let newFolio = currentFolio;
-    let newNumero = currentNumero + 1; 
-
-    if (countInFolio >= partidasPerFolio) {
-        newFolio = currentFolio + 1;
-    }
-
-    return { newLibro, newFolio, newNumero };
-};
-
+import ConfirmationTicket from '@/components/ConfirmationTicket';
+import { supabase } from '@/lib/supabaseClient'; 
+import { calculateNextConsecutive } from '@/services/sacramentParametersService';
 
 const ConfirmationSentarRegistrosPage = () => {
     const { user } = useAuth();
+    const { 
+        seatConfirmation, 
+        seatMultipleConfirmations, 
+        getMisDatosList, 
+        getConfirmationParameters,
+        updateConfirmationParameters,
+        getParrocos // 🚀 Extraemos la lista de sacerdotes
+    } = useAppData();
+    
     const { toast } = useToast();
-    const [viewMode, setViewMode] = useState('individual'); // 'individual' | 'batch'
+    const navigate = useNavigate();
+
+    const [resolvedParishId, setResolvedParishId] = useState(null);
+    const [nombreParroquia, setNombreParroquia] = useState('PARROQUIA PADRE MISERICORDIOSO');
+    const [mode, setMode] = useState('individual'); 
     const [pendingConfirmations, setPendingConfirmations] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedIds, setSelectedIds] = useState([]);
-    const [parameters, setParameters] = useState(null);
+    
+    const [nextNumbers, setNextNumbers] = useState({ book: '0001', page: '0001', entry: '0001' });
+    const [fullParamsCache, setFullParamsCache] = useState(null); 
+
     const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+    const [parishInfo, setParishInfo] = useState(null); 
 
-    // Ticket Printing States
-    const [showTicket, setShowTicket] = useState(false);
-    const [ticketData, setTicketData] = useState(null);
-    const [parishInfo, setParishInfo] = useState({ name: '', address: '', phone: '', city: '' });
+    const isDateInFuture = (dateString) => {
+        if (!dateString) return false;
+        const now = new Date();
+        const sacramentDate = new Date(dateString);
+        return sacramentDate > now; 
+    };
 
-    // Initial Load
     useEffect(() => {
-        if (!user?.parishId && !user?.dioceseId) return;
-        loadData();
-        loadParishData();
+        const resolveParish = async () => {
+            if (!user) return;
+            const pId = user.parish_id || user.parishId || 'ae48c502-6603-4887-ba38-6886e628430e';
+            setResolvedParishId(pId);
+            setNombreParroquia(user.parishName || user.parish_name || 'PARROQUIA PADRE MISERICORDIOSO');
+        };
+        resolveParish();
     }, [user]);
 
-    const loadParishData = () => {
-        if (!user?.parishId) return;
-        const misDatosKey = `misDatos_${user.parishId}`;
-        let parishNameFound = null;
+    const loadData = async () => {
+        if (!resolvedParishId) return;
+        setIsLoading(true);
+
         try {
-            const storedMisDatos = localStorage.getItem(misDatosKey);
-            if (storedMisDatos) {
-                const parsedData = JSON.parse(storedMisDatos);
-                if (Array.isArray(parsedData) && parsedData.length > 0) {
-                    parishNameFound = parsedData[0].nombre;
-                }
+            // 🚀 OBTENER BORRADORES DE LA NUBE
+            const { data: tempData, error: tempError } = await supabase
+                .from('pending_confirmations')
+                .select('*')
+                .eq('parish_id', resolvedParishId)
+                .order('created_at', { ascending: false });
+
+            let recordsMapped = [];
+            const sacerdotes = getParrocos(resolvedParishId) || []; 
+            
+            if (!tempError && tempData && tempData.length > 0) {
+                const cloudPending = tempData.map(pb => {
+                    const raw = typeof pb.raw_data === 'string' ? JSON.parse(pb.raw_data) : (pb.raw_data || {});
+                    return { ...raw, id: pb.id, status: 'pending' };
+                });
+                
+                localStorage.setItem(`pendingConfirmations_${resolvedParishId}`, JSON.stringify(cloudPending));
+
+                recordsMapped = cloudPending.map(r => {
+                    let fechaSac = r.fechaSacramento || r.sacramentDate;
+
+                    // 🚀 MÁQUINA DEL TIEMPO PARA CORRECCIÓN (Da Fe)
+                    let historicalPriest = null;
+                    if (fechaSac && sacerdotes.length > 0) {
+                        const fDate = new Date(fechaSac.includes('T') ? fechaSac : `${fechaSac}T12:00:00`);
+                        const sEpoca = sacerdotes.find(s => {
+                            if (!s.fechaIngreso && !s.fechaNombramiento) return false;
+                            const inicio = new Date((s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`);
+                            const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
+                            return fDate >= inicio && fDate <= fin;
+                        });
+                        if (sEpoca) historicalPriest = `${sEpoca.nombre} ${sEpoca.apellido || ''}`.trim().toUpperCase();
+                    }
+
+                    // Corrección Da Fe
+                    let rawDaFe = r.daFe || r.ministerFaith || r.dafe || r.da_fe;
+                    if (!rawDaFe || !isNaN(Number(String(rawDaFe).trim()))) {
+                        rawDaFe = historicalPriest || '';
+                    }
+
+                    return {
+                        ...r,
+                        numeroRegistro: r.numeroRegistro || r.inscripcionNumero || '---',
+                        lugarSacramento: r.lugarSacramento || r.place || r.sacramentPlace || '---',
+                        fechaSacramento: fechaSac,
+                        ministro: r.ministro || r.minister || '',
+                        daFe: rawDaFe
+                    };
+                });
+            }
+            
+            setPendingConfirmations(recordsMapped);
+
+            // Cargar Consecutivos desde Parameters
+            const p = await getConfirmationParameters(resolvedParishId);
+            setFullParamsCache(p);
+            setNextNumbers({
+                book: String(p.ordinarioLibro || 1).padStart(4, '0'),
+                page: String(p.ordinarioFolio || 1).padStart(4, '0'),
+                entry: String(p.ordinarioNumero || 1).padStart(4, '0')
+            });
+
+            const misDatos = getMisDatosList(resolvedParishId);
+            if (misDatos?.length > 0) {
+                setParishInfo({
+                    diocesis: misDatos[0].diocesis,
+                    nombre: misDatos[0].nombre,
+                    direccion: misDatos[0].direccion,
+                    telefono: misDatos[0].telefono,
+                    ciudad: misDatos[0].ciudad
+                });
             }
         } catch (error) {
-            console.error("Error leyendo Mis Datos:", error);
-        }
-        if (!parishNameFound) {
-            parishNameFound = user.parishName || user.parish_name || '';
-        }
-        setParishInfo({ name: parishNameFound });
-    };
-
-    const loadData = () => {
-        setIsLoading(true);
-        const entityId = user.parishId || user.dioceseId;
-        
-        const pendingKey = `pendingConfirmations_${entityId}`;
-        const storedPending = JSON.parse(localStorage.getItem(pendingKey) || '[]');
-        
-        const sanitizedPending = storedPending.map(b => ({
-            ...b,
-            ministerFaith: b.ministerFaith || b.minister || '',
-            lugarConfirmacionDetalle: b.lugarConfirmacionDetalle || b.lugarConfirmacion || '',
-            lugarNacimientoDetalle: b.lugarNacimientoDetalle || b.birthPlace || '',
-            sex: b.sex || '',
-        }));
-        
-        setPendingConfirmations(sanitizedPending);
-
-        const currentParams = getPartidaParameters(entityId);
-        
-        setParameters({
-            ordinarioLibro: currentParams.libro,
-            ordinarioFolio: currentParams.folio,
-            ordinarioNumero: currentParams.numero,
-            ordinarioPartidas: currentParams.partidasPerFolio
-        });
-        setIsLoading(false);
-    };
-
-    // --- PRINTING LOGIC ---
-
-    const handlePrintTicketIndividual = () => {
-        const currentConf = pendingConfirmations[currentIndex];
-        
-        if (!currentConf || !currentConf.id) {
-            toast({ title: "Error", description: "No hay datos válidos.", variant: "destructive" });
-            return;
-        }
-
-        const dataToPrint = {
-            ...currentConf,
-            numero: currentConf.numero || 'PEND',
-            inscriptionDate: currentConf.inscriptionDate || new Date().toISOString()
-        };
-
-        setTicketData(dataToPrint);
-        setShowTicket(true);
-
-        setTimeout(() => {
-            window.print();
-        }, 500);
-    };
-
-    const handlePrintTicketBatch = () => {
-        if (selectedIds.length !== 1) {
-             toast({ title: "Selección Inválida", description: "Seleccione 1 registro.", variant: "destructive" });
-            return;
-        }
-
-        const selectedConf = pendingConfirmations.find(b => b.id === selectedIds[0]);
-
-        if (!selectedConf) {
-            toast({ title: "Error", description: "Registro no encontrado.", variant: "destructive" });
-            return;
-        }
-
-        const dataToPrint = {
-            ...selectedConf,
-            numero: selectedConf.numero || 'PEND',
-            inscriptionDate: selectedConf.inscriptionDate || new Date().toISOString()
-        };
-
-        setTicketData(dataToPrint);
-        setShowTicket(true);
-
-        setTimeout(() => {
-            window.print();
-        }, 500);
-    };
-
-
-    // --- INDIVIDUAL VIEW LOGIC ---
-
-    const currentConf = pendingConfirmations[currentIndex];
-
-    const handleFormChange = (e) => {
-        const { name, value, type } = e.target;
-        let finalValue = value;
-        
-        if (type === 'date') {
-            finalValue = toStorageDate(value);
-        }
-
-        const updated = [...pendingConfirmations];
-        updated[currentIndex] = { ...updated[currentIndex], [name]: finalValue };
-        setPendingConfirmations(updated);
-        const entityId = user.parishId || user.dioceseId;
-        localStorage.setItem(`pendingConfirmations_${entityId}`, JSON.stringify(updated));
-    };
-
-    const handleRegisterIndividual = () => {
-        if (!currentConf) return;
-
-        if (currentConf.sacramentDate && !isDateValid(currentConf.sacramentDate)) {
-             toast({ title: "Error", description: "La fecha de confirmación no puede ser futura.", variant: "destructive" });
-             return;
-        }
-        
-        const entityId = user.parishId || user.dioceseId;
-        const { libro, folio, numero, partidasPerFolio } = getPartidaParameters(entityId);
-        
-        const today = new Date();
-        const formattedToday = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
-
-        const newRecord = {
-            ...currentConf,
-            status: 'celebrated',
-            book_number: libro,
-            page_number: folio,
-            entry_number: numero,
-            registrationDate: formattedToday,
-            sex: currentConf.sex || 'MASCULINO'
-        };
-
-        const finalKey = `confirmations_${entityId}`;
-        const currentFinal = JSON.parse(localStorage.getItem(finalKey) || '[]');
-        localStorage.setItem(finalKey, JSON.stringify([...currentFinal, newRecord]));
-
-        const { newLibro, newFolio, newNumero } = calculateNextPartidaValues(entityId, libro, folio, numero, partidasPerFolio);
-
-        updatePartidaParameters(entityId, newLibro, newFolio, newNumero);
-        
-        setParameters({
-            ordinarioLibro: newLibro,
-            ordinarioFolio: newFolio,
-            ordinarioNumero: newNumero,
-            ordinarioPartidas: partidasPerFolio
-        });
-
-        const updatedPending = pendingConfirmations.filter((_, idx) => idx !== currentIndex);
-        localStorage.setItem(`pendingConfirmations_${entityId}`, JSON.stringify(updatedPending));
-        setPendingConfirmations(updatedPending);
-
-        toast({ title: "Registro Exitoso", description: `Confirmación registrada: L${libro} F${folio} N${numero}`, className: "bg-green-50 border-green-200 text-green-900" });
-
-        if (currentIndex >= updatedPending.length) {
-            setCurrentIndex(Math.max(0, updatedPending.length - 1));
+            console.error("Error cargando datos:", error);
+        } finally {
+            setIsLoading(false);
         }
     };
 
-    // --- BATCH VIEW LOGIC ---
-
-    const toggleSelection = (id) => {
-        if (selectedIds.includes(id)) {
-            setSelectedIds(selectedIds.filter(i => i !== id));
-        } else {
-            setSelectedIds([...selectedIds, id]);
+    useEffect(() => { 
+        if (resolvedParishId) {
+            loadData(); 
         }
-    };
+    }, [resolvedParishId]);
 
-    const toggleSelectAll = () => {
-        if (selectedIds.length === pendingConfirmations.length) {
-            setSelectedIds([]);
-        } else {
-            setSelectedIds(pendingConfirmations.map(b => b.id));
-        }
-    };
+    const incrementParameters = async (count, bookType = 'ordinario') => {
+        if (!resolvedParishId) return;
 
-    const handleRegisterBatch = () => {
-        if (selectedIds.length === 0) return;
+        try {
+            const p = fullParamsCache || await getConfirmationParameters(resolvedParishId);
+            const prefix = bookType;
 
-        const selected = pendingConfirmations.filter(b => selectedIds.includes(b.id));
+            let cFolio = parseInt(p[`${prefix}Folio`], 10) || 1;
+            let cNumero = parseInt(p[`${prefix}Numero`], 10) || 1;
+            let cLibro = parseInt(p[`${prefix}Libro`], 10) || 1;
+            let pPorFolio = parseInt(p[`${prefix}Partidas`], 10) || 2;
+            let restart = p[`${prefix}RestartNumber`];
 
-        const entityId = user.parishId || user.dioceseId;
-        let { libro, folio, numero, partidasPerFolio } = getPartidaParameters(entityId);
-        
-        const finalKey = `confirmations_${entityId}`;
-        const existingRecords = JSON.parse(localStorage.getItem(finalKey) || '[]');
-        
-        const today = new Date();
-        const formattedToday = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
-        
-        const newFinalRecords = [];
-        const recordsToSave = [...existingRecords];
-
-        selected.forEach(conf => {
-            const record = {
-                ...conf,
-                status: 'celebrated',
-                book_number: libro,
-                page_number: folio,
-                entry_number: numero,
-                registrationDate: formattedToday,
-                sex: conf.sex || 'MASCULINO'
-            };
-            
-            newFinalRecords.push(record);
-            recordsToSave.push(record); 
-
-            numero++; 
-            const countInFolio = recordsToSave.filter(r => 
-                parseInt(r.book_number) === parseInt(libro) && 
-                parseInt(r.page_number) === parseInt(folio)
-            ).length;
-
-            if (countInFolio >= partidasPerFolio) {
-                folio++;
+            for (let i = 0; i < count; i++) {
+                const siguiente = calculateNextConsecutive(cNumero, cFolio, cLibro, pPorFolio, restart);
+                cNumero = parseInt(siguiente.numero, 10);
+                cFolio = parseInt(siguiente.folio, 10);
+                cLibro = parseInt(siguiente.libro, 10);
             }
-        });
 
-        localStorage.setItem(finalKey, JSON.stringify(recordsToSave));
-        updatePartidaParameters(entityId, libro, folio, numero);
-        setParameters({
-            ordinarioLibro: libro,
-            ordinarioFolio: folio,
-            ordinarioNumero: numero,
-            ordinarioPartidas: partidasPerFolio
-        });
+            const updatedParams = { 
+                ...p, 
+                [`${prefix}Folio`]: cFolio, 
+                [`${prefix}Numero`]: cNumero, 
+                [`${prefix}Libro`]: cLibro 
+            };
 
-        const updatedPending = pendingConfirmations.filter(b => !selectedIds.includes(b.id));
-        localStorage.setItem(`pendingConfirmations_${entityId}`, JSON.stringify(updatedPending));
-        setPendingConfirmations(updatedPending);
-        setSelectedIds([]);
-
-        toast({ title: "Lote Registrado", description: `Se han asentado ${newFinalRecords.length} registros.`, className: "bg-green-50 border-green-200 text-green-900" });
+            await updateConfirmationParameters(resolvedParishId, updatedParams);
+            setFullParamsCache(updatedParams);
+            setNextNumbers({
+                book: String(cLibro).padStart(4, '0'),
+                page: String(cFolio).padStart(4, '0'),
+                entry: String(cNumero).padStart(4, '0')
+            });
+        } catch (err) {
+            console.error("Error al incrementar parámetros:", err);
+        }
     };
 
-    if (isLoading) {
-        return (
-            <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-                <div className="flex items-center justify-center h-64">
-                    <p className="text-gray-500">Cargando registros...</p>
-                </div>
-            </DashboardLayout>
-        );
-    }
+    const currentConfirmation = pendingConfirmations[currentIndex];
+    const currentIsFuture = currentConfirmation ? isDateInFuture(currentConfirmation.fechaSacramento) : false;
 
-    const EmptyState = () => (
-        <div className="flex flex-col items-center justify-center h-64 bg-white rounded-lg border border-dashed border-gray-300 p-8 text-center">
-            <CheckCircle2 className="w-16 h-16 text-green-100 mb-4" />
-            <h3 className="text-xl font-bold text-gray-900">¡Todo al día!</h3>
-            <p className="text-gray-500 mt-2">No hay confirmaciones pendientes para registrar.</p>
-        </div>
+    const handleReprint = () => {
+        if (!currentConfirmation) return;
+        setTimeout(() => window.print(), 300);
+    };
+
+    const handleRegisterIndividual = async () => {
+        if (!currentConfirmation || isSaving || currentIsFuture) return;
+
+        setIsSaving(true);
+        try {
+            const result = await seatConfirmation(currentConfirmation.id, resolvedParishId, currentConfirmation);
+            if (result.success) {
+                await incrementParameters(1, 'ordinario'); 
+                toast({ title: "Éxito", description: "Confirmación asentada permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
+                await loadData();
+                if (currentIndex >= pendingConfirmations.length - 1) setCurrentIndex(Math.max(0, pendingConfirmations.length - 2));
+            } else {
+                throw new Error(result.message);
+            }
+        } catch (error) { 
+            toast({ title: "Error", description: error.message, variant: "destructive" }); 
+        } finally { 
+            setIsSaving(false); 
+        }
+    };
+
+    const handleSelectAll = (checked) => {
+        if (checked) {
+            const validIds = pendingConfirmations
+                .filter(b => !isDateInFuture(b.fechaSacramento))
+                .map(b => b.id);
+            setSelectedIds(validIds);
+        } else {
+            setSelectedIds([]);
+        }
+    };
+
+    const toggleSelection = (id, isFuture) => {
+        if (isFuture) return; 
+        if (selectedIds.includes(id)) setSelectedIds(selectedIds.filter(i => i !== id));
+        else setSelectedIds([...selectedIds, id]);
+    };
+
+    const handleBatchConfirm = async () => {
+        if (selectedIds.length === 0 || isSaving) return;
+        if (!window.confirm(`¿Asentar ${selectedIds.length} registros permanentemente?`)) return;
+
+        setIsSaving(true);
+        try {
+            const result = await seatMultipleConfirmations(selectedIds, resolvedParishId);
+            if (result.success) {
+                await incrementParameters(selectedIds.length, 'ordinario'); 
+                toast({ title: "Lote Procesado", className: "bg-green-50 text-green-900 border-green-200" });
+                setSelectedIds([]);
+                await loadData();
+            } else {
+                throw new Error(result.message);
+            }
+        } catch (err) { 
+            toast({ title: "Error", description: err.message, variant: "destructive" }); 
+        } finally { 
+            setIsSaving(false); 
+        }
+    };
+
+    if (isLoading) return (
+        <DashboardLayout entityName={nombreParroquia}>
+            <div className="flex justify-center py-20"><Loader2 className="animate-spin text-red-600 w-8 h-8" /></div>
+        </DashboardLayout>
+    );
+
+    if (pendingConfirmations.length === 0) return (
+        <DashboardLayout entityName={nombreParroquia}>
+            <div className="flex flex-col items-center justify-center min-h-[400px] bg-white rounded-[3rem] p-12 text-center border-2 border-dashed border-gray-200 shadow-sm">
+                <CheckCircle2 className="w-16 h-16 text-green-200 mb-4" />
+                <h3 className="text-xl font-bold uppercase text-gray-400">Archivo al Día</h3>
+                <p className="text-xs text-gray-400 mt-1">No hay borradores pendientes de confirmación en la nube.</p>
+                <Button variant="outline" className="mt-6 rounded-xl text-red-600 border-red-200 hover:bg-red-50" onClick={() => navigate('/parroquia/confirmacion/partidas')}>Ver Actas Permanentes</Button>
+            </div>
+        </DashboardLayout>
     );
 
     return (
-        <>
-            <div className="print:hidden">
-                <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-                    {/* Header Area */}
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+        <DashboardLayout entityName={nombreParroquia}>
+            <div className="hidden print:block">
+                {currentConfirmation && <ConfirmationTicket confirmationData={currentConfirmation} parishInfo={parishInfo} />}
+            </div>
+
+            <div className="print:hidden max-w-7xl mx-auto px-4 pb-20">
+                <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-6">
+                    <div className="flex items-center gap-5">
+                        <Button variant="ghost" onClick={() => navigate('/parroquia/confirmacion/partidas')} className="rounded-2xl bg-white shadow-sm h-12 w-12 border"><ChevronLeft className="text-gray-500"/></Button>
                         <div>
-                            <h1 className="text-2xl font-bold text-[#4B7BA7] font-serif">Sentar Registros de Confirmación</h1>
-                            <p className="text-sm text-gray-600">Gestione y legalice las confirmaciones pendientes.</p>
-                        </div>
-                        
-                        <div className="flex bg-white rounded-lg shadow-sm border border-gray-200 p-1">
-                            <button
-                                onClick={() => setViewMode('individual')}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                                    viewMode === 'individual' 
-                                        ? 'bg-[#4B7BA7] text-white shadow-sm' 
-                                        : 'text-gray-600 hover:bg-gray-100'
-                                }`}
-                            >
-                                <User className="w-4 h-4" />
-                                Individual
-                            </button>
-                            <button
-                                onClick={() => setViewMode('batch')}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                                    viewMode === 'batch' 
-                                        ? 'bg-[#4B7BA7] text-white shadow-sm' 
-                                        : 'text-gray-600 hover:bg-gray-100'
-                                }`}
-                            >
-                                <Users className="w-4 h-4" />
-                                Por Lote
-                            </button>
+                            <h1 className="text-3xl font-black uppercase tracking-tighter text-gray-900">Asentamiento de Confirmaciones</h1>
+                            <p className="text-red-600 text-[10px] font-black uppercase tracking-[0.3em] flex items-center gap-2 mt-1"><Layers className="w-3 h-3 text-red-600" /> Firma de Actas Temporales</p>
                         </div>
                     </div>
 
-                    {pendingConfirmations.length === 0 ? (
-                        <EmptyState />
-                    ) : viewMode === 'individual' ? (
-                        <div className="space-y-4">
-                            {/* Navigation Bar */}
-                            <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <Button variant="outline" size="icon" onClick={() => setCurrentIndex(0)} disabled={currentIndex === 0}>
-                                        <ChevronsLeft className="w-4 h-4" />
-                                    </Button>
-                                    <Button variant="outline" size="icon" onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))} disabled={currentIndex === 0}>
-                                        <ChevronLeft className="w-4 h-4" />
-                                    </Button>
-                                </div>
-                                <span className="font-mono font-bold text-gray-700">
-                                    {currentIndex + 1} / {pendingConfirmations.length}
-                                </span>
-                                <div className="flex items-center gap-2">
-                                    <Button variant="outline" size="icon" onClick={() => setCurrentIndex(prev => Math.min(pendingConfirmations.length - 1, prev + 1))} disabled={currentIndex === pendingConfirmations.length - 1}>
-                                        <ChevronRight className="w-4 h-4" />
-                                    </Button>
-                                    <Button variant="outline" size="icon" onClick={() => setCurrentIndex(pendingConfirmations.length - 1)} disabled={currentIndex === pendingConfirmations.length - 1}>
-                                        <ChevronsRight className="w-4 h-4" />
-                                    </Button>
-                                </div>
+                    <div className="bg-white p-1.5 rounded-[1.5rem] border shadow-sm flex items-center gap-1">
+                        <button onClick={() => setMode('individual')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all", mode === 'individual' ? "bg-red-50 text-red-700 shadow-sm border border-red-100" : "text-gray-500 hover:bg-gray-50")}>
+                            <BookOpenCheck className="w-4 h-4 inline mr-2" /> Individual
+                        </button>
+                        <button onClick={() => setMode('batch')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all", mode === 'batch' ? "bg-red-50 text-red-700 shadow-sm border border-red-100" : "text-gray-500 hover:bg-gray-50")}>
+                            <LayoutList className="w-4 h-4 inline mr-2" /> Por Lote
+                        </button>
+                    </div>
+                </div>
+
+                {mode === 'individual' && (
+                    <div className="animate-in fade-in duration-500 space-y-6">
+                        <div className="bg-white p-4 rounded-t-[2rem] border shadow-sm flex items-center justify-between border-b-0">
+                            <Button variant="outline" onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))} disabled={currentIndex === 0}><ChevronLeft className="w-4 h-4 text-gray-600" /></Button>
+                            <span className="font-black text-[10px] uppercase tracking-widest text-red-600 bg-red-50 px-4 py-1.5 rounded-full border border-red-100">Documento {currentIndex + 1} de {pendingConfirmations.length}</span>
+                            <Button variant="outline" onClick={() => setCurrentIndex(prev => Math.min(pendingConfirmations.length - 1, prev + 1))} disabled={currentIndex === pendingConfirmations.length - 1}><ChevronRight className="w-4 h-4 text-gray-600" /></Button>
+                        </div>
+
+                        <div className="bg-white p-10 rounded-b-[2rem] border shadow-sm space-y-8">
+                            <div className="grid grid-cols-3 gap-6 p-6 bg-slate-50 border rounded-2xl text-center">
+                                <div><label className="text-[10px] font-black text-slate-400 uppercase">Libro Destino</label><div className="text-2xl font-black text-red-600">{nextNumbers.book}</div></div>
+                                <div><label className="text-[10px] font-black text-slate-400 uppercase">Folio Destino</label><div className="text-2xl font-black text-red-600">{nextNumbers.page}</div></div>
+                                <div><label className="text-[10px] font-black text-slate-400 uppercase">Acta Nº</label><div className="text-2xl font-black text-[#D4AF37]">{nextNumbers.entry}</div></div>
                             </div>
 
-                            {/* Form Content */}
-                            <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-                                    {/* Auto-assigned fields (Read-Only Preview) */}
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-bold text-gray-500 uppercase">Libro (Auto)</label>
-                                        <div className="p-2 bg-gray-100 rounded border border-gray-200 font-mono text-gray-700">{parameters?.ordinarioLibro}</div>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-bold text-gray-500 uppercase">Folio (Auto)</label>
-                                        <div className="p-2 bg-gray-100 rounded border border-gray-200 font-mono text-gray-700">{parameters?.ordinarioFolio}</div>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-bold text-gray-500 uppercase">Número (Auto)</label>
-                                        <div className="p-2 bg-gray-100 rounded border border-gray-200 font-mono text-gray-700">{parameters?.ordinarioNumero}</div>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-bold text-[#4B7BA7] uppercase">Fecha Confirmación</label>
-                                        <Input 
-                                            name="sacramentDate" 
-                                            type="date"
-                                            value={toInputDate(currentConf.sacramentDate)} 
-                                            onChange={handleFormChange}
-                                            className="border-gray-300 focus:border-[#4B7BA7]"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                                    <div className="space-y-4">
-                                        <h3 className="font-bold text-gray-900 border-b pb-2">Datos del Confirmado</h3>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="text-xs font-semibold text-gray-600">Nombres</label>
-                                                <Input name="firstName" value={currentConf.firstName} onChange={handleFormChange} />
-                                            </div>
-                                            <div>
-                                                <label className="text-xs font-semibold text-gray-600">Apellidos</label>
-                                                <Input name="lastName" value={currentConf.lastName} onChange={handleFormChange} />
-                                            </div>
-                                            <div>
-                                                <label className="text-xs font-semibold text-gray-600">Fecha Nacimiento</label>
-                                                <Input name="birthDate" type="date" value={toInputDate(currentConf.birthDate)} onChange={handleFormChange} />
-                                            </div>
-                                            <div>
-                                                <label className="text-xs font-semibold text-gray-600">Sexo</label>
-                                                <select 
-                                                    name="sex" 
-                                                    value={currentConf.sex || ''} 
-                                                    onChange={handleFormChange}
-                                                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#4B7BA7]"
-                                                >
-                                                    <option value="MASCULINO">MASCULINO</option>
-                                                    <option value="FEMENINO">FEMENINO</option>
-                                                </select>
-                                            </div>
-                                            <div className="col-span-2">
-                                                <label className="text-xs font-semibold text-gray-600">Lugar Nacimiento</label>
-                                                <Input name="lugarNacimientoDetalle" value={currentConf.lugarNacimientoDetalle} onChange={handleFormChange} />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-4">
-                                        <h3 className="font-bold text-gray-900 border-b pb-2">Datos de los Padres</h3>
-                                        <div className="space-y-3">
-                                            <div>
-                                                <label className="text-xs font-semibold text-gray-600">Padre</label>
-                                                <Input name="fatherName" value={currentConf.fatherName} onChange={handleFormChange} />
-                                            </div>
-                                            <div>
-                                                <label className="text-xs font-semibold text-gray-600">Madre</label>
-                                                <Input name="motherName" value={currentConf.motherName} onChange={handleFormChange} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2 mb-6">
-                                    <label className="text-xs font-semibold text-gray-600">Padrinos</label>
-                                    <textarea 
-                                        name="godparents" 
-                                        value={currentConf.godparents || ''} 
-                                        onChange={handleFormChange}
-                                        className="w-full rounded-md border border-gray-300 p-2 text-sm h-16 resize-none focus:ring-2 focus:ring-[#4B7BA7] outline-none"
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="space-y-3">
-                                        <div>
-                                            <label className="text-xs font-semibold text-gray-600">Ministro</label>
-                                            <Input name="minister" value={currentConf.minister} onChange={handleFormChange} />
-                                        </div>
-                                        <div>
-                                            <label className="text-xs font-semibold text-gray-600">Lugar Confirmación</label>
-                                            <Input name="lugarConfirmacionDetalle" value={currentConf.lugarConfirmacionDetalle} onChange={handleFormChange} />
-                                        </div>
-                                    </div>
-                                    <div className="space-y-3">
-                                        <div>
-                                            <label className="text-xs font-semibold text-gray-600">Da Fe (Firma)</label>
-                                            <Input 
-                                                name="ministerFaith" 
-                                                value={currentConf.ministerFaith || ''} 
-                                                onChange={handleFormChange}
-                                                placeholder="Nombre del párroco"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
+                            <div className="flex items-center gap-4 border-b pb-4">
+                                <div className="w-12 h-12 bg-red-50 text-red-600 rounded-xl flex items-center justify-center font-black border border-red-100">{currentIndex + 1}</div>
+                                <p className="text-2xl font-black uppercase text-gray-900">{currentConfirmation?.nombres} {currentConfirmation?.apellidos}</p>
                             </div>
 
-                            {/* Actions */}
-                            <div className="flex justify-end gap-3 mt-4">
-                                <Button variant="outline" className="text-gray-600 border-gray-300 hover:bg-gray-100" onClick={() => {/* Handle exit logic */}}>
-                                    <LogOut className="w-4 h-4 mr-2" />
-                                    Salir
-                                </Button>
-                                <Button className="bg-[#D4AF37] hover:bg-[#C4A027] text-white font-bold" onClick={handlePrintTicketIndividual}>
-                                    <Printer className="w-4 h-4 mr-2" />
-                                    Imprimir Boleta
-                                </Button>
-                                <Button className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white" onClick={handleRegisterIndividual}>
-                                    <Save className="w-4 h-4 mr-2" />
-                                    Registrar
+                            {currentIsFuture && (
+                                <div className="flex items-center gap-4 bg-red-50 p-6 rounded-2xl border border-red-200 text-red-700 animate-pulse">
+                                    <AlertCircle className="w-8 h-8 flex-shrink-0" />
+                                    <div>
+                                        <p className="font-black uppercase text-sm">Registro Bloqueado</p>
+                                        <p className="text-xs font-bold opacity-80">La fecha del sacramento ({currentConfirmation?.fechaSacramento}) aún no ha ocurrido. No se puede asentar antes de su celebración.</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-10 opacity-100 bg-gray-50/50 p-6 rounded-2xl border border-gray-100">
+                                <div><label className="text-[10px] font-black text-gray-400 uppercase">Nº Registro Previo</label><p className="font-black text-red-600 text-lg">#{currentConfirmation?.numeroRegistro || '---'}</p></div>
+                                <div><label className="text-[10px] font-black text-gray-400 uppercase">Lugar de Confirmación</label><p className="font-bold text-gray-700 uppercase">{currentConfirmation?.lugarSacramento || '---'}</p></div>
+                            </div>
+
+                            <div className="flex justify-between items-center pt-8 border-t">
+                                <Button variant="outline" onClick={handleReprint} className="rounded-xl border-gray-300 text-gray-600 hover:bg-gray-50"><Printer className="mr-2 w-4 h-4" /> Re-imprimir Boleta</Button>
+                                <Button 
+                                    onClick={handleRegisterIndividual} 
+                                    disabled={isSaving || currentIsFuture} 
+                                    className={cn(
+                                        "px-12 py-8 rounded-2xl font-black uppercase text-[10px] shadow-xl transition-all",
+                                        currentIsFuture ? "bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200 shadow-none" : "bg-red-600 hover:bg-red-800 text-white hover:scale-105 shadow-red-900/20"
+                                    )}
+                                >
+                                    {isSaving ? <Loader2 className="animate-spin mr-2 w-5 h-5" /> : (currentIsFuture ? <Lock className="mr-2 w-5 h-5" /> : <Save className="mr-2 w-5 h-5" />)}
+                                    {currentIsFuture ? "Bloqueado por Fecha" : "Firmar y Sellar Permanente"}
                                 </Button>
                             </div>
                         </div>
-                    ) : (
-                        // --- BATCH VIEW ---
-                        <div className="space-y-4">
-                            {/* Counters */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm flex flex-col items-center">
-                                    <span className="text-2xl font-bold text-[#4B7BA7]">{selectedIds.length}</span>
-                                    <span className="text-xs text-gray-500 uppercase font-semibold">Seleccionadas</span>
-                                </div>
-                                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm flex flex-col items-center">
-                                    <span className="text-2xl font-bold text-gray-400">{pendingConfirmations.length - selectedIds.length}</span>
-                                    <span className="text-xs text-gray-500 uppercase font-semibold">No Seleccionadas</span>
-                                </div>
-                                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm flex flex-col items-center">
-                                    <span className="text-2xl font-bold text-gray-900">{pendingConfirmations.length}</span>
-                                    <span className="text-xs text-gray-500 uppercase font-semibold">Total</span>
-                                </div>
-                            </div>
+                    </div>
+                )}
 
-                            {/* Table */}
-                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm text-left">
-                                        <thead className="bg-gray-50 border-b border-gray-200 text-xs text-gray-600 uppercase">
-                                            <tr>
-                                                <th className="px-6 py-3 w-10">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        checked={selectedIds.length === pendingConfirmations.length && pendingConfirmations.length > 0}
-                                                        onChange={toggleSelectAll}
-                                                        className="w-4 h-4 text-[#4B7BA7] rounded border-gray-300 focus:ring-[#4B7BA7]"
-                                                    />
-                                                </th>
-                                                <th className="px-6 py-3">#</th>
-                                                <th className="px-6 py-3">Apellidos</th>
-                                                <th className="px-6 py-3">Nombres</th>
-                                                <th className="px-6 py-3">Fecha Conf.</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-100">
-                                            {pendingConfirmations.map((conf, idx) => (
-                                                <tr key={conf.id || idx} className="hover:bg-gray-50 transition-colors">
-                                                    <td className="px-6 py-3">
-                                                        <input 
-                                                            type="checkbox" 
-                                                            checked={selectedIds.includes(conf.id)}
-                                                            onChange={() => toggleSelection(conf.id)}
-                                                            className="w-4 h-4 text-[#4B7BA7] rounded border-gray-300 focus:ring-[#4B7BA7]"
-                                                        />
-                                                    </td>
-                                                    <td className="px-6 py-3 font-mono text-gray-500">{idx + 1}</td>
-                                                    <td className="px-6 py-3 font-semibold text-gray-900">{conf.lastName}</td>
-                                                    <td className="px-6 py-3 text-gray-700">{conf.firstName}</td>
-                                                    <td className="px-6 py-3 text-gray-500">{conf.sacramentDate || '-'}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
+                {mode === 'batch' && (
+                    <div className="animate-in fade-in duration-500 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-50 border-b font-black text-[10px] text-gray-400 uppercase">
+                                <tr>
+                                    <th className="px-8 py-6 w-16 text-center"><button onClick={() => handleSelectAll(selectedIds.length !== pendingConfirmations.filter(b => !isDateInFuture(b.fechaSacramento)).length)}>{selectedIds.length > 0 && selectedIds.length === pendingConfirmations.filter(b => !isDateInFuture(b.fechaSacramento)).length ? <CheckSquare className="text-red-600" /> : <Square />}</button></th>
+                                    <th className="px-6 py-6">ESTADO</th>
+                                    <th className="px-6 py-6">Confirmando</th>
+                                    <th className="px-6 py-6">Fecha Sacramento</th>
+                                    <th className="px-6 py-6">Lugar de Celebración</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {pendingConfirmations.map(conf => {
+                                    const isFuture = isDateInFuture(conf.fechaSacramento);
+                                    const isSelected = selectedIds.includes(conf.id);
+                                    return (
+                                        <tr 
+                                            key={conf.id} 
+                                            onClick={() => toggleSelection(conf.id, isFuture)} 
+                                            className={cn(
+                                                "transition-colors", 
+                                                isFuture ? "bg-gray-50/50 cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-red-50/30",
+                                                isSelected ? "bg-red-50/60" : ""
+                                            )}
+                                        >
+                                            <td className="px-8 py-4 text-center">
+                                                {!isFuture && (
+                                                    <div className={cn("w-5 h-5 rounded border-2 flex items-center justify-center mx-auto", isSelected ? "bg-red-600 border-red-600" : "border-gray-300")}>
+                                                        {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
+                                                    </div>
+                                                )}
+                                                {isFuture && <Lock className="w-4 h-4 text-gray-300 mx-auto" />}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                {isFuture ? <span className="text-[8px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full uppercase border border-gray-200">Futuro</span> : <span className="text-[8px] font-black bg-green-100 text-green-700 px-2 py-1 rounded-full uppercase border border-green-200">Listo</span>}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <p className="font-black uppercase text-xs text-gray-800">{conf.apellidos}, {conf.nombres}</p>
+                                                <p className="text-[9px] font-bold text-gray-400 uppercase">#{conf.numeroRegistro || '---'}</p>
+                                            </td>
+                                            <td className={cn("px-6 py-4 text-[11px] font-black uppercase", isFuture ? "text-gray-400" : "text-gray-600")}>
+                                                {conf.fechaSacramento}
+                                            </td>
+                                            <td className="px-6 py-4 text-[11px] font-bold text-gray-500 uppercase">{conf.lugarSacramento || '---'}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                        <div className="p-8 bg-gray-50 border-t flex justify-between items-center">
+                            <div className="flex flex-col">
+                                <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">Seleccionados: <span className="text-red-600 text-sm">{selectedIds.length}</span></span>
+                                {selectedIds.length > 0 && <span className="text-[9px] font-bold text-green-600 uppercase mt-1">Registros aptos para firma</span>}
                             </div>
-
-                            {/* Actions */}
-                            <div className="flex justify-end gap-3 mt-4">
-                                <Button variant="outline" className="text-gray-600" onClick={() => setSelectedIds([])} disabled={selectedIds.length === 0}>
-                                    Cancelar Selección
-                                </Button>
-                                <Button 
-                                    className="bg-[#D4AF37] hover:bg-[#C4A027] text-white font-bold" 
-                                    onClick={handlePrintTicketBatch}
-                                    disabled={selectedIds.length !== 1}
-                                    title={selectedIds.length !== 1 ? "Seleccione exactamente un registro para imprimir" : "Imprimir Boleta"}
-                                >
-                                    <Printer className="w-4 h-4 mr-2" />
-                                    Imprimir Boleta
-                                </Button>
-                                <Button 
-                                    className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white" 
-                                    onClick={handleRegisterBatch}
-                                    disabled={selectedIds.length === 0}
-                                >
-                                    <Save className="w-4 h-4 mr-2" />
-                                    Registrar ({selectedIds.length})
-                                </Button>
-                            </div>
+                            <Button onClick={handleBatchConfirm} disabled={selectedIds.length === 0 || isSaving} className="bg-red-600 hover:bg-red-800 text-white px-10 py-7 rounded-2xl font-black uppercase text-[10px] shadow-lg shadow-red-900/20 active:scale-95 transition-transform">
+                                {isSaving ? <Loader2 className="animate-spin mr-2 w-5 h-5" /> : <CheckCircle2 className="mr-2 w-5 h-5" />} Asentar Selección
+                            </Button>
                         </div>
-                    )}
-                </DashboardLayout>
+                    </div>
+                )}
             </div>
-            
-            <div className="hidden print:block">
-                 {ticketData && <ConfirmationTicket confirmationData={ticketData} parishInfo={parishInfo} />}
-            </div>
-        </>
+        </DashboardLayout>
     );
 };
 
