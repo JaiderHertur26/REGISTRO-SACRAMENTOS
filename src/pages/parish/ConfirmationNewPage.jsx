@@ -33,6 +33,9 @@ const ConfirmationNewPage = () => {
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
     const [listaSacerdotes, setListaSacerdotes] = useState([]); 
     const [fullParamsCache, setFullParamsCache] = useState(null); 
+    
+    // Nuevo estado para el catálogo de iglesias
+    const [listaIglesias, setListaIglesias] = useState([]);
 
     const [formData, setFormData] = useState({
         numeroRegistro: '', 
@@ -74,6 +77,12 @@ const ConfirmationNewPage = () => {
             if (p) {
                 setFullParamsCache(p);
                 setFormData(prev => ({ ...prev, numeroRegistro: p.numeroRegistroActual || '' }));
+            }
+
+            // 🚀 Cargar catálogo de Iglesias para vincular el código automáticamente
+            const { data: iglesiasData } = await supabase.from('iglesias').select('nombre, codigo, ciudad');
+            if (iglesiasData) {
+                setListaIglesias(iglesiasData);
             }
         };
         loadInitialData();
@@ -126,7 +135,6 @@ const ConfirmationNewPage = () => {
             const possibleResponsables = [prev.nombrePadre, prev.nombreMadre, prev.padrinos].filter(v => v && v.trim() !== '');
             const topPriority = possibleResponsables[0] || '';
             
-            // Solo lo actualizamos automáticamente si la casilla está vacía o si contiene alguno de los valores jerárquicos anteriores
             if (!prev.responsable || possibleResponsables.includes(prev.responsable)) {
                  if (prev.responsable !== topPriority) {
                      return { ...prev, responsable: topPriority };
@@ -135,6 +143,32 @@ const ConfirmationNewPage = () => {
             return prev;
         });
     }, [formData.nombrePadre, formData.nombreMadre, formData.padrinos]);
+
+    // 🚀 INTELIGENCIA 4: Vinculación Automática del Código de Iglesia
+    useEffect(() => {
+        if (formData.lugarBautismo && listaIglesias.length > 0) {
+            const searchStr = formData.lugarBautismo.toUpperCase().trim();
+            
+            const matchedChurch = listaIglesias.find(iglesia => {
+                const nombre = (iglesia.nombre || '').toUpperCase().trim();
+                const ciudad = (iglesia.ciudad || '').toUpperCase().trim();
+                // Muchas veces el Autocomplete concatena el nombre con la ciudad (ej: SAN SILVESTRE - BOGOTA)
+                const fullMatch = ciudad ? `${nombre} - ${ciudad}` : nombre;
+                
+                return searchStr === nombre || searchStr === fullMatch || searchStr.startsWith(nombre);
+            });
+
+            if (matchedChurch && matchedChurch.codigo) {
+                setFormData(prev => {
+                    // Solo actualizamos si el código es diferente para evitar renders infinitos
+                    if (prev.codigoBautizo !== matchedChurch.codigo) {
+                        return { ...prev, codigoBautizo: matchedChurch.codigo };
+                    }
+                    return prev;
+                });
+            }
+        }
+    }, [formData.lugarBautismo, listaIglesias]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -147,7 +181,6 @@ const ConfirmationNewPage = () => {
         setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
 
-    // 🚀 LECTURA DEFINITIVA DEL MODAL (Evita campos en blanco)
     const handleSelectBaptismPartida = (partida) => {
         let normalizedSex = '';
         if (partida.sex || partida.sexo) {
