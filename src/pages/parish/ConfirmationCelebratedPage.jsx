@@ -34,7 +34,7 @@ const ConfirmationCelebratedPage = () => {
     
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
-    // 🚀 ESTADO ACTUALIZADO (Se añadió notaMarginal)
+    // 🚀 ESTADO ACTUALIZADO (Con notas marginales incluidas)
     const [formData, setFormData] = useState({
         Libro: '', 
         folio: '', 
@@ -52,7 +52,7 @@ const ConfirmationCelebratedPage = () => {
         padrinos: '', 
         ministro: '', 
         daFe: '',
-        notaMarginal: '' // Agregado
+        notaMarginal: ''
     });
 
     useEffect(() => {
@@ -62,7 +62,6 @@ const ConfirmationCelebratedPage = () => {
             const misDatos = getMisDatosList(parishId);
             const nombreOficial = misDatos && misDatos.length > 0 ? misDatos[0]?.nombre : nombreParroquia;
             
-            // Cargar Consecutivos desde Parameters
             const { data: paramData } = await supabase.from('parish_parameters').select('confirmaciones_params').eq('parish_id', parishId).maybeSingle();
             const p = paramData?.confirmaciones_params || {};
             setCloudParams(p);
@@ -90,7 +89,6 @@ const ConfirmationCelebratedPage = () => {
         loadInitialData();
     }, [parishId, nombreParroquia, getMisDatosList, getParrocos]);
 
-    // 🚀 MÁQUINA DEL TIEMPO: SINCRONIZA DA FE Y CÁLCULO DE EDAD
     useEffect(() => {
         if (formData.fechaSacramento && listaSacerdotes.length > 0) {
             const fechaSeleccionada = new Date(formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`);
@@ -107,7 +105,6 @@ const ConfirmationCelebratedPage = () => {
             }
         }
 
-        // Cálculo de Edad Dinámico
         if (formData.fechaNacimiento && formData.fechaSacramento) {
             const birthStr = formData.fechaNacimiento.includes('T') ? formData.fechaNacimiento : `${formData.fechaNacimiento}T12:00:00`;
             const confStr = formData.fechaSacramento.includes('T') ? formData.fechaSacramento : `${formData.fechaSacramento}T12:00:00`;
@@ -171,38 +168,29 @@ const ConfirmationCelebratedPage = () => {
 
         setIsSubmitting(true);
         try {
-            // 🚀 Helper para transformar vacíos en "---" y evitar huecos en el PDF
-            const safeString = (val) => (val && String(val).trim() !== '') ? String(val).trim() : '---';
-            const cleanDate = (d) => (d && String(d).trim() !== '') ? d : null;
-
-            // Preparamos los datos con el formato seguro
-            const dbNacimiento = cleanDate(formData.fechaNacimiento);
-            const dbPadre = safeString(formData.nombrePadre);
-            const dbMadre = safeString(formData.nombreMadre);
-            const dbLugarBau = safeString(formData.lugarBautismo);
-            const dbPadrinos = safeString(formData.padrinos);
-            const dbMinistro = safeString(formData.ministro);
-            const dbNotas = formData.notaMarginal.trim() !== '' ? formData.notaMarginal.trim() : null; // null permite que el PDF ponga su texto por defecto
-
+            // 🚀 ESTA ES LA REPARACIÓN CLAVE: Las llaves deben ser exactas a como las mapea 
+            // el componente de Importación para que el PDF las detecte correctamente.
             const finalRawData = {
-                "LIBRO": formData.Libro,
-                "FOLIO": formData.folio,
-                "NÚMERO": formData.numero,
-                "FECHA DE CONFIRMACION": formData.fechaSacramento,
-                "LUGAR DE CONFIRMACION": formData.lugarSacramento,
-                "APELLIDOS": formData.apellidos,
-                "NOMBRES": formData.nombres,
-                "FECHA DE NACIMIENTO": dbNacimiento || '---',
-                "EDAD": formData.edad ? `${formData.edad} AÑOS` : '',
-                "LUGAR DE BAUTISMO": dbLugarBau,
-                "SEXO": formData.sexo,
-                "NOMBRE DEL PADRE": dbPadre,
-                "NOMBRE DE LA MADRE": dbMadre,
-                "PADRINO / MADRINA": dbPadrinos,
-                "MINISTRO": dbMinistro,
-                "DA FE": formData.daFe,
-                "NOTAS MARGINALES": dbNotas || ''
+                Libro: String(formData.Libro).padStart(4, '0'),
+                folio: String(formData.folio).padStart(4, '0'),
+                numero: String(formData.numero).padStart(4, '0'),
+                fechaSacramento: formData.fechaSacramento || '',
+                lugarSacramento: formData.lugarSacramento || '',
+                apellidos: formData.apellidos || '',
+                nombres: formData.nombres || '',
+                fechaNacimiento: formData.fechaNacimiento || '',
+                edad: formData.edad || '',
+                lugarBautismo: formData.lugarBautismo || '',
+                sexo: formData.sexo || '',
+                nombrePadre: formData.nombrePadre || '',
+                nombreMadre: formData.nombreMadre || '',
+                padrinos: formData.padrinos || '',
+                ministro: formData.ministro || '',
+                daFe: formData.daFe || '',
+                notaMarginal: formData.notaMarginal || ''
             };
+
+            const cleanDate = (d) => (d && String(d).trim() !== '') ? d : null;
 
             const { error: errConf } = await supabase.from('confirmations').insert([{
                 parish_id: parishId,
@@ -211,18 +199,18 @@ const ConfirmationCelebratedPage = () => {
                 number: formData.numero,
                 status: 'seated', 
                 celebration_date: formData.fechaSacramento || null,
-                lugar_bautismo: dbLugarBau !== '---' ? dbLugarBau : null,
+                lugar_bautismo: formData.lugarBautismo || null,
                 apellidos: formData.apellidos || null,
                 nombres: formData.nombres || null,
                 sexo: formData.sexo || null,
-                fecha_nacimiento: dbNacimiento,
-                nombre_padre: dbPadre !== '---' ? dbPadre : null,
-                nombre_madre: dbMadre !== '---' ? dbMadre : null,
-                padrinos: dbPadrinos !== '---' ? dbPadrinos : null,
-                ministro: dbMinistro !== '---' ? dbMinistro : null,
+                fecha_nacimiento: cleanDate(formData.fechaNacimiento),
+                nombre_padre: formData.nombrePadre || null,
+                nombre_madre: formData.nombreMadre || null,
+                padrinos: formData.padrinos || null,
+                ministro: formData.ministro || null,
                 da_fe: formData.daFe || null,
-                nota_marginal: dbNotas, 
-                raw_data: finalRawData,
+                nota_marginal: formData.notaMarginal || null,
+                raw_data: finalRawData, // El JSON ahora coincide 100% con la plantilla del PDF
                 created_at: new Date().toISOString()
             }]);
 
@@ -334,7 +322,7 @@ const ConfirmationCelebratedPage = () => {
                                         <option value="FEMENINO">FEMENINO</option>
                                     </select>
                                 </div>
-                                <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="fechaNacimiento" value={formData.fechaNacimiento} onChange={handleChange} className={inputClass} /></div>
+                                <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="fechaNacimiento" required value={formData.fechaNacimiento} onChange={handleChange} className={inputClass} /></div>
                                 <div>
                                     <label className={labelClass}>Edad Conf.</label>
                                     <div className="relative">
@@ -351,11 +339,11 @@ const ConfirmationCelebratedPage = () => {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                 <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-5 shadow-sm">
                                     <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Padre</p>
-                                    <input name="nombrePadre" placeholder="NOMBRE COMPLETO" value={formData.nombrePadre} onChange={handleChange} className={inputClass} />
+                                    <input name="nombrePadre" required placeholder="NOMBRE COMPLETO" value={formData.nombrePadre} onChange={handleChange} className={inputClass} />
                                 </div>
                                 <div className="bg-pink-50/30 p-8 rounded-[2rem] border border-pink-100/50 space-y-5 shadow-sm">
                                     <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Madre</p>
-                                    <input name="nombreMadre" placeholder="NOMBRE COMPLETO" value={formData.nombreMadre} onChange={handleChange} className={inputClass} />
+                                    <input name="nombreMadre" required placeholder="NOMBRE COMPLETO" value={formData.nombreMadre} onChange={handleChange} className={inputClass} />
                                 </div>
                             </div>
                         </section>
@@ -364,7 +352,7 @@ const ConfirmationCelebratedPage = () => {
                         <section>
                             <SectionHeader number="05" title="Registro de Bautismo Origen" icon={Droplet} />
                             <div className="space-y-6">
-                                <div><label className={labelClass}>Lugar y Parroquia de Bautismo</label><input name="lugarBautismo" value={formData.lugarBautismo} onChange={handleChange} className={inputClass} placeholder="EJ: PARROQUIA SAN JUAN BAUTISTA" /></div>
+                                <div><label className={labelClass}>Lugar y Parroquia de Bautismo</label><input name="lugarBautismo" required value={formData.lugarBautismo} onChange={handleChange} className={inputClass} placeholder="EJ: PARROQUIA SAN JUAN BAUTISTA" /></div>
                             </div>
                         </section>
 
@@ -372,14 +360,13 @@ const ConfirmationCelebratedPage = () => {
                         <section>
                             <SectionHeader number="06" title="Ministro y Autoridad" icon={PenTool} />
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                {/* Quitamos el 'required' estricto del Ministro para casos históricos */}
-                                <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input name="ministro" value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} placeholder="EXCMO. MONS..." /></div>
+                                <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input name="ministro" required value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} placeholder="EXCMO. MONS..." /></div>
                                 <div><label className={labelClass}>Da Fe (Párroco)</label><input name="daFe" required value={formData.daFe} onChange={handleChange} list="lista-parrocos" className={inputClass} /></div>
                             </div>
-                            <div><label className={labelClass}>Padrinos</label><input name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
+                            <div><label className={labelClass}>Padrinos</label><input name="padrinos" required value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
                         </section>
-                        
-                        {/* 07. NOTAS MARGINALES (NUEVO) */}
+
+                        {/* 07. NOTAS MARGINALES */}
                         <section>
                             <SectionHeader number="07" title="Notas Marginales" icon={FileText} />
                             <div>
