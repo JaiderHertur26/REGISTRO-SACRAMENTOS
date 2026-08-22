@@ -154,11 +154,12 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
 
             {/* CUERPO DEL DOCUMENTO */}
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-     
-                <div style={{ display: 'flex', gap: '15px' }}> 
+                
                 <FieldLine label="CONFIRMANDO" value={confirmando} />
                 
                 <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="FECHA NACIMIENTO." value={formatDate(confirmationData.fechaNacimiento || confirmationData.birthDate)} width="50%" />
+                                    </div>
                     <FieldLine label="FECHA NACIMIENTO." value={formatDate(confirmationData.fechaNacimiento || confirmationData.birthDate)} width="50%" />
                                     </div>
 
