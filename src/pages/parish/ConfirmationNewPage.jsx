@@ -7,10 +7,9 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { 
     Save, X, Calendar, User, Users, BookOpen, PenTool, 
-    CheckCircle2, Loader2, MapPin, Hash, AlertCircle, Search, Droplet 
+    CheckCircle2, Loader2, Hash, AlertCircle, Search, Droplet 
 } from 'lucide-react';
 import ConfirmationTicket from '@/components/ConfirmationTicket';
-import CityAutocomplete from '@/components/CityAutocomplete';
 import ChurchLocationAutocomplete from '@/components/ChurchLocationAutocomplete';
 import SearchBaptismPartidaModal from '@/components/modals/SearchBaptismPartidaModal';
 import { calculateNextRegistro } from '@/services/sacramentParametersService';
@@ -18,7 +17,7 @@ import { supabase } from '@/lib/supabaseClient';
 
 const ConfirmationNewPage = () => {
     const { user } = useAuth(); 
-    const { getMisDatosList, getCiudadesList, getParrocos, saveConfirmationToSource, getConfirmationParameters } = useAppData();
+    const { getMisDatosList, getParrocos, saveConfirmationToSource, getConfirmationParameters } = useAppData();
     const navigate = useNavigate();
     const { toast } = useToast();
     
@@ -31,19 +30,20 @@ const ConfirmationNewPage = () => {
     
     const [ticketData, setTicketData] = useState(null);
     const [parishInfo, setParishInfo] = useState(null); 
-    const [ciudades, setCiudades] = useState([]); 
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
     const [listaSacerdotes, setListaSacerdotes] = useState([]); 
     const [fullParamsCache, setFullParamsCache] = useState(null); 
 
     const [formData, setFormData] = useState({
-        numeroRegistro: '', Libro: '---', folio: '---', numero: '---',
+        numeroRegistro: '', 
+        fechaInscripcion: new Date().toISOString().split('T')[0],
+        Libro: '---', folio: '---', numero: '---',
         fechaSacramento: '', lugarSacramento: nombreParroquia,
         apellidos: '', nombres: '', sexo: '', 
-        fechaNacimiento: '', edad: '', lugarNacimiento: '', 
-        tipoUnionPadres: '', nombrePadre: '', cedulaPadre: '', nombreMadre: '', cedulaMadre: '', 
-        lugarBautismo: '', libroBautismo: '', folioBautismo: '', numeroBautismo: '',
-        padrinos: '', ministro: '', daFe: '', notaMarginal: ''
+        fechaNacimiento: '', edad: '', direccion: '', 
+        nombrePadre: '', nombreMadre: '', 
+        codigoBautizo: '', lugarBautismo: '', libroBautismo: '', folioBautismo: '', numeroBautismo: '',
+        padrinos: '', responsable: '', ministro: '', daFe: '', notaMarginal: ''
     });
 
     useEffect(() => {
@@ -55,9 +55,6 @@ const ConfirmationNewPage = () => {
                 setParishInfo(misDatos[0]);
                 setFormData(prev => ({ ...prev, lugarSacramento: (misDatos[0].nombre || nombreParroquia).toUpperCase() }));
             }
-
-            const listaCiudadesRaw = getCiudadesList(parishId) || [];
-            setCiudades(listaCiudadesRaw.map(c => (c.nombre || '').toUpperCase()));
             
             const listaParrocos = getParrocos(parishId) || [];
             setListaSacerdotes(listaParrocos); 
@@ -80,7 +77,7 @@ const ConfirmationNewPage = () => {
             }
         };
         loadInitialData();
-    }, [parishId, nombreParroquia, getMisDatosList, getCiudadesList, getParrocos, getConfirmationParameters]);
+    }, [parishId, nombreParroquia, getMisDatosList, getParrocos, getConfirmationParameters]);
 
     // 🚀 INTELIGENCIA: Máquina del tiempo para el Párroco que Da Fe
     useEffect(() => {
@@ -118,16 +115,12 @@ const ConfirmationNewPage = () => {
     const handleChange = (e) => {
         const { name, value } = e.target;
         const uppercaseFields = [
-            'nombres', 'apellidos', 'lugarNacimiento', 'lugarSacramento', 'lugarBautismo', 
-            'padrinos', 'nombrePadre', 'nombreMadre', 'ministro', 'daFe', 'notaMarginal'
+            'nombres', 'apellidos', 'lugarSacramento', 'lugarBautismo', 
+            'padrinos', 'responsable', 'nombrePadre', 'nombreMadre', 
+            'ministro', 'daFe', 'direccion', 'notaMarginal', 'codigoBautizo'
         ];
         const finalValue = uppercaseFields.includes(name) ? value.toUpperCase() : value;
         setFormData(prev => ({ ...prev, [name]: finalValue }));
-    };
-
-    const handleCityChange = (data) => {
-        let value = data?.target?.value || data?.nombre || data || "";
-        setFormData(prev => ({ ...prev, lugarNacimiento: String(value).toUpperCase() }));
     };
 
     const handleSelectBaptismPartida = (partida) => {
@@ -248,8 +241,9 @@ const ConfirmationNewPage = () => {
                             
                             <section>
                                 <SectionHeader number="01" title="Archivo y Control (Automático)" icon={Hash} />
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50 p-8 rounded-[2rem] border border-slate-100">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-slate-50 p-8 rounded-[2rem] border border-slate-100">
                                     <div><label className={labelClass}>Nº Registro Previo</label><input type="text" name="numeroRegistro" value={formData.numeroRegistro} disabled className={`${inputClass} text-center cursor-not-allowed opacity-80 text-red-600`} /></div>
+                                    <div><label className={labelClass}>Fecha Inscripción</label><input type="date" name="fechaInscripcion" value={formData.fechaInscripcion} onChange={handleChange} className={inputClass} /></div>
                                     <div className="md:col-span-2 flex items-center px-4">
                                         <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest leading-relaxed"><AlertCircle className="w-4 h-4 inline-block mr-2 mb-0.5 text-amber-500" /> Libro, Folio y Acta se asignarán al asentar oficialmente.</p>
                                     </div>
@@ -296,36 +290,20 @@ const ConfirmationNewPage = () => {
                                             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">AÑOS</span>
                                         </div>
                                     </div>
-                                    <div>
-                                        <label className={labelClass}>Lugar de Nacimiento</label>
-                                        <CityAutocomplete name="lugarNacimiento" value={formData.lugarNacimiento} onChange={handleCityChange} cities={ciudades} className={inputClass} />
-                                    </div>
+                                    <div><label className={labelClass}>Dirección</label><input type="text" name="direccion" value={formData.direccion} onChange={handleChange} className={inputClass} /></div>
                                 </div>
                             </section>
 
                             <section>
                                 <SectionHeader number="04" title="Filiación e Identidad" icon={Users} />
-                                <div className="mb-6">
-                                    <label className={labelClass}>Tipo de Unión de Padres</label>
-                                    <select name="tipoUnionPadres" value={formData.tipoUnionPadres} onChange={handleChange} className="w-full md:w-1/2 px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl font-black text-gray-600 uppercase outline-none shadow-sm focus:bg-white transition-all">
-                                        <option value="">SELECCIONE...</option>
-                                        <option value="MATRIMONIO CATÓLICO">MATRIMONIO CATÓLICO</option>
-                                        <option value="MATRIMONIO CIVIL">MATRIMONIO CIVIL</option>
-                                        <option value="UNIÓN LIBRE">UNIÓN LIBRE</option>
-                                        <option value="MADRE SOLTERA">MADRE SOLTERA</option>
-                                        <option value="PADRE SOLTERO">PADRE SOLTERO</option>
-                                    </select>
-                                </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                     <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-5">
-                                        <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Datos del Padre</p>
+                                        <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Padre</p>
                                         <div><label className={labelClass}>Nombre del Padre</label><input type="text" name="nombrePadre" value={formData.nombrePadre} onChange={handleChange} className={inputClass} /></div>
-                                        <div><label className={labelClass}>Cédula Padre</label><input type="text" name="cedulaPadre" value={formData.cedulaPadre} onChange={handleChange} className={inputClass} /></div>
                                     </div>
                                     <div className="bg-pink-50/30 p-8 rounded-[2rem] border border-pink-100/50 space-y-5">
-                                        <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Datos de la Madre</p>
+                                        <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Madre</p>
                                         <div><label className={labelClass}>Nombre de la Madre</label><input type="text" name="nombreMadre" value={formData.nombreMadre} onChange={handleChange} className={inputClass} /></div>
-                                        <div><label className={labelClass}>Cédula Madre</label><input type="text" name="cedulaMadre" value={formData.cedulaMadre} onChange={handleChange} className={inputClass} /></div>
                                     </div>
                                 </div>
                             </section>
@@ -333,13 +311,16 @@ const ConfirmationNewPage = () => {
                             <section>
                                 <SectionHeader number="05" title="Registro de Bautismo Origen" icon={Droplet} />
                                 <div className="space-y-6">
-                                    <div>
-                                        <label className={labelClass}>Lugar y Parroquia de Bautismo</label>
-                                        <ChurchLocationAutocomplete 
-                                            value={formData.lugarBautismo} 
-                                            onChange={(val) => setFormData(prev => ({...prev, lugarBautismo: val}))}
-                                            placeholder="Buscar iglesia y ciudad..."
-                                        />
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <label className={labelClass}>Lugar y Parroquia de Bautismo</label>
+                                            <ChurchLocationAutocomplete 
+                                                value={formData.lugarBautismo} 
+                                                onChange={(val) => setFormData(prev => ({...prev, lugarBautismo: val}))}
+                                                placeholder="Buscar iglesia y ciudad..."
+                                            />
+                                        </div>
+                                        <div><label className={labelClass}>Código de Bautizo</label><input type="text" name="codigoBautizo" value={formData.codigoBautizo} onChange={handleChange} className={inputClass} placeholder="Ej. 000000" /></div>
                                     </div>
                                     <div className="grid grid-cols-3 gap-6 bg-slate-50 p-6 rounded-3xl border border-slate-100">
                                         <div><label className={labelClass}>Libro Baut.</label><input name="libroBautismo" value={formData.libroBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
@@ -355,7 +336,10 @@ const ConfirmationNewPage = () => {
                                     <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input type="text" name="ministro" required value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} placeholder="EXCMO. MONS..." /></div>
                                     <div><label className={labelClass}>Párroco que Da Fe</label><input type="text" name="daFe" required value={formData.daFe} onChange={handleChange} className={inputClass} list="lista-parrocos" /></div>
                                 </div>
-                                <div><label className={labelClass}>Padrinos</label><input type="text" name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                    <div><label className={labelClass}>Padrino / Madrina</label><input type="text" name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
+                                    <div><label className={labelClass}>Responsable</label><input type="text" name="responsable" value={formData.responsable} onChange={handleChange} className={`${inputClass} py-5`} placeholder="QUIEN SOLICITA / ACUDIENTE" /></div>
+                                </div>
                             </section>
 
                             <section>
