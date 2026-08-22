@@ -208,7 +208,6 @@ const ConfirmationNewPage = () => {
 
     const labelClass = "block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1";
     const inputClass = "h-11 w-full px-4 py-2 text-sm text-gray-900 font-bold border border-gray-200 rounded-xl focus:ring-4 focus:ring-red-600/10 focus:border-red-600 outline-none transition-all bg-gray-50/50 focus:bg-white uppercase shadow-sm";
-    const sectionHeaderClass = "text-[11px] font-black text-red-600 uppercase tracking-[0.2em] border-b border-gray-100 pb-3 mb-6 flex items-center gap-2 mt-10 first:mt-2";
 
     const SectionHeader = ({ icon: Icon, title, number }) => (
         <div className="flex items-center gap-3 mb-8 pb-3 border-b border-gray-100 mt-10 first:mt-2">
@@ -343,7 +342,7 @@ const ConfirmationNewPage = () => {
                             </section>
 
                             <section>
-                                <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 07. Observaciones</h3>
+                                <SectionHeader number="07" title="Observaciones" icon={BookOpen} />
                                 <div>
                                     <label className={labelClass}>Nota Marginal / Observaciones</label>
                                     <textarea name="notaMarginal" value={formData.notaMarginal} onChange={handleChange} className={`${inputClass} h-24 resize-none font-mono text-xs`} />
