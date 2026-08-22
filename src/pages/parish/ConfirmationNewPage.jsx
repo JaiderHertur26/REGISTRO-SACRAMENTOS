@@ -60,6 +60,7 @@ const ConfirmationNewPage = () => {
             setListaSacerdotes(listaParrocos); 
             setParrocosSugeridos(listaParrocos.map(p => `${p.nombre} ${p.apellido || ''}`.trim().toUpperCase()));
 
+            // 🚀 Auto-asignar el Párroco Actual a "Da Fe" al cargar
             const parrocoActual = listaParrocos.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
             if (parrocoActual) {
                 const nombreCompletoActual = `${parrocoActual.nombre} ${parrocoActual.apellido || ''}`.trim().toUpperCase();
@@ -78,6 +79,7 @@ const ConfirmationNewPage = () => {
         loadInitialData();
     }, [parishId, nombreParroquia, getMisDatosList, getParrocos, getConfirmationParameters]);
 
+    // 🚀 INTELIGENCIA 1: Máquina del tiempo para el Párroco que Da Fe
     useEffect(() => {
         if (!formData.fechaSacramento || listaSacerdotes.length === 0) return;
 
@@ -96,6 +98,7 @@ const ConfirmationNewPage = () => {
         }
     }, [formData.fechaSacramento, listaSacerdotes]);
 
+    // 🚀 INTELIGENCIA 2: Cálculo Dinámico de Edad (Blindado contra zonas horarias)
     useEffect(() => {
         if (formData.fechaNacimiento && formData.fechaSacramento) {
             const birthStr = formData.fechaNacimiento.includes('T') ? formData.fechaNacimiento : `${formData.fechaNacimiento}T12:00:00`;
@@ -117,11 +120,13 @@ const ConfirmationNewPage = () => {
         }
     }, [formData.fechaNacimiento, formData.fechaSacramento]);
 
+    // 🚀 INTELIGENCIA 3: Asignación en cascada del "Responsable"
     useEffect(() => {
         setFormData(prev => {
             const possibleResponsables = [prev.nombrePadre, prev.nombreMadre, prev.padrinos].filter(v => v && v.trim() !== '');
             const topPriority = possibleResponsables[0] || '';
             
+            // Solo lo actualizamos automáticamente si la casilla está vacía o si contiene alguno de los valores jerárquicos anteriores
             if (!prev.responsable || possibleResponsables.includes(prev.responsable)) {
                  if (prev.responsable !== topPriority) {
                      return { ...prev, responsable: topPriority };
@@ -376,7 +381,7 @@ const ConfirmationNewPage = () => {
                             </section>
 
                             <section>
-                                <h3 className={sectionHeaderClass}><div className="w-2 h-2 bg-[#D4AF37] rounded-full" /> 07. Observaciones</h3>
+                                <SectionHeader number="07" title="Observaciones" icon={BookOpen} />
                                 <div>
                                     <label className={labelClass}>Nota Marginal / Observaciones</label>
                                     <textarea name="notaMarginal" value={formData.notaMarginal} onChange={handleChange} className={`${inputClass} h-24 resize-none font-mono text-xs`} />
