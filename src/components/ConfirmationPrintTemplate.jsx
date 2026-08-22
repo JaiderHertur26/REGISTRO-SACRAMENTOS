@@ -58,10 +58,6 @@ const ConfirmationPrintTemplate = forwardRef(({ data, parroquiaInfo, incluirNota
 
     // --- BAUTISMO DE ORIGEN ---
     const lugarBautismo = formatData(raw.lugarBautismo || raw.baptismPlace);
-    let datosBautismo = '';
-    if (raw.libroBautismo || raw.folioBautismo || raw.numeroBautismo) {
-        datosBautismo = `LIBRO: ${raw.libroBautismo || '---'}   FOLIO: ${raw.folioBautismo || '---'}   NÚMERO: ${raw.numeroBautismo || '---'}`;
-    }
     
     // 🧠 Limpieza de Títulos Redundantes
     const cleanTitle = (nameStr) => {
@@ -138,6 +134,8 @@ const ConfirmationPrintTemplate = forwardRef(({ data, parroquiaInfo, incluirNota
     const telefono = formatData(header.telefono || '');
     const email = header.email ? header.email.toLowerCase().trim() : '';
 
+    const getText = (v) => (!v || v === '---') ? '---' : v.toUpperCase();
+
     const LinedRow = ({ label, value }) => (
         <div style={{ display: 'flex', borderBottom: '1.5px solid #000', minHeight: '30px', boxSizing: 'border-box' }}>
             <div style={{ padding: '4px 10px', fontWeight: 'bold', fontSize: '11px', whiteSpace: 'nowrap', borderRight: '1.5px solid #000', width: '180px', display: 'flex', alignItems: 'center', backgroundColor: '#fbfbfb' }}>
@@ -192,18 +190,17 @@ const ConfirmationPrintTemplate = forwardRef(({ data, parroquiaInfo, incluirNota
                     </div>
                 </div>
 
-                <LinedRow label="CONFIRMADO(A):" value={nombresYApellidos} />
-                <LinedRow label="FECHA CONFIRMACIÓN:" value={fechaConfirmacion} />
-                <LinedRow label="LUGAR CONFIRMACIÓN:" value={lugarConfirmacion} />
-                <LinedRow label="FECHA NACIMIENTO:" value={fechaNacimiento} />
-                {lugarNacimiento && <LinedRow label="LUGAR NACIMIENTO:" value={lugarNacimiento} />}
-                <LinedRow label="PADRE:" value={padre} />
-                <LinedRow label="MADRE:" value={madre} />
-                <LinedRow label="BAUTIZADO(A) EN:" value={lugarBautismo} />
-                {datosBautismo && <LinedRow label="DATOS BAUTISMO:" value={datosBautismo} />}
-                <LinedRow label="PADRINO O MADRINA:" value={padrinos} />
-                <LinedRow label="MINISTRO:" value={ministro} />
-                <LinedRow label="DOY FE:" value={daFe} />
+                <LinedRow label="CONFIRMADO(A):" value={getText(nombresYApellidos)} />
+                <LinedRow label="FECHA CONFIRMACIÓN:" value={formatDateText(fechaConfirmacion)} />
+                <LinedRow label="LUGAR CONFIRMACIÓN:" value={getText(lugarConfirmacion)} />
+                <LinedRow label="FECHA NACIMIENTO:" value={formatDateText(fechaNacimiento)} />
+                {lugarNacimiento && <LinedRow label="LUGAR NACIMIENTO:" value={getText(lugarNacimiento)} />}
+                <LinedRow label="PADRE:" value={getText(padre)} />
+                <LinedRow label="MADRE:" value={getText(madre)} />
+                <LinedRow label="BAUTIZADO(A) EN:" value={getText(lugarBautismo)} />
+                <LinedRow label="PADRINO O MADRINA:" value={getText(padrinos)} />
+                <LinedRow label="MINISTRO:" value={getText(ministro)} />
+                <LinedRow label="DOY FE:" value={getText(daFe)} />
 
                 {/* ANOTACIONES MARGINALES */}
                 <div style={{ padding: '8px 12px', minHeight: '60px', backgroundColor: '#fff' }}>
