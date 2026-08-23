@@ -27,14 +27,13 @@ const BaptismJsonImporter = () => {
     const [isProcessing, setIsProcessing] = useState(false);
     const [importComplete, setImportComplete] = useState(false);
     const [validationResult, setValidationResult] = useState(null);
-    const [fileType, setFileType] = useState(null); // 🚀 ESTADO PARA GUARDAR EL TIPO DE ARCHIVO ('BAUTIZOS' o 'INSBAUTI')
+    const [fileType, setFileType] = useState(null); // 🚀 GUARDA SI ES 'BAUTIZOS' o 'INSBAUTI'
     
     const [parrocoActual, setParrocoActual] = useState('');
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
 
     const parishId = user?.parish_id || user?.parishId;
 
-    // --- 1. CARGAR HISTORIAL DE PÁRROCOS ---
     useEffect(() => {
         if (parishId) {
             const parrocos = getParrocos(parishId) || [];
@@ -49,7 +48,6 @@ const BaptismJsonImporter = () => {
         }
     }, [parishId, getParrocos]);
 
-    // --- 2. MÁQUINA DEL TIEMPO: BUSCADOR HISTÓRICO EXACTO ---
     const getHistoricalPriest = (dateString) => {
         if (!dateString || listaSacerdotes.length === 0) return null;
         
@@ -69,23 +67,22 @@ const BaptismJsonImporter = () => {
         return null;
     };
 
-    // --- 3. PROCESAMIENTO Y LECTURA DEL ARCHIVO ---
     const handleFileChange = async (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
 
-        // 🚀 FILTRO ESTRICTO DE NOMBRE DE ARCHIVO
+        // 🚀 1. IDENTIFICADOR DEL ARCHIVO
         const fileName = selectedFile.name.toUpperCase();
         let detectedType = null;
         
-        if (fileName === 'BAUTIZOS.JSON') {
+        if (fileName.includes('BAUTIZOS')) {
             detectedType = 'BAUTIZOS';
-        } else if (fileName === 'INSBAUTI.JSON') {
+        } else if (fileName.includes('INSBAUTI')) {
             detectedType = 'INSBAUTI';
         } else {
             toast({ 
                 title: "Archivo No Permitido", 
-                description: `El archivo "${selectedFile.name}" no es válido. Solo se admiten BAUTIZOS.json o INSBAUTI.json`, 
+                description: `El archivo "${selectedFile.name}" no es válido. Renómbralo a BAUTIZOS.json o INSBAUTI.json`, 
                 variant: "destructive" 
             });
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -108,7 +105,7 @@ const BaptismJsonImporter = () => {
 
                 let existingKeys = new Set();
                 
-                // Solo verificamos la base de datos oficial si es el archivo de BAUTIZOS
+                // 🚀 Solo traemos la BD Oficial si estamos subiendo BAUTIZOS (evitamos saturar la app)
                 if (detectedType === 'BAUTIZOS') {
                     const { data: existingData, error: dbError } = await supabase
                         .from('baptisms')
@@ -131,6 +128,10 @@ const BaptismJsonImporter = () => {
                 rawData.forEach((item, index) => {
                     const rowNum = index + 1;
                     
+                    // Verificamos si dice true. Si no existe, es false.
+                    const isReportado = item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE';
+                    const destinoStr = detectedType === 'BAUTIZOS' ? 'oficial' : (isReportado ? 'boleta' : 'cola');
+
                     const mappedItem = {
                         numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
                         fechaInscripcion: item["FECHA DE INSCRIPCION"] || item.fechaInscripcion || '',
@@ -160,8 +161,7 @@ const BaptismJsonImporter = () => {
                         nuip: item["NUIP"] || item.nuip || '',
                         oficinaRegistro: item["NOTARIA"] || item.oficinaRegistro || '',
                         fechaExpedicionRegistro: item["FECHA DE REGISTRO"] || item.fechaExpedicionRegistro || '',
-                        notaMarginal: item["NOTAS MARGINALES"] || item.notaMarginal || '',
-                        reportado: item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE'
+                        notaMarginal: item["NOTAS MARGINALES"] || item.notaMarginal || ''
                     };
 
                     const sacerdoteEpoca = getHistoricalPriest(mappedItem.fechaSacramento);
@@ -185,30 +185,32 @@ const BaptismJsonImporter = () => {
                     }
 
                     const cleanItem = purificarRegistroBautismo(mappedItem);
+                    
+                    // 🚀 SOLUCIÓN AL BUG: Restaurar los valores que el purificador eliminó
+                    cleanItem.reportado = isReportado;
+                    cleanItem.destino = destinoStr;
+                    cleanItem.rawOriginal = item; // Guardamos el JSON rico e intacto
+
                     const keyBautizos = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
                     const keyInsbauti = cleanItem.numeroRegistro || `${cleanItem.nombres}-${cleanItem.apellidos}`;
                     const nombreBautizado = `${cleanItem.nombres} ${cleanItem.apellidos}`.trim();
 
                     if (!cleanItem.nombres || !cleanItem.apellidos) {
-                        errors.push(`Fila ${rowNum}: Faltan datos críticos (Nombres o Apellidos).`);
+                        errors.push(`Fila ${rowNum}: Faltan Nombres o Apellidos críticos.`);
                     } else if (detectedType === 'BAUTIZOS') {
-                        // 🚀 VALIDACIÓN PARA BAUTIZOS.JSON (Libros Físicos Antiguos)
+                        // REGLAS BAUTIZOS (Libro Oficial)
                         if (cleanItem.Libro === '0000' || !cleanItem.Libro || cleanItem.Libro === '---') {
-                            errors.push(`Fila ${rowNum}: Faltan datos críticos (Libro).`);
-                        } else if (existingKeys.has(keyBautizos)) {
+                            errors.push(`Fila ${rowNum}: Faltan datos críticos (Libro/Folio).`);
+                        } else if (existingKeys.has(keyBautizos) || internalKeys.has(keyBautizos)) {
                             warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe).`);
-                        } else if (internalKeys.has(keyBautizos)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Acta duplicada dentro del archivo).`);
                         } else {
                             processed.push(cleanItem);
                             internalKeys.add(keyBautizos);
                             validCount++;
                         }
                     } else if (detectedType === 'INSBAUTI') {
-                        // 🚀 VALIDACIÓN PARA INSBAUTI.JSON (Inscripciones del Despacho)
-                        if (cleanItem.reportado && (!cleanItem.Libro || cleanItem.Libro === '0000' || cleanItem.Libro === '---')) {
-                            errors.push(`Fila ${rowNum}: El acta de "${nombreBautizado}" viene REPORTADA pero carece de Libro/Folio válido.`);
-                        } else if (internalKeys.has(keyInsbauti)) {
+                        // REGLAS INSBAUTI (Inscripciones de Despacho)
+                        if (internalKeys.has(keyInsbauti)) {
                             warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Inscripción duplicada dentro del archivo).`);
                         } else {
                             processed.push(cleanItem);
@@ -231,7 +233,7 @@ const BaptismJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
-    // --- 4. INYECCIÓN SEPARADA DEPENDIENDO DEL TIPO DE ARCHIVO ---
+    // --- 4. INYECCIÓN BIFURCADA SEGÚN EL ARCHIVO ---
     const handleImport = async () => {
         if (!validationResult || validationResult.dataToImport.length === 0) return;
         setIsProcessing(true);
@@ -242,7 +244,7 @@ const BaptismJsonImporter = () => {
             const batchSize = 200;
 
             if (fileType === 'BAUTIZOS') {
-                // 🚀 RUTA 1: BAUTIZOS.JSON -> Va directo a la tabla oficial 'baptisms'
+                // 🚀 ARCHIVO: BAUTIZOS.json -> VA A LA TABLA OFICIAL PERMANENTE
                 const dbRecords = validationResult.dataToImport.map(item => ({
                     id: generateUUID(),
                     parish_id: parishId,
@@ -275,7 +277,7 @@ const BaptismJsonImporter = () => {
                     da_fe: item.daFe || null,
                     direccion: item.direccion || null,
                     nota_marginal: item.notaMarginal || null,
-                    raw_data: item, 
+                    raw_data: item.rawOriginal, 
                     created_at: new Date().toISOString()
                 }));
 
@@ -292,15 +294,14 @@ const BaptismJsonImporter = () => {
                 });
 
             } else if (fileType === 'INSBAUTI') {
-                // 🚀 RUTA 2: INSBAUTI.JSON -> Va directo a la tabla de cola 'pending_baptisms'
+                // 🚀 ARCHIVO: INSBAUTI.json -> VA A LA TABLA DE ESPERA (Boletas o Cola)
                 const pendingRecords = validationResult.dataToImport.map(item => ({
                     id: generateUUID(),
                     parish_id: parishId,
-                    raw_data: item,
-                    // Si reportado es True -> status 'seated' (pestaña Boletas). Si False -> status 'pending' (pestaña Cola)
-                    status: item.reportado ? 'seated' : 'pending',
+                    raw_data: item.rawOriginal, // Guardamos el JSON intacto
+                    status: item.destino === 'boleta' ? 'seated' : 'pending', // seated = Boletas Emitidas, pending = Cola
                     reportado: item.reportado, 
-                    created_at: item.fechaInscripcion ? new Date(item.fechaInscripcion).toISOString() : new Date().toISOString()
+                    created_at: item.rawOriginal["FECHA DE INSCRIPCION"] ? new Date(item.rawOriginal["FECHA DE INSCRIPCION"]).toISOString() : new Date().toISOString()
                 }));
 
                 for (let i = 0; i < pendingRecords.length; i += batchSize) {
@@ -313,8 +314,8 @@ const BaptismJsonImporter = () => {
                 const totalQueue = pendingRecords.length - totalReported;
 
                 toast({ 
-                    title: "¡Importación de Inscripciones Exitosa!", 
-                    description: `${totalReported} a Boletas Emitidas y ${totalQueue} a la Cola de Espera.`, 
+                    title: "¡Inscripciones Procesadas!", 
+                    description: `${totalReported} generarán Boletas y ${totalQueue} fueron a la Cola.`, 
                     className: "bg-green-50 border-green-200 text-green-900" 
                 });
             }
@@ -334,26 +335,29 @@ const BaptismJsonImporter = () => {
         setImportComplete(false);
     };
 
+    // Ajuste dinámico de columnas para que sepas qué está pasando visualmente
     const getColumnsByType = () => {
         if (fileType === 'BAUTIZOS') {
             return [
-                { header: 'Ubicación (L:F:N)', render: r => <span className="font-mono text-[#4B7BA7] font-black">{r.Libro}:{r.folio}:{r.numero}</span> },
+                { header: 'Destino', render: () => <span className="bg-emerald-100 text-emerald-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><Database className="w-3 h-3"/>Libro Oficial</span> },
                 { header: 'Bautizado', render: r => <span className="font-bold uppercase text-slate-800">{r.apellidos} {r.nombres}</span> },
-                { header: 'Párroco Da Fe', render: r => <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 px-2 py-1 rounded">{r.daFe}</span> },
-                { header: 'Ministro', render: r => <span className="text-[10px] font-bold text-gray-500 uppercase">{r.ministro || '---'}</span> }
+                { header: 'Ubicación (L:F:N)', render: r => <span className="font-mono text-[#4B7BA7] font-black">{r.Libro}:{r.folio}:{r.numero}</span> }
             ];
         } else {
             return [
-                { header: 'Destino', render: r => r.reportado ? <span className="bg-green-100 text-green-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><FileText className="w-3 h-3"/>Boleta Emitida</span> : <span className="bg-amber-100 text-amber-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><LayoutList className="w-3 h-3"/>A la Cola</span> },
-                { header: 'Bautizando', render: r => <span className="font-bold uppercase text-slate-800">{r.apellidos} {r.nombres}</span> },
-                { header: 'Nº Registro', render: r => <span className="font-mono text-[#4B7BA7] font-black">#{r.numeroRegistro || 'S/N'}</span> },
-                { header: 'Fecha', render: r => <span className="text-[10px] font-bold text-gray-500 uppercase">{r.fechaSacramento || '---'}</span> }
+                { header: 'Destino', render: r => r.destino === 'boleta' ? <span className="bg-blue-100 text-blue-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><FileText className="w-3 h-3"/>Boleta Emitida</span> : <span className="bg-amber-100 text-amber-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><LayoutList className="w-3 h-3"/>A la Cola</span> },
+                { header: 'Bautizado', render: r => <span className="font-bold uppercase text-slate-800">{r.apellidos} {r.nombres}</span> },
+                { header: 'Nº Registro', render: r => <span className="font-mono text-[#4B7BA7] font-black">#{r.numeroRegistro || 'S/N'}</span> }
             ];
         }
     };
 
     const hasErrors = validationResult?.errors?.length > 0;
     const canConfirm = validationResult && validationResult.count > 0 && !hasErrors && !isProcessing && !importComplete;
+
+    const totalOficial = validationResult ? validationResult.dataToImport.filter(i => i.destino === 'oficial').length : 0;
+    const totalBoletas = validationResult ? validationResult.dataToImport.filter(i => i.destino === 'boleta').length : 0;
+    const totalCola = validationResult ? validationResult.dataToImport.filter(i => i.destino === 'cola').length : 0;
 
     return (
         <div className="bg-white border border-gray-100 rounded-[2.5rem] p-8 md:p-12 shadow-sm relative overflow-hidden">
@@ -396,7 +400,7 @@ const BaptismJsonImporter = () => {
                             <div>
                                 <h3 className="font-black text-gray-900 uppercase text-sm tracking-widest">Motor de Inyección</h3>
                                 <p className="text-[10px] text-gray-500 font-bold uppercase">
-                                    {fileType === 'BAUTIZOS' ? 'Inyección Directa a Libros Físicos' : fileType === 'INSBAUTI' ? 'Enrutador de Inscripciones de Despacho' : 'Esperando Archivo...'}
+                                    {fileType === 'BAUTIZOS' ? 'Inyección Directa a Libros Físicos' : fileType === 'INSBAUTI' ? 'Enrutador de Inscripciones de Despacho' : 'Sincronización Inteligente'}
                                 </p>
                             </div>
                         </div>
@@ -410,7 +414,7 @@ const BaptismJsonImporter = () => {
                     {!validationResult && !isProcessing && (
                         <div className="py-12 text-center bg-slate-50/50 rounded-[2rem] border border-slate-100">
                             <Info className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-                            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Sube tu archivo para iniciar la auditoría y enrutamiento.</p>
+                            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">El sistema detectará el tipo de archivo por su nombre y lo enrutará.</p>
                         </div>
                     )}
 
@@ -420,14 +424,14 @@ const BaptismJsonImporter = () => {
                             {/* ESTADÍSTICAS DINÁMICAS SEGÚN EL ARCHIVO */}
                             {fileType === 'BAUTIZOS' ? (
                                 <div className="grid grid-cols-3 gap-4">
-                                    <StatCard label="Para Libro Oficial" val={validationResult.count} color="green" />
+                                    <StatCard label="Libro Oficial" val={totalOficial} color="emerald" />
                                     <StatCard label="Errores" val={validationResult.errors.length} color="red" />
                                     <StatCard label="Omitidos" val={validationResult.warnings.length} color="amber" />
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    <StatCard label="Boletas Listas" val={validationResult.dataToImport.filter(i => i.reportado).length} color="green" />
-                                    <StatCard label="A La Cola" val={validationResult.dataToImport.filter(i => !i.reportado).length} color="blue" />
+                                    <StatCard label="Boletas Listas" val={totalBoletas} color="blue" />
+                                    <StatCard label="A La Cola" val={totalCola} color="amber" />
                                     <StatCard label="Errores" val={validationResult.errors.length} color="red" />
                                     <StatCard label="Omitidos" val={validationResult.warnings.length} color="amber" />
                                 </div>
@@ -451,7 +455,7 @@ const BaptismJsonImporter = () => {
                                     className="w-full py-8 bg-gradient-to-r from-[#4B7BA7] to-[#3A6286] hover:shadow-xl text-white rounded-2xl font-black uppercase text-[11px] tracking-[0.2em] transition-all transform active:scale-95 disabled:opacity-50"
                                 >
                                     {isProcessing ? <Loader2 className="w-5 h-5 mr-3 animate-spin" /> : <Database className="w-5 h-5 mr-3" />}
-                                    {isProcessing ? 'Inyectando a la Nube...' : importComplete ? 'Importación Finalizada' : `Inyectar ${validationResult.count} Registros`}
+                                    {isProcessing ? 'Inyectando a la Nube...' : importComplete ? 'Importación Finalizada' : `Procesar e Inyectar ${validationResult.count} Registros`}
                                 </Button>
                             )}
                         </div>
@@ -477,7 +481,7 @@ const BaptismJsonImporter = () => {
 
 const StatCard = ({ label, val, color }) => {
     const colors = {
-        green: "bg-green-50 border-green-100 text-green-700",
+        emerald: "bg-emerald-50 border-emerald-100 text-emerald-700",
         blue: "bg-blue-50 border-blue-100 text-[#4B7BA7]",
         red: "bg-red-50 border-red-100 text-red-700",
         amber: "bg-amber-50 border-amber-100 text-amber-700"
