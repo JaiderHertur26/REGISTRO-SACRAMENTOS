@@ -1,25 +1,25 @@
 import React from 'react';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, Scissors } from 'lucide-react';
 
 const BaptismTicket = ({ baptismData, parishInfo }) => {
     if (!baptismData) return null;
 
-    // --- 1. RESOLUCIÓN DE DATOS INSTITUCIONALES ---
+    // --- 1. RESOLUCIÓN DE DATOS INSTITUCIONALES Y NULLS ---
     const formatData = (val) => {
-        if (!val || val === '---' || String(val).trim() === '') return '';
+        // 🚀 Si el dato viene vacío o nulo desde el JSON, devuelve "NO REGISTRA"
+        if (!val || val === '---' || String(val).trim() === '') return 'NO REGISTRA';
         return String(val).trim().toUpperCase();
     };
 
     const header = parishInfo || {};
-    const diocesis = formatData(header.diocesis || 'ARQUIDIÓCESIS DE BARRANQUILLA');
-    const nombreP = formatData(header.nombre || 'PARROQUIA');
-    const direccion = formatData(header.direccion || '');
-    const telefono = formatData(header.telefono || '');
-    const ciudad = formatData(header.ciudad || 'BARRANQUILLA');
-    const region = formatData(header.region || 'ATLÁNTICO');
+    const diocesis = header.diocesis ? String(header.diocesis).toUpperCase() : 'ARQUIDIÓCESIS DE BARRANQUILLA';
+    const nombreP = header.nombre ? String(header.nombre).toUpperCase() : 'PARROQUIA';
+    const direccion = header.direccion ? String(header.direccion).toUpperCase() : '';
+    const telefono = header.telefono ? String(header.telefono).toUpperCase() : '';
+    const ciudad = header.ciudad ? String(header.ciudad).toUpperCase() : 'BARRANQUILLA';
+    const region = header.region ? String(header.region).toUpperCase() : 'ATLÁNTICO';
 
     let ubicacionFinal = ciudad;
-    // Normalizamos para evitar duplicar si la ciudad ya incluye el departamento
     const ciudadNorm = ciudad.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
     const regionNorm = region.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
 
@@ -34,9 +34,9 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
         .filter(Boolean)
         .join(' — ');
 
-    // --- 2. FORMATEADORES DE FECHA ---
+    // --- 2. FORMATEADORES DE FECHA CON MANEJO DE VACÍOS ---
     const formatDate = (dateString) => {
-        if (!dateString) return '';
+        if (!dateString || dateString === '---') return 'NO REGISTRA';
         try {
             const date = new Date(dateString);
             if (isNaN(date.getTime())) return String(dateString).toUpperCase();
@@ -52,10 +52,10 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
     };
 
     const formatTime = (dateString) => {
-        if (!dateString) return '';
+        if (!dateString || dateString === '---') return 'NO REGISTRA';
         try {
             const date = new Date(dateString);
-            if (isNaN(date.getTime())) return '';
+            if (isNaN(date.getTime())) return 'NO REGISTRA';
             let timeStr = date.toLocaleTimeString('es-CO', {
                 hour: '2-digit',
                 minute: '2-digit',
@@ -63,13 +63,20 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
             }).toUpperCase();
             timeStr = timeStr.replace('A.M.', 'A. M.').replace('P.M.', 'P. M.');
             return timeStr;
-        } catch (e) { return ''; }
+        } catch (e) { return 'NO REGISTRA'; }
     };
 
     // --- 3. MAPEO DE DATOS DEL BAUTIZO ---
-    const nroReg = formatData(baptismData.numeroRegistro || baptismData.registration_number || '');
-    const bautizando = `${formatData(baptismData.nombres || baptismData.firstName)} ${formatData(baptismData.apellidos || baptismData.lastName)}`.trim();
-    const sexoReal = formatData(baptismData.sexo) || '';
+    const nroReg = formatData(baptismData.numeroRegistro || baptismData.registration_number);
+    
+    // Armado seguro del nombre para evitar que diga "NO REGISTRA NO REGISTRA"
+    const nom = formatData(baptismData.nombres || baptismData.firstName);
+    const ape = formatData(baptismData.apellidos || baptismData.lastName);
+    const bautizando = (nom === 'NO REGISTRA' && ape === 'NO REGISTRA') 
+        ? 'NO REGISTRA' 
+        : `${nom !== 'NO REGISTRA' ? nom : ''} ${ape !== 'NO REGISTRA' ? ape : ''}`.trim();
+
+    const sexoReal = formatData(baptismData.sexo);
     const identificacion = formatData(baptismData.nuip || baptismData.identification || baptismData.serialRegistro);
     const dirResidencia = formatData(baptismData.direccion || baptismData.address);
     const tipoUnion = formatData(baptismData.tipoUnionPadres || baptismData.parentalUnion);
@@ -82,35 +89,45 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
     
     // 🚀 LÓGICA EN CASCADA PARA LA FIRMA DEL RESPONSABLE
     const getResponsable = () => {
-        if (nombrePadre) return nombrePadre;
-        if (nombreMadre) return nombreMadre;
-        if (abuelosPaternos) return abuelosPaternos;
-        if (abuelosMaternos) return abuelosMaternos;
-        if (padrinos) return padrinos;
-        return '';
+        if (baptismData.responsable && String(baptismData.responsable).trim() !== '') return String(baptismData.responsable).toUpperCase();
+        if (nombrePadre !== 'NO REGISTRA') return nombrePadre;
+        if (nombreMadre !== 'NO REGISTRA') return nombreMadre;
+        if (abuelosPaternos !== 'NO REGISTRA') return abuelosPaternos;
+        if (abuelosMaternos !== 'NO REGISTRA') return abuelosMaternos;
+        if (padrinos !== 'NO REGISTRA') return padrinos;
+        return 'NO REGISTRA';
     };
     const nombreResponsable = getResponsable();
 
     // --- 4. COMPONENTES ESTRUCTURALES ---
-    const FieldLine = ({ label, value, width = "100%" }) => (
-        <div style={{ display: 'flex', alignItems: 'flex-end', width: width, marginBottom: '6px' }}>
-            <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '6px', whiteSpace: 'nowrap' }}>
-                {label}:
-            </span>
-            <span style={{ 
-                flex: 1, 
-                borderBottom: '1px solid black', 
-                fontSize: '12px', 
-                lineHeight: '1.2', 
-                paddingBottom: '1px',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis'
-            }}>
-                {value}
-            </span>
-        </div>
-    );
+    const FieldLine = ({ label, value, width = "100%" }) => {
+        const valStr = value || 'NO REGISTRA';
+        
+        // 🚀 AJUSTE DINÁMICO DE FUENTE (Evita recortes de texto)
+        const isLong = valStr.length > 28;
+        const isVeryLong = valStr.length > 40;
+
+        return (
+            <div style={{ display: 'flex', alignItems: 'flex-end', width: width, marginBottom: '6px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 'bold', marginRight: '6px', whiteSpace: 'nowrap' }}>
+                    {label}:
+                </span>
+                <span style={{ 
+                    flex: 1, 
+                    borderBottom: '1px solid black', 
+                    fontSize: isVeryLong ? '9px' : (isLong ? '10px' : '12px'), 
+                    letterSpacing: isVeryLong ? '-0.2px' : 'normal',
+                    lineHeight: '1.2', 
+                    paddingBottom: '1px',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                }}>
+                    {valStr}
+                </span>
+            </div>
+        );
+    };
 
     const TicketHalf = ({ isArchive }) => (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0.25in 0.6in', position: 'relative', overflow: 'hidden' }}>
@@ -231,7 +248,11 @@ const BaptismTicket = ({ baptismData, parishInfo }) => {
             <TicketHalf isArchive={true} />
             
             {/* LÍNEA DE CORTE */}
-            <div style={{ width: '100%', borderTop: '1px dashed black' }}></div>
+            <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: '1px dashed black', position: 'relative' }}>
+                <div style={{ position: 'absolute', backgroundColor: 'white', padding: '0 10px', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold', color: '#666' }}>
+                    <Scissors size={12} /> CORTE AQUÍ <Scissors size={12} />
+                </div>
+            </div>
             
             <TicketHalf isArchive={false} />
 
