@@ -12,7 +12,6 @@ import { generateUUID } from '@/utils/supabaseHelpers';
 import Table from '@/components/ui/Table';
 import { cn } from '@/lib/utils';
 
-// 🚀 FUNCIÓN LIMPIADORA DE TÍTULOS
 const cleanTitle = (nameStr) => {
     if (!nameStr) return '';
     return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|SACERDOTE\s*)/i, '').trim();
@@ -186,10 +185,10 @@ const BaptismJsonImporter = () => {
 
                     const cleanItem = purificarRegistroBautismo(mappedItem);
                     
-                    // 🚀 SOLUCIÓN AL BUG: Restaurar los valores que el purificador eliminó
+                    // Restaurar los valores y el JSON crudo original
                     cleanItem.reportado = isReportado;
                     cleanItem.destino = destinoStr;
-                    cleanItem.rawOriginal = item; // Guardamos el JSON rico e intacto
+                    cleanItem.rawOriginal = item;
 
                     const keyBautizos = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
                     const keyInsbauti = cleanItem.numeroRegistro || `${cleanItem.nombres}-${cleanItem.apellidos}`;
@@ -245,41 +244,47 @@ const BaptismJsonImporter = () => {
 
             if (fileType === 'BAUTIZOS') {
                 // 🚀 ARCHIVO: BAUTIZOS.json -> VA A LA TABLA OFICIAL PERMANENTE
-                const dbRecords = validationResult.dataToImport.map(item => ({
-                    id: generateUUID(),
-                    parish_id: parishId,
-                    book_number: item.Libro,
-                    folio: item.folio,
-                    number: item.numero,
-                    numero_registro: item.numeroRegistro || null,
-                    status: 'seated', 
-                    celebration_date: cleanDate(item.fechaSacramento),
-                    hora_sacramento: item.horaSacramento || null,
-                    lugar_bautismo: item.lugarBautismo || null,
-                    apellidos: item.apellidos || null,
-                    nombres: item.nombres || null,
-                    sexo: item.sexo || null,
-                    fecha_nacimiento: cleanDate(item.fechaNacimiento),
-                    lugar_nacimiento: item.lugarNacimiento || null,
-                    nuip: item.nuip || null,
-                    serial_registro: item.serialRegistro || null,
-                    oficina_registro: item.oficinaRegistro || null,
-                    fecha_expedicion_registro: cleanDate(item.fechaExpedicionRegistro),
-                    tipo_union_padres: item.tipoUnionPadres || null,
-                    nombre_padre: item.nombrePadre || null,
-                    cedula_padre: item.cedulaPadre || null,
-                    nombre_madre: item.nombreMadre || null,
-                    cedula_madre: item.cedulaMadre || null,
-                    abuelos_paternos: item.abuelosPaternos || null,
-                    abuelos_maternos: item.abuelosMaternos || null,
-                    padrinos: item.padrinos || null,
-                    ministro: item.ministro || null,
-                    da_fe: item.daFe || null,
-                    direccion: item.direccion || null,
-                    nota_marginal: item.notaMarginal || null,
-                    raw_data: item.rawOriginal, 
-                    created_at: new Date().toISOString()
-                }));
+                const dbRecords = validationResult.dataToImport.map(item => {
+                    // Extraemos las variables internas para que no ensucien la BD
+                    const { rawOriginal, destino, reportado, hasReportadoKey, ...cleanMappedData } = item;
+                    
+                    return {
+                        id: generateUUID(),
+                        parish_id: parishId,
+                        book_number: item.Libro,
+                        folio: item.folio,
+                        number: item.numero,
+                        numero_registro: item.numeroRegistro || null,
+                        status: 'seated', 
+                        celebration_date: cleanDate(item.fechaSacramento),
+                        hora_sacramento: item.horaSacramento || null,
+                        lugar_bautismo: item.lugarBautismo || null,
+                        apellidos: item.apellidos || null,
+                        nombres: item.nombres || null,
+                        sexo: item.sexo || null,
+                        fecha_nacimiento: cleanDate(item.fechaNacimiento),
+                        lugar_nacimiento: item.lugarNacimiento || null,
+                        nuip: item.nuip || null,
+                        serial_registro: item.serialRegistro || null,
+                        oficina_registro: item.oficinaRegistro || null,
+                        fecha_expedicion_registro: cleanDate(item.fechaExpedicionRegistro),
+                        tipo_union_padres: item.tipoUnionPadres || null,
+                        nombre_padre: item.nombrePadre || null,
+                        cedula_padre: item.cedulaPadre || null,
+                        nombre_madre: item.nombreMadre || null,
+                        cedula_madre: item.cedulaMadre || null,
+                        abuelos_paternos: item.abuelosPaternos || null,
+                        abuelos_maternos: item.abuelosMaternos || null,
+                        padrinos: item.padrinos || null,
+                        ministro: item.ministro || null,
+                        da_fe: item.daFe || null,
+                        direccion: item.direccion || null,
+                        nota_marginal: item.notaMarginal || null,
+                        // 🚀 SOLUCIÓN MAGISTRAL: Fusionamos el Excel Original CON las variables limpias en minúscula
+                        raw_data: { ...rawOriginal, ...cleanMappedData }, 
+                        created_at: new Date().toISOString()
+                    };
+                });
 
                 for (let i = 0; i < dbRecords.length; i += batchSize) {
                     const batch = dbRecords.slice(i, i + batchSize);
@@ -295,14 +300,19 @@ const BaptismJsonImporter = () => {
 
             } else if (fileType === 'INSBAUTI') {
                 // 🚀 ARCHIVO: INSBAUTI.json -> VA A LA TABLA DE ESPERA (Boletas o Cola)
-                const pendingRecords = validationResult.dataToImport.map(item => ({
-                    id: generateUUID(),
-                    parish_id: parishId,
-                    raw_data: item.rawOriginal, // Guardamos el JSON intacto
-                    status: item.destino === 'boleta' ? 'seated' : 'pending', // seated = Boletas Emitidas, pending = Cola
-                    reportado: item.reportado, 
-                    created_at: item.rawOriginal["FECHA DE INSCRIPCION"] ? new Date(item.rawOriginal["FECHA DE INSCRIPCION"]).toISOString() : new Date().toISOString()
-                }));
+                const pendingRecords = validationResult.dataToImport.map(item => {
+                    const { rawOriginal, destino, reportado, hasReportadoKey, ...cleanMappedData } = item;
+                    
+                    return {
+                        id: generateUUID(),
+                        parish_id: parishId,
+                        // 🚀 SOLUCIÓN MAGISTRAL: Fusionamos para que el Ticket pueda leer los datos en minúscula
+                        raw_data: { ...rawOriginal, ...cleanMappedData }, 
+                        status: item.destino === 'boleta' ? 'seated' : 'pending',
+                        reportado: item.reportado, 
+                        created_at: item.rawOriginal["FECHA DE INSCRIPCION"] ? new Date(item.rawOriginal["FECHA DE INSCRIPCION"]).toISOString() : new Date().toISOString()
+                    };
+                });
 
                 for (let i = 0; i < pendingRecords.length; i += batchSize) {
                     const batch = pendingRecords.slice(i, i + batchSize);
@@ -335,7 +345,6 @@ const BaptismJsonImporter = () => {
         setImportComplete(false);
     };
 
-    // Ajuste dinámico de columnas para que sepas qué está pasando visualmente
     const getColumnsByType = () => {
         if (fileType === 'BAUTIZOS') {
             return [
