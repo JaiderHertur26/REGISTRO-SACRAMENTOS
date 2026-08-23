@@ -102,6 +102,14 @@ const BaptismJsonImporter = () => {
                 rawData.forEach((item, index) => {
                     const rowNum = index + 1;
                     
+                    const hasReportadoKey = item.hasOwnProperty("REPORTADO");
+                    const isReportado = hasReportadoKey ? (item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE') : false;
+
+                    let destinoStr = 'oficial';
+                    if (hasReportadoKey) {
+                        destinoStr = isReportado ? 'boleta' : 'cola';
+                    }
+                    
                     const mappedItem = {
                         numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
                         fechaInscripcion: item["FECHA DE INSCRIPCION"] || item.fechaInscripcion || '',
@@ -132,8 +140,10 @@ const BaptismJsonImporter = () => {
                         oficinaRegistro: item["NOTARIA"] || item.oficinaRegistro || '',
                         fechaExpedicionRegistro: item["FECHA DE REGISTRO"] || item.fechaExpedicionRegistro || '',
                         notaMarginal: item["NOTAS MARGINALES"] || item.notaMarginal || '',
-                        // 🚀 AQUÍ IDENTIFICAMOS QUIÉN VA A BOLETAS Y QUIÉN VA A LA COLA
-                        reportado: item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE'
+                        // Control Inteligente Trifásico
+                        reportado: isReportado,
+                        hasReportadoKey: hasReportadoKey,
+                        destino: destinoStr
                     };
 
                     const sacerdoteEpoca = getHistoricalPriest(mappedItem.fechaSacramento);
@@ -160,18 +170,44 @@ const BaptismJsonImporter = () => {
                     const key = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
                     const nombreBautizado = `${cleanItem.nombres} ${cleanItem.apellidos}`.trim();
 
+                    // 🚀 INTELIGENCIA DE AUDITORÍA BASADA EN EL DESTINO
                     if (!cleanItem.nombres || !cleanItem.apellidos) {
                         errors.push(`Fila ${rowNum}: Faltan Nombres o Apellidos críticos.`);
-                    } else if (cleanItem.reportado && (!cleanItem.Libro || cleanItem.Libro === '0000' || cleanItem.Libro === '---')) {
-                        errors.push(`Fila ${rowNum}: El acta de "${nombreBautizado}" viene REPORTADA pero carece de un Libro/Folio válido.`);
-                    } else if (cleanItem.reportado && existingKeys.has(key)) {
-                        warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe en el archivo).`);
-                    } else if (cleanItem.reportado && internalKeys.has(key)) {
-                        warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Acta duplicada dentro del archivo).`);
-                    } else {
-                        processed.push(cleanItem);
-                        if (cleanItem.reportado) internalKeys.add(key); 
-                        validCount++;
+                    } else if (cleanItem.destino === 'oficial') {
+                        // REGLAS PARA BAUTIZOS.json (Libro Físico Oficial)
+                        if (existingKeys.has(key)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (El acta L:${cleanItem.Libro} ya existe).`);
+                        } else if (internalKeys.has(key)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Acta duplicada en el archivo).`);
+                        } else {
+                            processed.push(cleanItem);
+                            internalKeys.add(key);
+                            validCount++;
+                        }
+                    } else if (cleanItem.destino === 'boleta') {
+                        // REGLAS PARA REPORTADOS (Van directo a Boleta)
+                        if (!cleanItem.Libro || cleanItem.Libro === '0000' || cleanItem.Libro === '---') {
+                            errors.push(`Fila ${rowNum}: El acta de "${nombreBautizado}" viene REPORTADA pero carece de un Libro/Folio válido.`);
+                        } else {
+                            const pendingKey = `boleta-${cleanItem.numeroRegistro || key}`;
+                            if (internalKeys.has(pendingKey)) {
+                                warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Duplicado en el archivo).`);
+                            } else {
+                                processed.push(cleanItem);
+                                internalKeys.add(pendingKey);
+                                validCount++;
+                            }
+                        }
+                    } else if (cleanItem.destino === 'cola') {
+                        // REGLAS PARA NO REPORTADOS (Van a la cola de espera)
+                        const pendingKey = `cola-${cleanItem.numeroRegistro || key}`;
+                        if (internalKeys.has(pendingKey)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Duplicado en el archivo).`);
+                        } else {
+                            processed.push(cleanItem);
+                            internalKeys.add(pendingKey);
+                            validCount++;
+                        }
                     }
                 });
 
@@ -188,40 +224,89 @@ const BaptismJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
-    // 🚀 LÓGICA CORREGIDA: NINGUNO VA A 'BAPTISMS', TODOS VAN A LA COLA
     const handleImport = async () => {
         if (!validationResult || validationResult.dataToImport.length === 0) return;
         setIsProcessing(true);
 
+        const cleanDate = (d) => (d && String(d).trim() !== '' && String(d).trim() !== '---') ? d : null;
+
         try {
+            const officialRecords = [];
             const pendingRecords = [];
 
             validationResult.dataToImport.forEach(item => {
                 const id = generateUUID();
-                pendingRecords.push({
-                    id,
-                    parish_id: parishId,
-                    raw_data: item,
-                    // Si dice True, status 'seated' (para Boletas). Si dice False, 'pending' (para la cola)
-                    status: item.reportado ? 'seated' : 'pending',
-                    reportado: item.reportado, 
-                    created_at: item.fechaInscripcion ? new Date(item.fechaInscripcion).toISOString() : new Date().toISOString()
-                });
+                
+                if (item.destino === 'oficial') {
+                    officialRecords.push({
+                        id,
+                        parish_id: parishId,
+                        book_number: item.Libro,
+                        folio: item.folio,
+                        number: item.numero,
+                        numero_registro: item.numeroRegistro || null,
+                        status: 'seated', 
+                        celebration_date: cleanDate(item.fechaSacramento),
+                        lugar_bautismo: item.lugarBautismo || null,
+                        apellidos: item.apellidos || null,
+                        nombres: item.nombres || null,
+                        sexo: item.sexo || null,
+                        fecha_nacimiento: cleanDate(item.fechaNacimiento),
+                        lugar_nacimiento: item.lugarNacimiento || null,
+                        nuip: item.nuip || null,
+                        serial_registro: item.serialRegistro || null,
+                        oficina_registro: item.oficinaRegistro || null,
+                        fecha_expedicion_registro: cleanDate(item.fechaExpedicionRegistro),
+                        tipo_union_padres: item.tipoUnionPadres || null,
+                        nombre_padre: item.nombrePadre || null,
+                        cedula_padre: item.cedulaPadre || null,
+                        nombre_madre: item.nombreMadre || null,
+                        cedula_madre: item.cedulaMadre || null,
+                        abuelos_paternos: item.abuelosPaternos || null,
+                        abuelos_maternos: item.abuelosMaternos || null,
+                        padrinos: item.padrinos || null,
+                        ministro: item.ministro || null,
+                        da_fe: item.daFe || null, 
+                        direccion: item.direccion || null,
+                        nota_marginal: item.notaMarginal || null,
+                        raw_data: item, 
+                        created_at: new Date().toISOString()
+                    });
+                } else {
+                    pendingRecords.push({
+                        id,
+                        parish_id: parishId,
+                        raw_data: item,
+                        status: item.destino === 'boleta' ? 'seated' : 'pending',
+                        reportado: item.reportado, 
+                        created_at: item.fechaInscripcion ? new Date(item.fechaInscripcion).toISOString() : new Date().toISOString()
+                    });
+                }
             });
 
             const batchSize = 200;
-            for (let i = 0; i < pendingRecords.length; i += batchSize) {
-                const batch = pendingRecords.slice(i, i + batchSize);
-                const { error } = await supabase.from('pending_baptisms').insert(batch);
-                if (error) throw error;
+            
+            // 🚀 INYECCIÓN 1: Base de Datos Oficial (Archivos Viejos)
+            if (officialRecords.length > 0) {
+                for (let i = 0; i < officialRecords.length; i += batchSize) {
+                    const batch = officialRecords.slice(i, i + batchSize);
+                    const { error } = await supabase.from('baptisms').insert(batch);
+                    if (error) throw error;
+                }
             }
 
-            const totalReported = pendingRecords.filter(r => r.reportado).length;
-            const totalQueue = pendingRecords.length - totalReported;
+            // 🚀 INYECCIÓN 2: Cola de Pendientes y Boletas
+            if (pendingRecords.length > 0) {
+                for (let i = 0; i < pendingRecords.length; i += batchSize) {
+                    const batch = pendingRecords.slice(i, i + batchSize);
+                    const { error } = await supabase.from('pending_baptisms').insert(batch);
+                    if (error) throw error;
+                }
+            }
 
             toast({ 
-                title: "¡Inyección Completada!", 
-                description: `${totalReported} Boletas Directas y ${totalQueue} a la Cola de Espera.`, 
+                title: "¡Inyección Inteligente Exitosa!", 
+                description: `${officialRecords.length} Actas al Libro, ${pendingRecords.filter(r => r.reportado).length} a Boletas Emitidas y ${pendingRecords.filter(r => !r.reportado).length} a la Cola.`, 
                 className: "bg-green-50 border-green-200 text-green-900" 
             });
             
@@ -240,17 +325,22 @@ const BaptismJsonImporter = () => {
     };
 
     const columns = [
-        { header: 'Estado', render: r => r.reportado ? <span className="bg-green-100 text-green-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><FileText className="w-3 h-3"/>Boleta Directa</span> : <span className="bg-amber-100 text-amber-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><LayoutList className="w-3 h-3"/>A la Cola</span> },
-        { header: 'Ubicación (L:F:N)', render: r => <span className="font-mono text-[#4B7BA7] font-black">{r.reportado ? `${r.Libro}:${r.folio}:${r.numero}` : 'EN ESPERA'}</span> },
+        { header: 'Destino', render: r => {
+            if (r.destino === 'oficial') return <span className="bg-emerald-100 text-emerald-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><Database className="w-3 h-3"/>Libro Oficial</span>;
+            if (r.destino === 'boleta') return <span className="bg-blue-100 text-blue-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><FileText className="w-3 h-3"/>Boleta Emitida</span>;
+            return <span className="bg-amber-100 text-amber-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><LayoutList className="w-3 h-3"/>A la Cola</span>;
+        }},
         { header: 'Bautizado', render: r => <span className="font-bold uppercase text-slate-800">{r.apellidos} {r.nombres}</span> },
-        { header: 'Párroco Da Fe', render: r => <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 px-2 py-1 rounded">{r.daFe}</span> }
+        { header: 'Ubicación', render: r => <span className="font-mono text-[#4B7BA7] font-black">{r.Libro !== '---' && r.Libro ? `${r.Libro}:${r.folio}:${r.numero}` : `#${r.numeroRegistro || 'S/N'}`}</span> },
+        { header: 'Fecha', render: r => <span className="text-[10px] font-bold text-gray-500 uppercase">{r.fechaSacramento || '---'}</span> }
     ];
 
     const hasErrors = validationResult?.errors?.length > 0;
     const canConfirm = validationResult && validationResult.count > 0 && !hasErrors && !isProcessing && !importComplete;
 
-    const totalQueued = validationResult ? validationResult.dataToImport.filter(i => !i.reportado).length : 0;
-    const totalSeated = validationResult ? validationResult.dataToImport.filter(i => i.reportado).length : 0;
+    const totalOficial = validationResult ? validationResult.dataToImport.filter(i => i.destino === 'oficial').length : 0;
+    const totalBoletas = validationResult ? validationResult.dataToImport.filter(i => i.destino === 'boleta').length : 0;
+    const totalCola = validationResult ? validationResult.dataToImport.filter(i => i.destino === 'cola').length : 0;
 
     return (
         <div className="bg-white border border-gray-100 rounded-[2.5rem] p-8 md:p-12 shadow-sm relative overflow-hidden">
@@ -277,8 +367,8 @@ const BaptismJsonImporter = () => {
                                 {isProcessing ? 'Procesando Archivo...' : validationResult ? 'Archivo Cargado' : 'Seleccionar JSON'}
                             </p>
                             {!validationResult && !isProcessing && (
-                                <p className="text-[10px] text-gray-400 mt-2 font-bold uppercase tracking-widest">
-                                    El sistema separará automáticamente quién va a Boletas Emitidas y quién a la Cola.
+                                <p className="text-[10px] text-gray-400 mt-2 font-bold uppercase tracking-widest leading-relaxed">
+                                    El sistema detectará si son actas antiguas o inscripciones del despacho y las organizará automáticamente.
                                 </p>
                             )}
                         </div>
@@ -292,7 +382,7 @@ const BaptismJsonImporter = () => {
                             <div className="bg-blue-50 p-2 rounded-xl"><Database className="w-5 h-5 text-[#4B7BA7]" /></div>
                             <div>
                                 <h3 className="font-black text-gray-900 uppercase text-sm tracking-widest">Motor de Inyección (Bautismos)</h3>
-                                <p className="text-[10px] text-gray-500 font-bold uppercase">Sincronización Dual (Cola / Asentado)</p>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase">Sincronización Inteligente Trifásica</p>
                             </div>
                         </div>
                         {validationResult && (
@@ -312,10 +402,10 @@ const BaptismJsonImporter = () => {
                     {validationResult && (
                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <StatCard label="Boleta Directa" val={totalSeated} color="green" />
-                                <StatCard label="Para La Cola" val={totalQueued} color="blue" />
+                                <StatCard label="Libro Oficial" val={totalOficial} color="emerald" />
+                                <StatCard label="Boleta Emitida" val={totalBoletas} color="blue" />
+                                <StatCard label="A La Cola" val={totalCola} color="amber" />
                                 <StatCard label="Errores" val={validationResult.errors.length} color="red" />
-                                <StatCard label="Omitidos" val={validationResult.warnings.length} color="amber" />
                             </div>
 
                             {(validationResult.errors.length > 0 || validationResult.warnings.length > 0) && (
@@ -348,7 +438,7 @@ const BaptismJsonImporter = () => {
                 <div className="mt-10 pt-8 border-t border-gray-100 animate-in fade-in duration-700">
                     <div className="bg-gray-50/50 px-6 py-4 rounded-t-3xl border border-b-0 border-gray-100 flex items-center justify-between">
                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
-                            <Info className="w-4 h-4 text-[#4B7BA7]" /> Vista Previa de Asignación (Top 5)
+                            <Info className="w-4 h-4 text-[#4B7BA7]" /> Vista Previa de Asignación Automática (Top 5)
                         </span>
                     </div>
                     <div className="border border-gray-100 rounded-b-3xl overflow-hidden bg-white shadow-sm">
@@ -362,7 +452,7 @@ const BaptismJsonImporter = () => {
 
 const StatCard = ({ label, val, color }) => {
     const colors = {
-        green: "bg-green-50 border-green-100 text-green-700",
+        emerald: "bg-emerald-50 border-emerald-100 text-emerald-700",
         blue: "bg-blue-50 border-blue-100 text-[#4B7BA7]",
         red: "bg-red-50 border-red-100 text-red-700",
         amber: "bg-amber-50 border-amber-100 text-amber-700"
