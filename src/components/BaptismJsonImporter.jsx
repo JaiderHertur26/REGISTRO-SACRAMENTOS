@@ -12,6 +12,7 @@ import { generateUUID } from '@/utils/supabaseHelpers';
 import Table from '@/components/ui/Table';
 import { cn } from '@/lib/utils';
 
+// 🚀 FUNCIÓN LIMPIADORA DE TÍTULOS
 const cleanTitle = (nameStr) => {
     if (!nameStr) return '';
     return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|SACERDOTE\s*)/i, '').trim();
@@ -26,12 +27,14 @@ const BaptismJsonImporter = () => {
     const [isProcessing, setIsProcessing] = useState(false);
     const [importComplete, setImportComplete] = useState(false);
     const [validationResult, setValidationResult] = useState(null);
+    const [fileType, setFileType] = useState(null); // 🚀 ESTADO PARA GUARDAR EL TIPO DE ARCHIVO ('BAUTIZOS' o 'INSBAUTI')
     
     const [parrocoActual, setParrocoActual] = useState('');
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
 
     const parishId = user?.parish_id || user?.parishId;
 
+    // --- 1. CARGAR HISTORIAL DE PÁRROCOS ---
     useEffect(() => {
         if (parishId) {
             const parrocos = getParrocos(parishId) || [];
@@ -46,6 +49,7 @@ const BaptismJsonImporter = () => {
         }
     }, [parishId, getParrocos]);
 
+    // --- 2. MÁQUINA DEL TIEMPO: BUSCADOR HISTÓRICO EXACTO ---
     const getHistoricalPriest = (dateString) => {
         if (!dateString || listaSacerdotes.length === 0) return null;
         
@@ -65,10 +69,30 @@ const BaptismJsonImporter = () => {
         return null;
     };
 
+    // --- 3. PROCESAMIENTO Y LECTURA DEL ARCHIVO ---
     const handleFileChange = async (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
 
+        // 🚀 FILTRO ESTRICTO DE NOMBRE DE ARCHIVO
+        const fileName = selectedFile.name.toUpperCase();
+        let detectedType = null;
+        
+        if (fileName === 'BAUTIZOS.JSON') {
+            detectedType = 'BAUTIZOS';
+        } else if (fileName === 'INSBAUTI.JSON') {
+            detectedType = 'INSBAUTI';
+        } else {
+            toast({ 
+                title: "Archivo No Permitido", 
+                description: `El archivo "${selectedFile.name}" no es válido. Solo se admiten BAUTIZOS.json o INSBAUTI.json`, 
+                variant: "destructive" 
+            });
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            return;
+        }
+
+        setFileType(detectedType);
         setIsProcessing(true);
         setValidationResult(null);
         setImportComplete(false);
@@ -82,16 +106,21 @@ const BaptismJsonImporter = () => {
                 
                 if (rawData.length === 0) throw new Error("El archivo no contiene registros válidos.");
 
-                const { data: existingData, error: dbError } = await supabase
-                    .from('baptisms')
-                    .select('book_number, folio, number')
-                    .eq('parish_id', parishId);
+                let existingKeys = new Set();
+                
+                // Solo verificamos la base de datos oficial si es el archivo de BAUTIZOS
+                if (detectedType === 'BAUTIZOS') {
+                    const { data: existingData, error: dbError } = await supabase
+                        .from('baptisms')
+                        .select('book_number, folio, number')
+                        .eq('parish_id', parishId);
 
-                if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
-
-                const existingKeys = new Set((existingData || []).map(b => 
-                    `${String(b.book_number).padStart(4, '0')}-${String(b.folio).padStart(4, '0')}-${String(b.number).padStart(4, '0')}`
-                ));
+                    if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
+                    
+                    existingKeys = new Set((existingData || []).map(b => 
+                        `${String(b.book_number).padStart(4, '0')}-${String(b.folio).padStart(4, '0')}-${String(b.number).padStart(4, '0')}`
+                    ));
+                }
 
                 const processed = [];
                 const errors = [];
@@ -101,14 +130,6 @@ const BaptismJsonImporter = () => {
 
                 rawData.forEach((item, index) => {
                     const rowNum = index + 1;
-                    
-                    const hasReportadoKey = item.hasOwnProperty("REPORTADO");
-                    const isReportado = hasReportadoKey ? (item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE') : false;
-
-                    let destinoStr = 'oficial';
-                    if (hasReportadoKey) {
-                        destinoStr = isReportado ? 'boleta' : 'cola';
-                    }
                     
                     const mappedItem = {
                         numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
@@ -140,10 +161,7 @@ const BaptismJsonImporter = () => {
                         oficinaRegistro: item["NOTARIA"] || item.oficinaRegistro || '',
                         fechaExpedicionRegistro: item["FECHA DE REGISTRO"] || item.fechaExpedicionRegistro || '',
                         notaMarginal: item["NOTAS MARGINALES"] || item.notaMarginal || '',
-                        // Control Inteligente Trifásico
-                        reportado: isReportado,
-                        hasReportadoKey: hasReportadoKey,
-                        destino: destinoStr
+                        reportado: item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE'
                     };
 
                     const sacerdoteEpoca = getHistoricalPriest(mappedItem.fechaSacramento);
@@ -167,45 +185,34 @@ const BaptismJsonImporter = () => {
                     }
 
                     const cleanItem = purificarRegistroBautismo(mappedItem);
-                    const key = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
+                    const keyBautizos = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
+                    const keyInsbauti = cleanItem.numeroRegistro || `${cleanItem.nombres}-${cleanItem.apellidos}`;
                     const nombreBautizado = `${cleanItem.nombres} ${cleanItem.apellidos}`.trim();
 
-                    // 🚀 INTELIGENCIA DE AUDITORÍA BASADA EN EL DESTINO
                     if (!cleanItem.nombres || !cleanItem.apellidos) {
-                        errors.push(`Fila ${rowNum}: Faltan Nombres o Apellidos críticos.`);
-                    } else if (cleanItem.destino === 'oficial') {
-                        // REGLAS PARA BAUTIZOS.json (Libro Físico Oficial)
-                        if (existingKeys.has(key)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (El acta L:${cleanItem.Libro} ya existe).`);
-                        } else if (internalKeys.has(key)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Acta duplicada en el archivo).`);
+                        errors.push(`Fila ${rowNum}: Faltan datos críticos (Nombres o Apellidos).`);
+                    } else if (detectedType === 'BAUTIZOS') {
+                        // 🚀 VALIDACIÓN PARA BAUTIZOS.JSON (Libros Físicos Antiguos)
+                        if (cleanItem.Libro === '0000' || !cleanItem.Libro || cleanItem.Libro === '---') {
+                            errors.push(`Fila ${rowNum}: Faltan datos críticos (Libro).`);
+                        } else if (existingKeys.has(keyBautizos)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe).`);
+                        } else if (internalKeys.has(keyBautizos)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Acta duplicada dentro del archivo).`);
                         } else {
                             processed.push(cleanItem);
-                            internalKeys.add(key);
+                            internalKeys.add(keyBautizos);
                             validCount++;
                         }
-                    } else if (cleanItem.destino === 'boleta') {
-                        // REGLAS PARA REPORTADOS (Van directo a Boleta)
-                        if (!cleanItem.Libro || cleanItem.Libro === '0000' || cleanItem.Libro === '---') {
-                            errors.push(`Fila ${rowNum}: El acta de "${nombreBautizado}" viene REPORTADA pero carece de un Libro/Folio válido.`);
-                        } else {
-                            const pendingKey = `boleta-${cleanItem.numeroRegistro || key}`;
-                            if (internalKeys.has(pendingKey)) {
-                                warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Duplicado en el archivo).`);
-                            } else {
-                                processed.push(cleanItem);
-                                internalKeys.add(pendingKey);
-                                validCount++;
-                            }
-                        }
-                    } else if (cleanItem.destino === 'cola') {
-                        // REGLAS PARA NO REPORTADOS (Van a la cola de espera)
-                        const pendingKey = `cola-${cleanItem.numeroRegistro || key}`;
-                        if (internalKeys.has(pendingKey)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Duplicado en el archivo).`);
+                    } else if (detectedType === 'INSBAUTI') {
+                        // 🚀 VALIDACIÓN PARA INSBAUTI.JSON (Inscripciones del Despacho)
+                        if (cleanItem.reportado && (!cleanItem.Libro || cleanItem.Libro === '0000' || cleanItem.Libro === '---')) {
+                            errors.push(`Fila ${rowNum}: El acta de "${nombreBautizado}" viene REPORTADA pero carece de Libro/Folio válido.`);
+                        } else if (internalKeys.has(keyInsbauti)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Inscripción duplicada dentro del archivo).`);
                         } else {
                             processed.push(cleanItem);
-                            internalKeys.add(pendingKey);
+                            internalKeys.add(keyInsbauti);
                             validCount++;
                         }
                     }
@@ -224,6 +231,7 @@ const BaptismJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
+    // --- 4. INYECCIÓN SEPARADA DEPENDIENDO DEL TIPO DE ARCHIVO ---
     const handleImport = async () => {
         if (!validationResult || validationResult.dataToImport.length === 0) return;
         setIsProcessing(true);
@@ -231,85 +239,86 @@ const BaptismJsonImporter = () => {
         const cleanDate = (d) => (d && String(d).trim() !== '' && String(d).trim() !== '---') ? d : null;
 
         try {
-            const officialRecords = [];
-            const pendingRecords = [];
-
-            validationResult.dataToImport.forEach(item => {
-                const id = generateUUID();
-                
-                if (item.destino === 'oficial') {
-                    officialRecords.push({
-                        id,
-                        parish_id: parishId,
-                        book_number: item.Libro,
-                        folio: item.folio,
-                        number: item.numero,
-                        numero_registro: item.numeroRegistro || null,
-                        status: 'seated', 
-                        celebration_date: cleanDate(item.fechaSacramento),
-                        lugar_bautismo: item.lugarBautismo || null,
-                        apellidos: item.apellidos || null,
-                        nombres: item.nombres || null,
-                        sexo: item.sexo || null,
-                        fecha_nacimiento: cleanDate(item.fechaNacimiento),
-                        lugar_nacimiento: item.lugarNacimiento || null,
-                        nuip: item.nuip || null,
-                        serial_registro: item.serialRegistro || null,
-                        oficina_registro: item.oficinaRegistro || null,
-                        fecha_expedicion_registro: cleanDate(item.fechaExpedicionRegistro),
-                        tipo_union_padres: item.tipoUnionPadres || null,
-                        nombre_padre: item.nombrePadre || null,
-                        cedula_padre: item.cedulaPadre || null,
-                        nombre_madre: item.nombreMadre || null,
-                        cedula_madre: item.cedulaMadre || null,
-                        abuelos_paternos: item.abuelosPaternos || null,
-                        abuelos_maternos: item.abuelosMaternos || null,
-                        padrinos: item.padrinos || null,
-                        ministro: item.ministro || null,
-                        da_fe: item.daFe || null, 
-                        direccion: item.direccion || null,
-                        nota_marginal: item.notaMarginal || null,
-                        raw_data: item, 
-                        created_at: new Date().toISOString()
-                    });
-                } else {
-                    pendingRecords.push({
-                        id,
-                        parish_id: parishId,
-                        raw_data: item,
-                        status: item.destino === 'boleta' ? 'seated' : 'pending',
-                        reportado: item.reportado, 
-                        created_at: item.fechaInscripcion ? new Date(item.fechaInscripcion).toISOString() : new Date().toISOString()
-                    });
-                }
-            });
-
             const batchSize = 200;
-            
-            // 🚀 INYECCIÓN 1: Base de Datos Oficial (Archivos Viejos)
-            if (officialRecords.length > 0) {
-                for (let i = 0; i < officialRecords.length; i += batchSize) {
-                    const batch = officialRecords.slice(i, i + batchSize);
+
+            if (fileType === 'BAUTIZOS') {
+                // 🚀 RUTA 1: BAUTIZOS.JSON -> Va directo a la tabla oficial 'baptisms'
+                const dbRecords = validationResult.dataToImport.map(item => ({
+                    id: generateUUID(),
+                    parish_id: parishId,
+                    book_number: item.Libro,
+                    folio: item.folio,
+                    number: item.numero,
+                    numero_registro: item.numeroRegistro || null,
+                    status: 'seated', 
+                    celebration_date: cleanDate(item.fechaSacramento),
+                    hora_sacramento: item.horaSacramento || null,
+                    lugar_bautismo: item.lugarBautismo || null,
+                    apellidos: item.apellidos || null,
+                    nombres: item.nombres || null,
+                    sexo: item.sexo || null,
+                    fecha_nacimiento: cleanDate(item.fechaNacimiento),
+                    lugar_nacimiento: item.lugarNacimiento || null,
+                    nuip: item.nuip || null,
+                    serial_registro: item.serialRegistro || null,
+                    oficina_registro: item.oficinaRegistro || null,
+                    fecha_expedicion_registro: cleanDate(item.fechaExpedicionRegistro),
+                    tipo_union_padres: item.tipoUnionPadres || null,
+                    nombre_padre: item.nombrePadre || null,
+                    cedula_padre: item.cedulaPadre || null,
+                    nombre_madre: item.nombreMadre || null,
+                    cedula_madre: item.cedulaMadre || null,
+                    abuelos_paternos: item.abuelosPaternos || null,
+                    abuelos_maternos: item.abuelosMaternos || null,
+                    padrinos: item.padrinos || null,
+                    ministro: item.ministro || null,
+                    da_fe: item.daFe || null,
+                    direccion: item.direccion || null,
+                    nota_marginal: item.notaMarginal || null,
+                    raw_data: item, 
+                    created_at: new Date().toISOString()
+                }));
+
+                for (let i = 0; i < dbRecords.length; i += batchSize) {
+                    const batch = dbRecords.slice(i, i + batchSize);
                     const { error } = await supabase.from('baptisms').insert(batch);
                     if (error) throw error;
                 }
-            }
 
-            // 🚀 INYECCIÓN 2: Cola de Pendientes y Boletas
-            if (pendingRecords.length > 0) {
+                toast({ 
+                    title: "¡Importación de Libros Exitosa!", 
+                    description: `${dbRecords.length} Actas Viejas inyectadas directamente en la Base Permanente.`, 
+                    className: "bg-green-50 border-green-200 text-green-900" 
+                });
+
+            } else if (fileType === 'INSBAUTI') {
+                // 🚀 RUTA 2: INSBAUTI.JSON -> Va directo a la tabla de cola 'pending_baptisms'
+                const pendingRecords = validationResult.dataToImport.map(item => ({
+                    id: generateUUID(),
+                    parish_id: parishId,
+                    raw_data: item,
+                    // Si reportado es True -> status 'seated' (pestaña Boletas). Si False -> status 'pending' (pestaña Cola)
+                    status: item.reportado ? 'seated' : 'pending',
+                    reportado: item.reportado, 
+                    created_at: item.fechaInscripcion ? new Date(item.fechaInscripcion).toISOString() : new Date().toISOString()
+                }));
+
                 for (let i = 0; i < pendingRecords.length; i += batchSize) {
                     const batch = pendingRecords.slice(i, i + batchSize);
                     const { error } = await supabase.from('pending_baptisms').insert(batch);
                     if (error) throw error;
                 }
+
+                const totalReported = pendingRecords.filter(r => r.reportado).length;
+                const totalQueue = pendingRecords.length - totalReported;
+
+                toast({ 
+                    title: "¡Importación de Inscripciones Exitosa!", 
+                    description: `${totalReported} a Boletas Emitidas y ${totalQueue} a la Cola de Espera.`, 
+                    className: "bg-green-50 border-green-200 text-green-900" 
+                });
             }
 
-            toast({ 
-                title: "¡Inyección Inteligente Exitosa!", 
-                description: `${officialRecords.length} Actas al Libro, ${pendingRecords.filter(r => r.reportado).length} a Boletas Emitidas y ${pendingRecords.filter(r => !r.reportado).length} a la Cola.`, 
-                className: "bg-green-50 border-green-200 text-green-900" 
-            });
-            
             setImportComplete(true);
 
         } catch (err) {
@@ -321,26 +330,30 @@ const BaptismJsonImporter = () => {
 
     const resetImporter = () => {
         setValidationResult(null);
+        setFileType(null);
         setImportComplete(false);
     };
 
-    const columns = [
-        { header: 'Destino', render: r => {
-            if (r.destino === 'oficial') return <span className="bg-emerald-100 text-emerald-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><Database className="w-3 h-3"/>Libro Oficial</span>;
-            if (r.destino === 'boleta') return <span className="bg-blue-100 text-blue-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><FileText className="w-3 h-3"/>Boleta Emitida</span>;
-            return <span className="bg-amber-100 text-amber-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><LayoutList className="w-3 h-3"/>A la Cola</span>;
-        }},
-        { header: 'Bautizado', render: r => <span className="font-bold uppercase text-slate-800">{r.apellidos} {r.nombres}</span> },
-        { header: 'Ubicación', render: r => <span className="font-mono text-[#4B7BA7] font-black">{r.Libro !== '---' && r.Libro ? `${r.Libro}:${r.folio}:${r.numero}` : `#${r.numeroRegistro || 'S/N'}`}</span> },
-        { header: 'Fecha', render: r => <span className="text-[10px] font-bold text-gray-500 uppercase">{r.fechaSacramento || '---'}</span> }
-    ];
+    const getColumnsByType = () => {
+        if (fileType === 'BAUTIZOS') {
+            return [
+                { header: 'Ubicación (L:F:N)', render: r => <span className="font-mono text-[#4B7BA7] font-black">{r.Libro}:{r.folio}:{r.numero}</span> },
+                { header: 'Bautizado', render: r => <span className="font-bold uppercase text-slate-800">{r.apellidos} {r.nombres}</span> },
+                { header: 'Párroco Da Fe', render: r => <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 px-2 py-1 rounded">{r.daFe}</span> },
+                { header: 'Ministro', render: r => <span className="text-[10px] font-bold text-gray-500 uppercase">{r.ministro || '---'}</span> }
+            ];
+        } else {
+            return [
+                { header: 'Destino', render: r => r.reportado ? <span className="bg-green-100 text-green-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><FileText className="w-3 h-3"/>Boleta Emitida</span> : <span className="bg-amber-100 text-amber-700 font-black text-[9px] px-2 py-1 rounded uppercase flex items-center w-max gap-1"><LayoutList className="w-3 h-3"/>A la Cola</span> },
+                { header: 'Bautizando', render: r => <span className="font-bold uppercase text-slate-800">{r.apellidos} {r.nombres}</span> },
+                { header: 'Nº Registro', render: r => <span className="font-mono text-[#4B7BA7] font-black">#{r.numeroRegistro || 'S/N'}</span> },
+                { header: 'Fecha', render: r => <span className="text-[10px] font-bold text-gray-500 uppercase">{r.fechaSacramento || '---'}</span> }
+            ];
+        }
+    };
 
     const hasErrors = validationResult?.errors?.length > 0;
     const canConfirm = validationResult && validationResult.count > 0 && !hasErrors && !isProcessing && !importComplete;
-
-    const totalOficial = validationResult ? validationResult.dataToImport.filter(i => i.destino === 'oficial').length : 0;
-    const totalBoletas = validationResult ? validationResult.dataToImport.filter(i => i.destino === 'boleta').length : 0;
-    const totalCola = validationResult ? validationResult.dataToImport.filter(i => i.destino === 'cola').length : 0;
 
     return (
         <div className="bg-white border border-gray-100 rounded-[2.5rem] p-8 md:p-12 shadow-sm relative overflow-hidden">
@@ -368,7 +381,7 @@ const BaptismJsonImporter = () => {
                             </p>
                             {!validationResult && !isProcessing && (
                                 <p className="text-[10px] text-gray-400 mt-2 font-bold uppercase tracking-widest leading-relaxed">
-                                    El sistema detectará si son actas antiguas o inscripciones del despacho y las organizará automáticamente.
+                                    Formatos admitidos: <br/><span className="text-[#4B7BA7]">BAUTIZOS.json</span> o <span className="text-[#4B7BA7]">INSBAUTI.json</span>
                                 </p>
                             )}
                         </div>
@@ -381,8 +394,10 @@ const BaptismJsonImporter = () => {
                         <div className="flex items-center gap-3">
                             <div className="bg-blue-50 p-2 rounded-xl"><Database className="w-5 h-5 text-[#4B7BA7]" /></div>
                             <div>
-                                <h3 className="font-black text-gray-900 uppercase text-sm tracking-widest">Motor de Inyección (Bautismos)</h3>
-                                <p className="text-[10px] text-gray-500 font-bold uppercase">Sincronización Inteligente Trifásica</p>
+                                <h3 className="font-black text-gray-900 uppercase text-sm tracking-widest">Motor de Inyección</h3>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase">
+                                    {fileType === 'BAUTIZOS' ? 'Inyección Directa a Libros Físicos' : fileType === 'INSBAUTI' ? 'Enrutador de Inscripciones de Despacho' : 'Esperando Archivo...'}
+                                </p>
                             </div>
                         </div>
                         {validationResult && (
@@ -395,18 +410,28 @@ const BaptismJsonImporter = () => {
                     {!validationResult && !isProcessing && (
                         <div className="py-12 text-center bg-slate-50/50 rounded-[2rem] border border-slate-100">
                             <Info className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-                            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Esperando archivo para auditoría de datos...</p>
+                            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Sube tu archivo para iniciar la auditoría y enrutamiento.</p>
                         </div>
                     )}
 
                     {validationResult && (
                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <StatCard label="Libro Oficial" val={totalOficial} color="emerald" />
-                                <StatCard label="Boleta Emitida" val={totalBoletas} color="blue" />
-                                <StatCard label="A La Cola" val={totalCola} color="amber" />
-                                <StatCard label="Errores" val={validationResult.errors.length} color="red" />
-                            </div>
+                            
+                            {/* ESTADÍSTICAS DINÁMICAS SEGÚN EL ARCHIVO */}
+                            {fileType === 'BAUTIZOS' ? (
+                                <div className="grid grid-cols-3 gap-4">
+                                    <StatCard label="Para Libro Oficial" val={validationResult.count} color="green" />
+                                    <StatCard label="Errores" val={validationResult.errors.length} color="red" />
+                                    <StatCard label="Omitidos" val={validationResult.warnings.length} color="amber" />
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <StatCard label="Boletas Listas" val={validationResult.dataToImport.filter(i => i.reportado).length} color="green" />
+                                    <StatCard label="A La Cola" val={validationResult.dataToImport.filter(i => !i.reportado).length} color="blue" />
+                                    <StatCard label="Errores" val={validationResult.errors.length} color="red" />
+                                    <StatCard label="Omitidos" val={validationResult.warnings.length} color="amber" />
+                                </div>
+                            )}
 
                             {(validationResult.errors.length > 0 || validationResult.warnings.length > 0) && (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -426,7 +451,7 @@ const BaptismJsonImporter = () => {
                                     className="w-full py-8 bg-gradient-to-r from-[#4B7BA7] to-[#3A6286] hover:shadow-xl text-white rounded-2xl font-black uppercase text-[11px] tracking-[0.2em] transition-all transform active:scale-95 disabled:opacity-50"
                                 >
                                     {isProcessing ? <Loader2 className="w-5 h-5 mr-3 animate-spin" /> : <Database className="w-5 h-5 mr-3" />}
-                                    {isProcessing ? 'Inyectando a la Nube...' : importComplete ? 'Importación Finalizada' : `Procesar e Inyectar ${validationResult.count} Registros`}
+                                    {isProcessing ? 'Inyectando a la Nube...' : importComplete ? 'Importación Finalizada' : `Inyectar ${validationResult.count} Registros`}
                                 </Button>
                             )}
                         </div>
@@ -438,11 +463,11 @@ const BaptismJsonImporter = () => {
                 <div className="mt-10 pt-8 border-t border-gray-100 animate-in fade-in duration-700">
                     <div className="bg-gray-50/50 px-6 py-4 rounded-t-3xl border border-b-0 border-gray-100 flex items-center justify-between">
                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
-                            <Info className="w-4 h-4 text-[#4B7BA7]" /> Vista Previa de Asignación Automática (Top 5)
+                            <Info className="w-4 h-4 text-[#4B7BA7]" /> Vista Previa de Asignación (Top 5)
                         </span>
                     </div>
                     <div className="border border-gray-100 rounded-b-3xl overflow-hidden bg-white shadow-sm">
-                        <Table columns={columns} data={validationResult.dataToImport.slice(0, 5)} />
+                        <Table columns={getColumnsByType()} data={validationResult.dataToImport.slice(0, 5)} />
                     </div>
                 </div>
             )}
@@ -452,7 +477,7 @@ const BaptismJsonImporter = () => {
 
 const StatCard = ({ label, val, color }) => {
     const colors = {
-        emerald: "bg-emerald-50 border-emerald-100 text-emerald-700",
+        green: "bg-green-50 border-green-100 text-green-700",
         blue: "bg-blue-50 border-blue-100 text-[#4B7BA7]",
         red: "bg-red-50 border-red-100 text-red-700",
         amber: "bg-amber-50 border-amber-100 text-amber-700"
