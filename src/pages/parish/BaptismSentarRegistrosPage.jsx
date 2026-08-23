@@ -10,7 +10,7 @@ import {
     ChevronLeft, ChevronRight, Save, 
     CheckCircle2, AlertCircle, Loader2, Printer,
     LayoutList, BookOpenCheck,
-    Layers, CheckSquare, Square, Lock, FileText
+    Layers, CheckSquare, Square, Lock, FileText, Search
 } from 'lucide-react';
 import BaptismTicket from '@/components/BaptismTicket';
 import { supabase } from '@/lib/supabaseClient'; 
@@ -32,13 +32,14 @@ const BaptismSentarRegistrosPage = () => {
     const [resolvedParishId, setResolvedParishId] = useState(null);
     const [nombreParroquia, setNombreParroquia] = useState('PARROQUIA PADRE MISERICORDIOSO');
     
-    // 🚀 NUEVA PESTAÑA: 'reported'
+    // 🚀 ESTADOS DE PESTAÑAS Y BUSCADOR
     const [mode, setMode] = useState('individual'); 
     const [pendingBaptisms, setPendingBaptisms] = useState([]);
     const [reportedBaptisms, setReportedBaptisms] = useState([]); // Historial
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedIds, setSelectedIds] = useState([]);
-    const [printingRecord, setPrintingRecord] = useState(null); // Para imprimir desde el historial
+    const [printingRecord, setPrintingRecord] = useState(null); 
+    const [searchTerm, setSearchTerm] = useState(''); // 🚀 BUSCADOR
     
     const [nextNumbers, setNextNumbers] = useState({ book: '0001', page: '0001', entry: '0001' });
     const [fullParamsCache, setFullParamsCache] = useState(null); 
@@ -81,7 +82,7 @@ const BaptismSentarRegistrosPage = () => {
             if (!tempError && tempData && tempData.length > 0) {
                 const cloudPending = tempData.map(pb => {
                     const raw = typeof pb.raw_data === 'string' ? JSON.parse(pb.raw_data) : (pb.raw_data || {});
-                    return { ...raw, id: pb.id, status: 'pending', reportado: pb.reportado }; // 🚀 Traemos la columna
+                    return { ...raw, id: pb.id, status: 'pending', reportado: pb.reportado };
                 });
                 
                 recordsMapped = cloudPending.map(r => {
@@ -113,7 +114,7 @@ const BaptismSentarRegistrosPage = () => {
                     return {
                         ...purificado,
                         id: r.id,
-                        reportado: r.reportado, // 🚀 Conservamos el estatus
+                        reportado: r.reportado, 
                         numeroRegistro: r.numeroRegistro || r.inscripcionNumero || purificado.numeroRegistro || '---',
                         direccion: r.direccion || purificado.direccion || '---',
                         nuip: r.nuip || purificado.nuip || '---',
@@ -125,7 +126,6 @@ const BaptismSentarRegistrosPage = () => {
                 });
             }
             
-            // 🚀 SEPARAMOS PENDIENTES Y REPORTADOS
             const pendientes = recordsMapped.filter(r => !r.reportado);
             const reportados = recordsMapped.filter(r => r.reportado);
 
@@ -207,11 +207,10 @@ const BaptismSentarRegistrosPage = () => {
 
     const handleReprint = () => {
         if (!currentBaptism) return;
-        setPrintingRecord(null); // Aseguramos que imprima el actual pendiente
+        setPrintingRecord(null); 
         setTimeout(() => window.print(), 300);
     };
 
-    // 🚀 LÓGICA DIRECTA SUPABASE: Inserta y marca como Reportado
     const handleRegisterIndividual = async () => {
         if (!currentBaptism || isSaving || currentIsFuture) return;
 
@@ -219,7 +218,6 @@ const BaptismSentarRegistrosPage = () => {
         try {
             const cleanDate = (d) => (d && String(d).trim() !== '' && String(d).trim() !== '---') ? d : null;
 
-            // 1. Insertar en tabla base
             const finalData = {
                 parish_id: resolvedParishId,
                 book_number: nextNumbers.book,
@@ -254,7 +252,6 @@ const BaptismSentarRegistrosPage = () => {
             const { error: insertError } = await supabase.from('baptisms').insert([finalData]);
             if (insertError) throw insertError;
 
-            // 2. Marcar como reportado en lugar de borrar
             const { error: updateError } = await supabase.from('pending_baptisms').update({ reportado: true }).eq('id', currentBaptism.id);
             if (updateError) throw updateError;
 
@@ -288,7 +285,6 @@ const BaptismSentarRegistrosPage = () => {
         else setSelectedIds([...selectedIds, id]);
     };
 
-    // 🚀 LÓGICA DIRECTA SUPABASE PARA LOTE
     const handleBatchConfirm = async () => {
         if (selectedIds.length === 0 || isSaving) return;
         if (!window.confirm(`¿Asentar ${selectedIds.length} registros permanentemente?`)) return;
@@ -348,15 +344,12 @@ const BaptismSentarRegistrosPage = () => {
                 cLibro = parseInt(siguiente.libro, 10);
             }
 
-            // 1. Insertar Lote
             const { error: insertError } = await supabase.from('baptisms').insert(recordsToInsert);
             if (insertError) throw insertError;
 
-            // 2. Marcar Lote como Reportado (No borrar)
             const { error: updateError } = await supabase.from('pending_baptisms').update({ reportado: true }).in('id', selectedIds);
             if (updateError) throw updateError;
 
-            // 3. Guardar Parámetros
             const updatedParams = { ...p, ordinarioFolio: cFolio, ordinarioNumero: cNumero, ordinarioLibro: cLibro };
             await saveBaptismParameters(updatedParams, resolvedParishId);
 
@@ -371,11 +364,16 @@ const BaptismSentarRegistrosPage = () => {
         }
     };
 
-    // 🚀 FUNCIÓN PARA IMPRIMIR DESDE EL HISTORIAL
     const handlePrintReported = (record) => {
         setPrintingRecord(record);
         setTimeout(() => window.print(), 300);
     };
+
+    // 🚀 LÓGICA DE FILTRADO PARA EL BUSCADOR
+    const filteredReported = reportedBaptisms.filter(b => {
+        const fullName = `${b.nombres || ''} ${b.apellidos || ''}`.toLowerCase();
+        return fullName.includes(searchTerm.toLowerCase());
+    });
 
     if (isLoading) return (
         <DashboardLayout entityName={nombreParroquia}>
@@ -538,48 +536,74 @@ const BaptismSentarRegistrosPage = () => {
                     </div>
                 )}
 
-                {/* 🚀 NUEVA SECCIÓN DE BOLETAS EMITIDAS */}
+                {/* 🚀 NUEVA SECCIÓN DE BOLETAS EMITIDAS CON BUSCADOR */}
                 {mode === 'reported' && (
                     reportedBaptisms.length === 0 ? <EmptyState message="Aún no tienes registros que hayan sido reportados/asentados." hideButton /> :
                     <div className="animate-in fade-in duration-500 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden">
-                        <table className="w-full text-left">
-                            <thead className="bg-gray-50 border-b font-black text-[10px] text-gray-400 uppercase">
-                                <tr>
-                                    <th className="px-8 py-6 w-24">Estado</th>
-                                    <th className="px-6 py-6">Bautizado</th>
-                                    <th className="px-6 py-6">Fecha Bautismo</th>
-                                    <th className="px-6 py-6 text-right">Acción</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y">
-                                {reportedBaptisms.map(b => (
-                                    <tr key={b.id} className="hover:bg-slate-50 transition-colors">
-                                        <td className="px-8 py-4">
-                                            <span className="text-[8px] font-black bg-blue-50 text-[#4B7BA7] border border-blue-200 px-3 py-1.5 rounded-full uppercase flex items-center w-max gap-1">
-                                                <CheckCircle2 className="w-3 h-3" /> Reportado
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <p className="font-black uppercase text-xs text-gray-800">{b.apellidos}, {b.nombres}</p>
-                                            <p className="text-[9px] font-bold text-gray-400 uppercase">#{b.numeroRegistro || '---'}</p>
-                                        </td>
-                                        <td className="px-6 py-4 text-[11px] font-black uppercase text-gray-600">
-                                            {b.fechaSacramento}
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <Button 
-                                                variant="outline" 
-                                                size="sm" 
-                                                onClick={() => handlePrintReported(b)} 
-                                                className="text-[#4B7BA7] border-[#4B7BA7] hover:bg-blue-50 rounded-xl uppercase text-[10px] font-bold tracking-widest"
-                                            >
-                                                <Printer className="w-3 h-3 mr-2" /> Boleta
-                                            </Button>
-                                        </td>
+                        
+                        <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-50/50">
+                            <div>
+                                <h3 className="text-sm font-black text-gray-800 uppercase tracking-widest flex items-center gap-2">
+                                    <FileText className="w-4 h-4 text-[#4B7BA7]" /> Historial de Boletas
+                                </h3>
+                            </div>
+                            <div className="relative w-full md:w-96">
+                                <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input 
+                                    type="text" 
+                                    placeholder="BUSCAR BAUTIZADO POR NOMBRE O APELLIDO..." 
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full h-11 pl-11 pr-4 text-xs font-bold text-gray-700 uppercase border border-gray-200 rounded-xl focus:ring-4 focus:ring-[#4B7BA7]/10 focus:border-[#4B7BA7] outline-none transition-all shadow-sm"
+                                />
+                            </div>
+                        </div>
+
+                        {filteredReported.length === 0 ? (
+                            <div className="p-16 text-center border-t border-dashed border-gray-100">
+                                <Search className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+                                <p className="text-gray-400 font-bold uppercase text-xs">No se encontraron resultados para "{searchTerm}"</p>
+                            </div>
+                        ) : (
+                            <table className="w-full text-left">
+                                <thead className="bg-gray-50 border-b font-black text-[10px] text-gray-400 uppercase">
+                                    <tr>
+                                        <th className="px-8 py-6 w-24">Estado</th>
+                                        <th className="px-6 py-6">Bautizado</th>
+                                        <th className="px-6 py-6">Fecha Bautismo</th>
+                                        <th className="px-6 py-6 text-right">Acción</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody className="divide-y">
+                                    {filteredReported.map(b => (
+                                        <tr key={b.id} className="hover:bg-slate-50 transition-colors">
+                                            <td className="px-8 py-4">
+                                                <span className="text-[8px] font-black bg-blue-50 text-[#4B7BA7] border border-blue-200 px-3 py-1.5 rounded-full uppercase flex items-center w-max gap-1">
+                                                    <CheckCircle2 className="w-3 h-3" /> Reportado
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <p className="font-black uppercase text-xs text-gray-800">{b.apellidos}, {b.nombres}</p>
+                                                <p className="text-[9px] font-bold text-gray-400 uppercase">#{b.numeroRegistro || '---'}</p>
+                                            </td>
+                                            <td className="px-6 py-4 text-[11px] font-black uppercase text-gray-600">
+                                                {b.fechaSacramento}
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                                <Button 
+                                                    variant="outline" 
+                                                    size="sm" 
+                                                    onClick={() => handlePrintReported(b)} 
+                                                    className="text-[#4B7BA7] border-[#4B7BA7] hover:bg-blue-50 rounded-xl uppercase text-[10px] font-bold tracking-widest"
+                                                >
+                                                    <Printer className="w-3 h-3 mr-2" /> Boleta
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
                     </div>
                 )}
             </div>
