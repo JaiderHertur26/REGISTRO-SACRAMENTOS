@@ -25,7 +25,7 @@ const UnifiedSearchPage = () => {
 
     const [searchParams, setSearchParams] = useState({ 
         firstName: '', lastName: '', sacramentType: '', 
-        dateStart: '', dateEnd: '', dioceseId: '', parishId: '' 
+        dateStart: '', dateEnd: '', dioceseId: '', parishId: 'all' 
     });
     
     const [results, setResults] = useState(null);
@@ -33,14 +33,13 @@ const UnifiedSearchPage = () => {
 
     const nombreEntidad = user?.parishName || user?.parish_name || 'BÚSQUEDA CENTRAL';
 
-    // 🚀 1. CARGA DE ENTIDADES DESDE SUPABASE (AHORA AUTENTICADO)
+    // 🚀 1. CARGA DE ENTIDADES ORDENADAS ALFABÉTICAMENTE
     useEffect(() => {
         const fetchEntities = async () => {
             try {
-                // Al estar autenticados, Supabase permite leer estas tablas según las reglas RLS
                 const [dioRes, parRes, misRes] = await Promise.all([
-                    supabase.from('dioceses').select('*'),
-                    supabase.from('parishes').select('*'),
+                    supabase.from('dioceses').select('*').order('name', { ascending: true }),
+                    supabase.from('parishes').select('*').order('name', { ascending: true }),
                     supabase.from('mis_datos').select('entity_id, payload')
                 ]);
 
@@ -59,6 +58,7 @@ const UnifiedSearchPage = () => {
         fetchEntities();
     }, [toast]);
 
+    // 🚀 2. EFECTO EN CASCADA PARA FILTRAR PARROQUIAS
     useEffect(() => {
         if (searchParams.dioceseId === 'all') {
             const validParishes = parishesList.filter(p => p.dioceseId !== null && p.dioceseId !== undefined);
@@ -79,7 +79,7 @@ const UnifiedSearchPage = () => {
         { value: 'marriage', label: 'MATRIMONIO' },
     ];
 
-    // 🚀 2. MOTOR DE BÚSQUEDA INTERNO
+    // 🚀 3. MOTOR DE BÚSQUEDA INTERNO
     const handleSearch = async (e) => {
         e.preventDefault();
         
@@ -99,13 +99,14 @@ const UnifiedSearchPage = () => {
             let all = [];
             let parishesToSearch = [];
             
+            // Lógica inteligente de asignación de IDs de parroquias a buscar
             if (searchParams.parishId && searchParams.parishId !== 'all') {
                 const p = parishesList.find(p => p.id === searchParams.parishId);
                 if (p) parishesToSearch.push(p);
             } else if (searchParams.dioceseId && searchParams.dioceseId !== 'all') {
                 parishesToSearch = parishesList.filter(p => p.dioceseId === searchParams.dioceseId);
             } else if (searchParams.dioceseId === 'all') {
-                parishesToSearch = parishesList;
+                parishesToSearch = parishesList.filter(p => p.dioceseId !== null);
             }
 
             if (parishesToSearch.length === 0) {
@@ -118,7 +119,7 @@ const UnifiedSearchPage = () => {
             const type = searchParams.sacramentType;
             const fetchPromises = [];
 
-            // Consultas a Supabase
+            // Consultas simultáneas a Supabase
             if (!type || type === 'baptism') {
                 fetchPromises.push(
                     supabase.from('baptisms').select('*').in('parish_id', parishIds)
@@ -205,7 +206,6 @@ const UnifiedSearchPage = () => {
     };
 
     return (
-        // 🚀 ENVUELTO EN DASHBOARD LAYOUT PARA SEGURIDAD VISUAL Y NAVEGACIÓN
         <DashboardLayout entityName={nombreEntidad}>
             <Helmet><title>Buscador Unificado | Eclesia Digital</title></Helmet>
 
@@ -221,20 +221,37 @@ const UnifiedSearchPage = () => {
 
                 <section className="bg-white rounded-[2rem] lg:rounded-[2.5rem] shadow-xl shadow-blue-900/5 p-6 lg:p-8 border border-gray-100 mb-12">
                     <form onSubmit={handleSearch} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
+                        
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Diócesis <span className="text-red-500">*</span></label>
-                            <select required value={searchParams.dioceseId} onChange={e => setSearchParams({...searchParams, dioceseId: e.target.value, parishId: ''})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#D4AF37]">
-                                <option value="">SELECCIONE...</option>
+                            <select 
+                                required 
+                                value={searchParams.dioceseId} 
+                                onChange={e => setSearchParams({...searchParams, dioceseId: e.target.value, parishId: 'all'})} 
+                                className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#D4AF37]"
+                            >
+                                <option value="">-- SELECCIONE UNA DIÓCESIS --</option>
                                 {dioceseOptions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                             </select>
                         </div>
+
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Parroquia</label>
-                            <select disabled={!searchParams.dioceseId} value={searchParams.parishId} onChange={e => setSearchParams({...searchParams, parishId: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none disabled:opacity-30 focus:ring-2 focus:ring-[#D4AF37]">
-                                <option value="all">TODAS LAS PARROQUIAS</option>
-                                {filteredParishes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            <select 
+                                disabled={!searchParams.dioceseId} 
+                                value={searchParams.parishId} 
+                                onChange={e => setSearchParams({...searchParams, parishId: e.target.value})} 
+                                className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none disabled:opacity-30 focus:ring-2 focus:ring-[#D4AF37]"
+                            >
+                                <option value="all">-- TODAS LAS PARROQUIAS --</option>
+                                {filteredParishes.map(p => (
+                                    <option key={p.id} value={p.id}>
+                                        {p.name} {p.city ? `- ${p.city}` : ''}
+                                    </option>
+                                ))}
                             </select>
                         </div>
+
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Tipo de Acta</label>
                             <select value={searchParams.sacramentType} onChange={e => setSearchParams({...searchParams, sacramentType: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#D4AF37]">
