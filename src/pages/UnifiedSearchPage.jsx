@@ -20,7 +20,6 @@ const UnifiedSearchPage = () => {
 
     const [searchLoading, setSearchLoading] = useState(false);
     const [diocesesList, setDiocesesList] = useState([]);
-    const [parishesList, setParishesList] = useState([]);
     const [misDatosList, setMisDatosList] = useState([]); 
 
     const [searchParams, setSearchParams] = useState({ 
@@ -33,43 +32,47 @@ const UnifiedSearchPage = () => {
 
     const nombreEntidad = user?.parishName || user?.parish_name || 'BÚSQUEDA CENTRAL';
 
-    // 🚀 1. CARGA DE ENTIDADES ORDENADAS ALFABÉTICAMENTE
+    // 🚀 1. CARGA INICIAL (SOLO DIÓCESIS) PARA EVITAR LÍMITE DE 1000 FILAS
     useEffect(() => {
-        const fetchEntities = async () => {
+        const fetchInitialEntities = async () => {
             try {
-                const [dioRes, parRes, misRes] = await Promise.all([
-                    supabase.from('dioceses').select('*').order('name', { ascending: true }),
-                    supabase.from('parishes').select('*').order('name', { ascending: true }),
+                const [dioRes, misRes] = await Promise.all([
+                    supabase.from('dioceses').select('id, name').order('name', { ascending: true }),
                     supabase.from('mis_datos').select('entity_id, payload')
                 ]);
 
                 if (dioRes.data) setDiocesesList(dioRes.data);
                 if (misRes.data) setMisDatosList(misRes.data);
-                
-                if (parRes.data) {
-                    const mappedParishes = parRes.data.map(p => ({ ...p, dioceseId: p.diocese_id }));
-                    setParishesList(mappedParishes);
-                }
             } catch (error) {
-                console.error("Error cargando entidades desde Supabase:", error);
+                console.error("Error cargando entidades iniciales:", error);
                 toast({ title: "Error de conexión", description: "No se pudieron cargar las jurisdicciones.", variant: "destructive" });
             }
         };
-        fetchEntities();
+        fetchInitialEntities();
     }, [toast]);
 
-    // 🚀 2. EFECTO EN CASCADA PARA FILTRAR PARROQUIAS
+    // 🚀 2. EFECTO EN CASCADA: CARGAR PARROQUIAS DINÁMICAMENTE COMO EN CANCILLERÍA
     useEffect(() => {
-        if (searchParams.dioceseId === 'all') {
-            const validParishes = parishesList.filter(p => p.dioceseId !== null && p.dioceseId !== undefined);
-            setFilteredParishes(validParishes);
-        } else if (searchParams.dioceseId) {
-            const filtered = parishesList.filter(p => p.dioceseId === searchParams.dioceseId);
-            setFilteredParishes(filtered);
-        } else {
-            setFilteredParishes([]); 
-        }
-    }, [searchParams.dioceseId, parishesList]);
+        const loadParishes = async () => {
+            if (!searchParams.dioceseId || searchParams.dioceseId === 'all') {
+                setFilteredParishes([]); 
+                return;
+            }
+            try {
+                // Al filtrar por diócesis antes, evitamos el límite de Supabase
+                const { data } = await supabase
+                    .from('parishes')
+                    .select('id, name, city, diocese_id')
+                    .eq('diocese_id', searchParams.dioceseId)
+                    .order('name', { ascending: true });
+                
+                if (data) setFilteredParishes(data);
+            } catch (error) {
+                console.error("Error cargando parroquias:", error);
+            }
+        };
+        loadParishes();
+    }, [searchParams.dioceseId]);
 
     const dioceseOptions = useMemo(() => [{ id: 'all', name: 'TODAS LAS DIÓCESIS' }, ...diocesesList], [diocesesList]);
 
@@ -79,7 +82,7 @@ const UnifiedSearchPage = () => {
         { value: 'marriage', label: 'MATRIMONIO' },
     ];
 
-    // 🚀 3. MOTOR DE BÚSQUEDA INTERNO
+    // 🚀 3. MOTOR DE BÚSQUEDA INTELIGENTE
     const handleSearch = async (e) => {
         e.preventDefault();
         
@@ -97,50 +100,70 @@ const UnifiedSearchPage = () => {
 
         try {
             let all = [];
-            let parishesToSearch = [];
-            
-            // Lógica inteligente de asignación de IDs de parroquias a buscar
-            if (searchParams.parishId && searchParams.parishId !== 'all') {
-                const p = parishesList.find(p => p.id === searchParams.parishId);
-                if (p) parishesToSearch.push(p);
-            } else if (searchParams.dioceseId && searchParams.dioceseId !== 'all') {
-                parishesToSearch = parishesList.filter(p => p.dioceseId === searchParams.dioceseId);
-            } else if (searchParams.dioceseId === 'all') {
-                parishesToSearch = parishesList.filter(p => p.dioceseId !== null);
+            let isGlobal = searchParams.dioceseId === 'all';
+            let queryParishIds = [];
+
+            if (!isGlobal) {
+                if (searchParams.parishId && searchParams.parishId !== 'all') {
+                    queryParishIds = [searchParams.parishId];
+                } else {
+                    queryParishIds = filteredParishes.map(p => p.id);
+                }
+
+                if (queryParishIds.length === 0) {
+                    setResults([]);
+                    setSearchLoading(false);
+                    return;
+                }
             }
 
-            if (parishesToSearch.length === 0) {
-                setResults([]);
-                setSearchLoading(false);
-                return;
-            }
-
-            const parishIds = parishesToSearch.map(p => p.id);
             const type = searchParams.sacramentType;
             const fetchPromises = [];
 
-            // Consultas simultáneas a Supabase
-            if (!type || type === 'baptism') {
-                fetchPromises.push(
-                    supabase.from('baptisms').select('*').in('parish_id', parishIds)
-                    .then(res => ({ type: 'baptism', data: res.data || [] }))
-                );
-            }
-            if (!type || type === 'confirmation') {
-                fetchPromises.push(
-                    supabase.from('confirmations').select('*').in('parish_id', parishIds)
-                    .then(res => ({ type: 'confirmation', data: res.data || [] }))
-                );
-            }
+            // Constructor dinámico de consultas para hacer la búsqueda rápida en la base de datos
+            const buildQuery = (table) => {
+                let q = supabase.from(table).select('*');
+                if (!isGlobal) {
+                    q = q.in('parish_id', queryParishIds);
+                }
+                
+                // Si buscan nombres, aplicamos el filtro desde el servidor (ilike)
+                if (searchParams.firstName.trim() && table !== 'marriages' && table !== 'matrimonios') {
+                    q = q.ilike('nombres', `%${searchParams.firstName.trim()}%`);
+                }
+                if (searchParams.lastName.trim() && table !== 'marriages' && table !== 'matrimonios') {
+                    q = q.ilike('apellidos', `%${searchParams.lastName.trim()}%`);
+                }
+                return q;
+            };
+
+            if (!type || type === 'baptism') fetchPromises.push(buildQuery('baptisms').then(res => ({ type: 'baptism', data: res.data || [] })));
+            if (!type || type === 'confirmation') fetchPromises.push(buildQuery('confirmations').then(res => ({ type: 'confirmation', data: res.data || [] })));
             if (!type || type === 'marriage') {
                 fetchPromises.push(
-                    supabase.from('marriages').select('*').in('parish_id', parishIds)
-                    .then(res => ({ type: 'marriage', data: res.data || [] }))
-                    .catch(() => supabase.from('matrimonios').select('*').in('parish_id', parishIds).then(res => ({ type: 'marriage', data: res.data || [] })))
+                    buildQuery('marriages').then(res => ({ type: 'marriage', data: res.data || [] }))
+                    .catch(() => buildQuery('matrimonios').then(res => ({ type: 'marriage', data: res.data || [] })))
                 );
             }
 
             const fetchedResults = await Promise.all(fetchPromises);
+
+            // Identificar los IDs de todas las parroquias encontradas (esencial para la búsqueda global)
+            let allFoundParishIds = new Set();
+            fetchedResults.forEach(fetchResult => {
+                fetchResult.data.forEach(row => {
+                    if (row.parish_id) allFoundParishIds.add(row.parish_id);
+                });
+            });
+
+            // Si es global, buscar los nombres exactos de las parroquias encontradas
+            let allParishesRef = [...filteredParishes];
+            if (isGlobal && allFoundParishIds.size > 0) {
+                const { data: missingParishes } = await supabase.from('parishes').select('id, name, city, diocese_id').in('id', Array.from(allFoundParishIds));
+                if (missingParishes) {
+                    allParishesRef = missingParishes;
+                }
+            }
 
             fetchedResults.forEach(fetchResult => {
                 const sacType = fetchResult.type;
@@ -152,7 +175,7 @@ const UnifiedSearchPage = () => {
                 }));
 
                 cloudRecords.forEach(record => {
-                    const parish = parishesToSearch.find(p => p.id === record.parishId);
+                    const parish = allParishesRef.find(p => p.id === record.parishId);
                     if (!parish) return;
 
                     if (matchesSearch(record, searchParams, sacType)) {
@@ -175,7 +198,7 @@ const UnifiedSearchPage = () => {
                             ...record,
                             type: typeLabel,
                             parishName: parish.name,
-                            dioceseId: parish.dioceseId,
+                            dioceseId: parish.diocese_id || parish.dioceseId,
                             parishAddress
                         });
                     }
@@ -238,7 +261,7 @@ const UnifiedSearchPage = () => {
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Parroquia</label>
                             <select 
-                                disabled={!searchParams.dioceseId} 
+                                disabled={!searchParams.dioceseId || searchParams.dioceseId === 'all'} 
                                 value={searchParams.parishId} 
                                 onChange={e => setSearchParams({...searchParams, parishId: e.target.value})} 
                                 className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none disabled:opacity-30 focus:ring-2 focus:ring-[#D4AF37]"
