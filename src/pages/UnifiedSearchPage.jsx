@@ -31,7 +31,6 @@ const UnifiedSearchPage = () => {
 
     const nombreEntidad = user?.parishName || user?.parish_name || 'BÚSQUEDA CENTRAL';
 
-    // 🚀 1. CARGA INICIAL (DIÓCESIS Y DATOS GLOBALES)
     useEffect(() => {
         const fetchInitialEntities = async () => {
             try {
@@ -50,7 +49,6 @@ const UnifiedSearchPage = () => {
         fetchInitialEntities();
     }, [toast]);
 
-    // 🚀 2. EFECTO EN CASCADA: CARGAR PARROQUIAS DINÁMICAMENTE
     useEffect(() => {
         const loadParishes = async () => {
             if (!searchParams.dioceseId || searchParams.dioceseId === 'all') {
@@ -80,7 +78,6 @@ const UnifiedSearchPage = () => {
         { value: 'marriage', label: 'MATRIMONIO' },
     ];
 
-    // 🚀 3. MOTOR DE BÚSQUEDA PROFUNDO (BÚSQUEDA OPTIMIZADA DESDE DB)
     const handleSearch = async (e) => {
         e.preventDefault();
         
@@ -118,46 +115,30 @@ const UnifiedSearchPage = () => {
             const type = searchParams.sacramentType;
             const fetchPromises = [];
 
-            // 🚀 CONSTRUCTOR DE CONSULTAS BLINDADO (Filtra directo en Supabase para evitar perder datos)
+            // 🚀 LA SOLUCIÓN: Consulta DB Simple y Directa
             const buildQuery = (table) => {
-                // Para matrimonios traemos campos base. Para los demás traemos nombres y apellidos.
-                let selectFields = table === 'marriages' || table === 'matrimonios' 
-                    ? 'id, parish_id, raw_data, celebration_date' 
-                    : 'id, parish_id, raw_data, celebration_date, nombres, apellidos';
-
-                let q = supabase.from(table).select(selectFields).limit(5000);
+                let q = supabase.from(table).select('*').limit(20000); 
                 
-                // Filtro de parroquias (Omitido si es global)
                 if (!isGlobal) {
+                    // Si se seleccionó una parroquia (o varias), solo pedimos esos registros por ID.
+                    // Nada de consultas raras de JSONB. El filtrado fino se hará en JavaScript.
                     if (queryParishIds.length === 1) {
                         q = q.eq('parish_id', queryParishIds[0]);
                     } else {
                         q = q.in('parish_id', queryParishIds);
                     }
+                } else {
+                    // Solo si es una búsqueda GLOBAL (Todas las Diócesis) aplicamos un filtro básico
+                    // en DB para que no colapse el navegador descargando el país entero.
+                    if (table === 'baptisms' || table === 'confirmations') {
+                        if (searchParams.firstName) q = q.ilike('nombres', `%${searchParams.firstName.trim().split(' ')[0]}%`);
+                        if (searchParams.lastName) q = q.ilike('apellidos', `%${searchParams.lastName.trim().split(' ')[0]}%`);
+                    }
                 }
 
-                // Filtro de fechas directo en BD
+                // Las fechas son columnas nativas, así que filtrarlas en la DB es 100% seguro
                 if (searchParams.dateStart) q = q.gte('celebration_date', searchParams.dateStart);
                 if (searchParams.dateEnd) q = q.lte('celebration_date', searchParams.dateEnd);
-
-                const firstTerm = searchParams.firstName.trim().split(' ')[0];
-                const lastTerm = searchParams.lastName.trim().split(' ')[0];
-
-                if (table !== 'marriages' && table !== 'matrimonios') {
-                    // Búsqueda en Bautismos y Confirmaciones
-                    let orConditions = [];
-                    if (firstTerm) orConditions.push(`nombres.ilike.%${firstTerm}%,raw_data->>nombres.ilike.%${firstTerm}%,raw_data->>NOMBRES.ilike.%${firstTerm}%`);
-                    if (lastTerm) orConditions.push(`apellidos.ilike.%${lastTerm}%,raw_data->>apellidos.ilike.%${lastTerm}%,raw_data->>APELLIDOS.ilike.%${lastTerm}%`);
-                    
-                    if (orConditions.length > 0) q = q.or(orConditions.join(','));
-                } else {
-                    // Búsqueda en Matrimonios (Dentro del JSONB)
-                    let marriageOrs = [];
-                    if (firstTerm) marriageOrs.push(`raw_data->>ESPOSO.ilike.%${firstTerm}%,raw_data->>ESPOSA.ilike.%${firstTerm}%,raw_data->>groomName.ilike.%${firstTerm}%,raw_data->>brideName.ilike.%${firstTerm}%`);
-                    if (lastTerm) marriageOrs.push(`raw_data->>ESPOSO.ilike.%${lastTerm}%,raw_data->>ESPOSA.ilike.%${lastTerm}%,raw_data->>groomSurname.ilike.%${lastTerm}%,raw_data->>brideSurname.ilike.%${lastTerm}%`);
-                    
-                    if (marriageOrs.length > 0) q = q.or(marriageOrs.join(','));
-                }
                 
                 return q;
             };
@@ -180,7 +161,6 @@ const UnifiedSearchPage = () => {
                 });
             });
 
-            // Si es búsqueda global, descargar los nombres de las parroquias encontradas
             let allParishesRef = [...filteredParishes];
             if (isGlobal && allFoundParishIds.size > 0) {
                 const { data: missingParishes } = await supabase.from('parishes').select('id, name, city, address, diocese_id').in('id', Array.from(allFoundParishIds));
@@ -205,11 +185,10 @@ const UnifiedSearchPage = () => {
                     const parish = allParishesRef.find(p => p.id === record.parishId);
                     if (!parish) return;
 
-                    // El filtro del Frontend hace la revisión microscópica ignorando tildes y exactitudes
+                    // Si JavaScript encuentra la coincidencia, lo agregamos.
                     if (matchesSearch(record, searchParams, sacType)) {
                         let parishAddress = parish.address || 'Dirección no registrada';
                         
-                        // Intentar sacar de mis_datos como fallback
                         if (parishAddress === 'Dirección no registrada') {
                             const misDatosMatch = misDatosList.find(md => md.entity_id === parish.id);
                             if (misDatosMatch) {
@@ -236,7 +215,6 @@ const UnifiedSearchPage = () => {
                 });
             });
 
-            // Ordenar por fecha (los más recientes primero)
             all.sort((a, b) => new Date(b.dbDate || b.fechaSacramento || 0) - new Date(a.dbDate || a.fechaSacramento || 0));
             setResults(all);
             
@@ -248,19 +226,27 @@ const UnifiedSearchPage = () => {
         }
     };
 
-    // 🚀 NORMALIZADOR ESTRICTO (Ignora tildes, mayúsculas y espacios dobles)
     const normalizeText = (str) => {
         if (!str) return '';
         return String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, ' ').trim();
     };
 
+    // 🚀 FILTRO MODO "ATRAPA-TODO"
     const matchesSearch = (r, p, type) => {
-        // En matrimonios unimos ESPOSO y ESPOSA para buscar en ambos
-        const recordName = type === 'marriage' ? `${r.groomName || r.ESPOSO || ''} ${r.brideName || r.ESPOSA || ''}` : (r.dbNombres || r.firstName || r.nombres || r.NOMBRES || '');
-        const recordLastName = type === 'marriage' ? `${r.groomSurname || ''} ${r.brideSurname || ''}` : (r.dbApellidos || r.lastName || r.apellidos || r.APELLIDOS || '');
+        // Unimos absolutamente toda la información posible del acta en un solo texto.
+        // Así evitamos que se pierda el acta si los apellidos los guardaron en la columna de nombres por error.
+        let fullRecordText = '';
         
-        if (p.firstName && !normalizeText(recordName).includes(normalizeText(p.firstName))) return false;
-        if (p.lastName && !normalizeText(recordLastName).includes(normalizeText(p.lastName))) return false;
+        if (type === 'marriage' || type === 'MATRIMONIO') {
+            fullRecordText = `${r.groomName || ''} ${r.ESPOSO || ''} ${r.brideName || ''} ${r.ESPOSA || ''} ${r.groomSurname || ''} ${r.brideSurname || ''}`;
+        } else {
+            fullRecordText = `${r.dbNombres || ''} ${r.firstName || ''} ${r.nombres || ''} ${r.NOMBRES || ''} ${r.dbApellidos || ''} ${r.lastName || ''} ${r.apellidos || ''} ${r.APELLIDOS || ''}`;
+        }
+
+        fullRecordText = normalizeText(fullRecordText);
+
+        if (p.firstName && !fullRecordText.includes(normalizeText(p.firstName))) return false;
+        if (p.lastName && !fullRecordText.includes(normalizeText(p.lastName))) return false;
 
         return true;
     };
