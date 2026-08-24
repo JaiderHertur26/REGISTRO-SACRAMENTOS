@@ -13,7 +13,6 @@ import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabaseClient';
 
 const UnifiedSearchPage = () => {
-    // 🔐 AL ESTAR AQUÍ, GARANTIZAMOS QUE EL USUARIO TIENE UN ROL
     const { user } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
@@ -32,7 +31,7 @@ const UnifiedSearchPage = () => {
 
     const nombreEntidad = user?.parishName || user?.parish_name || 'BÚSQUEDA CENTRAL';
 
-    // 🚀 1. CARGA INICIAL (SOLO DIÓCESIS)
+    // 1. CARGA INICIAL
     useEffect(() => {
         const fetchInitialEntities = async () => {
             try {
@@ -44,14 +43,13 @@ const UnifiedSearchPage = () => {
                 if (dioRes.data) setDiocesesList(dioRes.data);
                 if (misRes.data) setMisDatosList(misRes.data);
             } catch (error) {
-                console.error("Error cargando entidades iniciales:", error);
                 toast({ title: "Error de conexión", description: "No se pudieron cargar las jurisdicciones.", variant: "destructive" });
             }
         };
         fetchInitialEntities();
     }, [toast]);
 
-    // 🚀 2. EFECTO EN CASCADA: CARGAR PARROQUIAS DINÁMICAMENTE
+    // 2. EFECTO EN CASCADA: PARROQUIAS
     useEffect(() => {
         const loadParishes = async () => {
             if (!searchParams.dioceseId || searchParams.dioceseId === 'all') {
@@ -66,9 +64,7 @@ const UnifiedSearchPage = () => {
                     .order('name', { ascending: true });
                 
                 if (data) setFilteredParishes(data);
-            } catch (error) {
-                console.error("Error cargando parroquias:", error);
-            }
+            } catch (error) {}
         };
         loadParishes();
     }, [searchParams.dioceseId]);
@@ -81,7 +77,7 @@ const UnifiedSearchPage = () => {
         { value: 'marriage', label: 'MATRIMONIO' },
     ];
 
-    // 🚀 3. MOTOR DE BÚSQUEDA PROFUNDO (ROMPE EL LÍMITE DE 1000 FILAS Y BUSCA JSON EN MAYÚSCULAS)
+    // 🚀 3. MOTOR DE BÚSQUEDA (DIRECTO A LAS COLUMNAS NATIVAS)
     const handleSearch = async (e) => {
         e.preventDefault();
         
@@ -119,24 +115,24 @@ const UnifiedSearchPage = () => {
             const type = searchParams.sacramentType;
             const fetchPromises = [];
 
-            // 🚀 CONSTRUCTOR DE CONSULTAS BLINDADO (Extrae la primera palabra para evitar errores de espacios en SQL)
+            // 🚀 BÚSQUEDA EXCLUSIVA EN COLUMNAS NATIVAS
             const buildQuery = (table) => {
-                let q = supabase.from(table).select('*').limit(5000); // Límite ampliado a 5000
+                let q = supabase.from(table).select('*').limit(5000);
                 
-                if (!isGlobal) {
-                    q = q.in('parish_id', queryParishIds);
-                }
-                
-                const firstTerm = searchParams.firstName.trim().split(' ')[0];
-                const lastTerm = searchParams.lastName.trim().split(' ')[0];
+                if (!isGlobal) q = q.in('parish_id', queryParishIds);
 
-                if (firstTerm && table !== 'marriages' && table !== 'matrimonios') {
-                    // Busca en la columna superior, en JSON minúscula y JSON mayúscula
-                    q = q.or(`nombres.ilike.%${firstTerm}%,raw_data->>nombres.ilike.%${firstTerm}%,raw_data->>NOMBRES.ilike.%${firstTerm}%`);
+                const fName = searchParams.firstName.trim();
+                const lName = searchParams.lastName.trim();
+
+                if (table === 'baptisms' || table === 'confirmations') {
+                    if (fName) q = q.ilike('nombres', `%${fName}%`);
+                    if (lName) q = q.ilike('apellidos', `%${lName}%`);
                 }
-                if (lastTerm && table !== 'marriages' && table !== 'matrimonios') {
-                    q = q.or(`apellidos.ilike.%${lastTerm}%,raw_data->>apellidos.ilike.%${lastTerm}%,raw_data->>APELLIDOS.ilike.%${lastTerm}%`);
-                }
+
+                // El filtro de fechas ahora se hace 100% sobre la base de datos oficial
+                if (searchParams.dateStart) q = q.gte('celebration_date', searchParams.dateStart);
+                if (searchParams.dateEnd) q = q.lte('celebration_date', searchParams.dateEnd);
+
                 return q;
             };
 
@@ -145,7 +141,6 @@ const UnifiedSearchPage = () => {
             if (!type || type === 'marriage') {
                 fetchPromises.push(
                     buildQuery('marriages').then(res => ({ type: 'marriage', data: res.data || [] }))
-                    .catch(() => buildQuery('matrimonios').then(res => ({ type: 'marriage', data: res.data || [] })))
                 );
             }
 
@@ -169,12 +164,13 @@ const UnifiedSearchPage = () => {
             fetchedResults.forEach(fetchResult => {
                 const sacType = fetchResult.type;
                 
-                // Mapeo exhaustivo asegurando las columnas padre
+                // 🚀 MAPEO EXACTO: Usamos la fecha y nombres reales de la tabla
                 const cloudRecords = fetchResult.data.map(dbRow => ({
                     id: dbRow.id,
                     parishId: dbRow.parish_id,
                     dbNombres: dbRow.nombres,
                     dbApellidos: dbRow.apellidos,
+                    dbDate: dbRow.celebration_date, // ¡Esta es la clave para que la fecha no falle!
                     ...(dbRow.raw_data || {})
                 }));
 
@@ -182,7 +178,6 @@ const UnifiedSearchPage = () => {
                     const parish = allParishesRef.find(p => p.id === record.parishId);
                     if (!parish) return;
 
-                    // El filtro del Frontend hace la revisión microscópica ignorando tildes y exactitudes
                     if (matchesSearch(record, searchParams, sacType)) {
                         let parishAddress = 'Dirección no registrada';
                         const misDatosMatch = misDatosList.find(md => md.entity_id === parish.id);
@@ -226,40 +221,14 @@ const UnifiedSearchPage = () => {
     };
 
     const matchesSearch = (r, p, type) => {
-        // Lee todas las llaves posibles (incluyendo las de base de datos directa y los JSON viejos en mayúsculas)
+        // Prioridad 1: Nombres nativos de la base de datos (r.dbNombres)
         const recordName = type === 'marriage' ? `${r.groomName || r.ESPOSO || ''} ${r.brideName || r.ESPOSA || ''}` : (r.dbNombres || r.firstName || r.nombres || r.NOMBRES || '');
         const recordLastName = type === 'marriage' ? `${r.groomSurname || ''} ${r.brideSurname || ''}` : (r.dbApellidos || r.lastName || r.apellidos || r.APELLIDOS || '');
         
         if (p.firstName && !normalizeText(recordName).includes(normalizeText(p.firstName))) return false;
         if (p.lastName && !normalizeText(recordLastName).includes(normalizeText(p.lastName))) return false;
 
-        // 🚀 FILTRO DE FECHAS SEGURO (Procesa DD/MM/YYYY y YYYY-MM-DD)
-        if (p.dateStart || p.dateEnd) {
-            const recordDate = r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"] || r["FECHA DE CONFIRMACIÓN"];
-            if (!recordDate) return false; 
-            
-            let rTime;
-            const rStr = String(recordDate).trim();
-            if (rStr.includes('/')) {
-                const parts = rStr.split('/');
-                rTime = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T12:00:00`).getTime();
-            } else {
-                rTime = new Date(rStr.includes('T') ? rStr : `${rStr}T12:00:00`).getTime();
-            }
-
-            if (isNaN(rTime)) return false;
-
-            if (p.dateStart) {
-                const sTime = new Date(`${p.dateStart}T00:00:00`).getTime();
-                if (rTime < sTime) return false;
-            }
-            if (p.dateEnd) {
-                const eTime = new Date(`${p.dateEnd}T23:59:59`).getTime();
-                if (rTime > eTime) return false;
-            }
-        }
-
-        return true;
+        return true; // Las fechas ya fueron filtradas nativamente por la base de datos
     };
 
     return (
@@ -359,7 +328,10 @@ const UnifiedSearchPage = () => {
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
                                     {results.map(r => {
                                         const name = r.type === 'MATRIMONIO' ? `${r.groomName || r.ESPOSO || ''} & ${r.brideName || r.ESPOSA || ''}` : `${(r.dbNombres || r.firstName || r.nombres || r.NOMBRES || '')} ${(r.dbApellidos || r.lastName || r.apellidos || r.APELLIDOS || '')}`;
-                                        const date = r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"] || r["FECHA DE CONFIRMACIÓN"];
+                                        
+                                        // Usamos SIEMPRE la fecha de la base de datos primero
+                                        const rawDate = r.dbDate || r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"];
+                                        const date = rawDate ? new Date(rawDate.includes('T') ? rawDate : `${rawDate}T12:00:00`).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' }) : '---';
 
                                         return (
                                             <motion.div whileHover={{ y: -5 }} key={`${r.type}-${r.id}`} className="bg-white p-6 lg:p-8 rounded-[2rem] shadow-xl shadow-blue-900/5 border-l-8 border-[#D4AF37] relative group overflow-hidden flex flex-col justify-between">
@@ -373,7 +345,7 @@ const UnifiedSearchPage = () => {
                                                 <div className="space-y-2 pt-4 lg:pt-6 mt-4 lg:mt-6 border-t border-gray-50">
                                                     <div className="flex items-center gap-3 text-gray-500">
                                                         <Calendar className="w-4 h-4 text-[#D4AF37] shrink-0" />
-                                                        <span className="text-[10px] lg:text-xs font-bold uppercase">{date || '---'}</span>
+                                                        <span className="text-[10px] lg:text-xs font-bold uppercase">{date}</span>
                                                     </div>
                                                     <div className="flex items-center gap-3 text-gray-500">
                                                         <Church className="w-4 h-4 text-[#4B7BA7] shrink-0" />
