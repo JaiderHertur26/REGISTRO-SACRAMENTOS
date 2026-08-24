@@ -13,6 +13,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabaseClient';
 
 const UnifiedSearchPage = () => {
+    // 🔐 AL ESTAR AQUÍ, GARANTIZAMOS QUE EL USUARIO TIENE UN ROL
     const { user } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
@@ -31,7 +32,7 @@ const UnifiedSearchPage = () => {
 
     const nombreEntidad = user?.parishName || user?.parish_name || 'BÚSQUEDA CENTRAL';
 
-    // 🚀 1. CARGA INICIAL (SOLO DIÓCESIS) 
+    // 🚀 1. CARGA INICIAL (SOLO DIÓCESIS)
     useEffect(() => {
         const fetchInitialEntities = async () => {
             try {
@@ -80,7 +81,7 @@ const UnifiedSearchPage = () => {
         { value: 'marriage', label: 'MATRIMONIO' },
     ];
 
-    // 🚀 3. MOTOR DE BÚSQUEDA INTELIGENTE Y PROFUNDO
+    // 🚀 3. MOTOR DE BÚSQUEDA PROFUNDO (ROMPE EL LÍMITE DE 1000 FILAS Y BUSCA JSON EN MAYÚSCULAS)
     const handleSearch = async (e) => {
         e.preventDefault();
         
@@ -118,9 +119,10 @@ const UnifiedSearchPage = () => {
             const type = searchParams.sacramentType;
             const fetchPromises = [];
 
-            // 🚀 CREADOR DE CONSULTAS BLINDADO: Extrae solo la primera palabra para evitar errores por tildes o espacios en la DB
+            // 🚀 CONSTRUCTOR DE CONSULTAS BLINDADO (Extrae la primera palabra para evitar errores de espacios en SQL)
             const buildQuery = (table) => {
-                let q = supabase.from(table).select('*');
+                let q = supabase.from(table).select('*').limit(5000); // Límite ampliado a 5000
+                
                 if (!isGlobal) {
                     q = q.in('parish_id', queryParishIds);
                 }
@@ -129,11 +131,11 @@ const UnifiedSearchPage = () => {
                 const lastTerm = searchParams.lastName.trim().split(' ')[0];
 
                 if (firstTerm && table !== 'marriages' && table !== 'matrimonios') {
-                    // Busca en la columna, en el JSON minúscula y en el JSON mayúscula
-                    q = q.or(`nombres.ilike.%${firstTerm}%,raw_data->>nombres.ilike.%${firstTerm}%,raw_data->>NOMBRES.ilike.%${firstTerm}%,raw_data->>firstName.ilike.%${firstTerm}%`);
+                    // Busca en la columna superior, en JSON minúscula y JSON mayúscula
+                    q = q.or(`nombres.ilike.%${firstTerm}%,raw_data->>nombres.ilike.%${firstTerm}%,raw_data->>NOMBRES.ilike.%${firstTerm}%`);
                 }
                 if (lastTerm && table !== 'marriages' && table !== 'matrimonios') {
-                    q = q.or(`apellidos.ilike.%${lastTerm}%,raw_data->>apellidos.ilike.%${lastTerm}%,raw_data->>APELLIDOS.ilike.%${lastTerm}%,raw_data->>lastName.ilike.%${lastTerm}%`);
+                    q = q.or(`apellidos.ilike.%${lastTerm}%,raw_data->>apellidos.ilike.%${lastTerm}%,raw_data->>APELLIDOS.ilike.%${lastTerm}%`);
                 }
                 return q;
             };
@@ -167,9 +169,12 @@ const UnifiedSearchPage = () => {
             fetchedResults.forEach(fetchResult => {
                 const sacType = fetchResult.type;
                 
+                // Mapeo exhaustivo asegurando las columnas padre
                 const cloudRecords = fetchResult.data.map(dbRow => ({
                     id: dbRow.id,
                     parishId: dbRow.parish_id,
+                    dbNombres: dbRow.nombres,
+                    dbApellidos: dbRow.apellidos,
                     ...(dbRow.raw_data || {})
                 }));
 
@@ -177,7 +182,7 @@ const UnifiedSearchPage = () => {
                     const parish = allParishesRef.find(p => p.id === record.parishId);
                     if (!parish) return;
 
-                    // El filtro del Frontend hace la revisión exhaustiva
+                    // El filtro del Frontend hace la revisión microscópica ignorando tildes y exactitudes
                     if (matchesSearch(record, searchParams, sacType)) {
                         let parishAddress = 'Dirección no registrada';
                         const misDatosMatch = misDatosList.find(md => md.entity_id === parish.id);
@@ -214,19 +219,19 @@ const UnifiedSearchPage = () => {
         }
     };
 
-    // 🚀 NORMALIZADOR (Ignora tildes y mayúsculas)
+    // 🚀 NORMALIZADOR ESTRICTO (Ignora tildes, mayúsculas y espacios dobles)
     const normalizeText = (str) => {
         if (!str) return '';
-        return String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        return String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, ' ').trim();
     };
 
     const matchesSearch = (r, p, type) => {
-        // Lee todas las llaves posibles, tanto en minúscula como las antiguas en MAYÚSCULA
-        const recordName = type === 'marriage' ? `${r.groomName || r.ESPOSO || ''} ${r.brideName || r.ESPOSA || ''}` : (r.firstName || r.nombres || r.NOMBRES || '');
-        const recordLastName = type === 'marriage' ? `${r.groomSurname || ''} ${r.brideSurname || ''}` : (r.lastName || r.apellidos || r.APELLIDOS || '');
+        // Lee todas las llaves posibles (incluyendo las de base de datos directa y los JSON viejos en mayúsculas)
+        const recordName = type === 'marriage' ? `${r.groomName || r.ESPOSO || ''} ${r.brideName || r.ESPOSA || ''}` : (r.dbNombres || r.firstName || r.nombres || r.NOMBRES || '');
+        const recordLastName = type === 'marriage' ? `${r.groomSurname || ''} ${r.brideSurname || ''}` : (r.dbApellidos || r.lastName || r.apellidos || r.APELLIDOS || '');
         
-        if (p.firstName && !normalizeText(recordName).includes(normalizeText(p.firstName.trim()))) return false;
-        if (p.lastName && !normalizeText(recordLastName).includes(normalizeText(p.lastName.trim()))) return false;
+        if (p.firstName && !normalizeText(recordName).includes(normalizeText(p.firstName))) return false;
+        if (p.lastName && !normalizeText(recordLastName).includes(normalizeText(p.lastName))) return false;
 
         // 🚀 FILTRO DE FECHAS SEGURO (Procesa DD/MM/YYYY y YYYY-MM-DD)
         if (p.dateStart || p.dateEnd) {
@@ -353,7 +358,7 @@ const UnifiedSearchPage = () => {
                             ) : (
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
                                     {results.map(r => {
-                                        const name = r.type === 'MATRIMONIO' ? `${r.groomName || r.ESPOSO || ''} & ${r.brideName || r.ESPOSA || ''}` : `${(r.firstName || r.nombres || r.NOMBRES || '')} ${(r.lastName || r.apellidos || r.APELLIDOS || '')}`;
+                                        const name = r.type === 'MATRIMONIO' ? `${r.groomName || r.ESPOSO || ''} & ${r.brideName || r.ESPOSA || ''}` : `${(r.dbNombres || r.firstName || r.nombres || r.NOMBRES || '')} ${(r.dbApellidos || r.lastName || r.apellidos || r.APELLIDOS || '')}`;
                                         const date = r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"] || r["FECHA DE CONFIRMACIÓN"];
 
                                         return (
