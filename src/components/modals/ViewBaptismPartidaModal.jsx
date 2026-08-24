@@ -1,156 +1,23 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { 
     X, Printer, BookOpen, Fingerprint, 
     ShieldCheck, CheckCircle2, AlertCircle, Info,
-    User, Users, MapPin, PenTool, AlertOctagon
+    User, Users, MapPin, PenTool, AlertOctagon, FileText
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import BaptismPrintTemplate from '@/components/BaptismPrintTemplate';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import { useAppData } from '@/context/AppDataContext'; // 🚀 Necesario para acceder a los sacerdotes
+import { useAppData } from '@/context/AppDataContext';
+import { supabase } from '@/lib/supabaseClient';
 
-// --- COMPONENTE: PANEL DE DETALLES EXTENDIDO (INSPECCIÓN PARROQUIAL) ---
-const InfoBox = ({ data, parishId, getParrocos }) => {
-    if (!data) return null;
-    
-    const isReplacement = data.isSupplementary || data.tipoIdentidad === 'id_creada_reposicion';
-
-    // Limpieza de Ministro
-    const getResolvedMinistro = () => {
-        let min = data.ministro;
-        if (!min || !isNaN(Number(String(min).trim()))) return '---';
-        min = String(min).replace(/^(PBRO\.?\s*|PADRE\s*|SACERDOTE\s*)/i, '').trim();
-        return `PBRO. ${min}`;
-    };
-
-    // 🚀 RESOLUCIÓN INTELIGENTE DEL PÁRROCO QUE DA FE (MÁQUINA DEL TIEMPO)
-    const getResolvedDaFe = () => {
-        let rawDaFe = data.daFe || data.dafe || data.da_fe;
-        
-        // Si está vacío, es número (viejo sistema) o dice encargado
-        if (!rawDaFe || rawDaFe === '---' || rawDaFe.includes('ENCARGADO') || !isNaN(Number(String(rawDaFe).trim()))) {
-            
-            // 1. Clonar desde Ministro si es válido
-            let ministroRaw = data.ministro;
-            if (ministroRaw && isNaN(Number(String(ministroRaw).trim()))) {
-                rawDaFe = ministroRaw.toUpperCase();
-            } 
-            // 2. Máquina del Tiempo
-            else if (parishId && getParrocos) {
-                const sacerdotes = getParrocos(parishId) || [];
-                if (data.fechaSacramento) {
-                    const fechaSac = new Date(data.fechaSacramento.includes('T') ? data.fechaSacramento : `${data.fechaSacramento}T12:00:00`);
-                    const sacerdoteEpoca = sacerdotes.find(s => {
-                        if (!s.fechaIngreso && !s.fechaNombramiento) return false;
-                        const iStr = (s.fechaIngreso || s.fechaNombramiento).includes('T') ? (s.fechaIngreso || s.fechaNombramiento) : `${s.fechaIngreso || s.fechaNombramiento}T12:00:00`;
-                        const inicio = new Date(iStr);
-                        const fin = s.fechaSalida ? new Date(s.fechaSalida.includes('T') ? s.fechaSalida : `${s.fechaSalida}T12:00:00`) : new Date();
-                        return fechaSac >= inicio && fechaSac <= fin;
-                    });
-                    if (sacerdoteEpoca) rawDaFe = `${sacerdoteEpoca.nombre} ${sacerdoteEpoca.apellido || ''}`.trim().toUpperCase();
-                }
-                
-                // 3. Fallback: Actual
-                if (!rawDaFe || rawDaFe === '---' || !isNaN(Number(String(rawDaFe).trim()))) {
-                    const actual = sacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
-                    if (actual) rawDaFe = `${actual.nombre} ${actual.apellido || ''}`.trim().toUpperCase();
-                }
-            }
-        }
-        
-        if (!rawDaFe || !isNaN(Number(String(rawDaFe).trim()))) rawDaFe = 'EL PÁRROCO';
-        rawDaFe = String(rawDaFe).replace(/^(PBRO\.?\s*|PADRE\s*|SACERDOTE\s*)/i, '').trim();
-        return rawDaFe !== 'EL PÁRROCO' ? `PBRO. ${rawDaFe}` : rawDaFe;
-    };
-
-    return (
-        <div className="mt-8 border border-slate-200/80 rounded-[2.5rem] overflow-hidden shadow-2xl bg-white animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <div className="bg-slate-900 px-8 py-5 flex justify-between items-center">
-                <h3 className="text-white font-black text-xs uppercase tracking-[0.2em] flex items-center gap-3">
-                   <Info className="w-4 h-4 text-[#D4AF37]" /> Inspección de Registro Parroquial
-                </h3>
-                {isReplacement && (
-                    <span className="bg-amber-400 text-slate-900 text-[9px] font-black uppercase px-3 py-1 rounded-full flex items-center gap-1 shadow-sm">
-                        <AlertOctagon className="w-3 h-3"/> Acta por Decreto
-                    </span>
-                )}
-            </div>
-
-            <div className="p-8 space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-center bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100">
-                    <div className="space-y-1">
-                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block">Localización Física</span>
-                        <span className="text-base font-black text-[#4B7BA7] font-mono bg-white px-4 py-2 rounded-xl border border-blue-100 inline-block shadow-sm">
-                            L:{data.Libro} • F:{data.folio} • N:{data.numero}
-                        </span>
-                    </div>
-                    <div className="md:col-span-2 space-y-1">
-                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block">Bautizado (Apellidos y Nombres)</span>
-                        <span className="text-xl font-black text-slate-900 uppercase tracking-tight block">
-                            {data.apellidos} {data.nombres}
-                        </span>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <DetailItem icon={MapPin} label="Lugar Nacimiento" value={data.lugarNacimiento} />
-                    <DetailItem icon={User} label="Fecha Nacimiento" value={data.fechaNacimiento} />
-                    <DetailItem icon={MapPin} label="Lugar Bautismo" value={data.lugarBautismo} />
-                    <DetailItem icon={User} label="Fecha Bautismo" value={data.fechaSacramento} />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-blue-50/20 p-6 rounded-[2rem] border border-blue-100/50 space-y-4">
-                        <h4 className="text-[10px] font-black text-blue-900 uppercase tracking-widest flex items-center gap-2">
-                            <Users className="w-3.5 h-3.5 text-blue-600" /> Línea Paterna
-                        </h4>
-                        <DetailItem label="Padre" value={data.nombrePadre} />
-                        <DetailItem label="Abuelos Paternos" value={data.abuelosPaternos} isItalic />
-                    </div>
-                    <div className="bg-pink-50/20 p-6 rounded-[2rem] border border-pink-100/50 space-y-4">
-                        <h4 className="text-[10px] font-black text-pink-900 uppercase tracking-widest flex items-center gap-2">
-                            <Users className="w-3.5 h-3.5 text-pink-600" /> Línea Materna
-                        </h4>
-                        <DetailItem label="Madre" value={data.nombreMadre} />
-                        <DetailItem label="Abuelos Maternos" value={data.abuelosMaternos} isItalic />
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100">
-                    <DetailItem icon={Users} label="Padrinos" value={data.padrinos} />
-                    <DetailItem icon={PenTool} label="Ministro Celebrante" value={getResolvedMinistro()} />
-                    <div className="space-y-1">
-                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block flex items-center gap-1">
-                            <ShieldCheck className="w-3 h-3 text-[#D4AF37]" /> Párroco que Da Fe
-                        </span>
-                        <span className="text-xs font-black text-[#4B7BA7] uppercase bg-white px-3 py-1.5 rounded-xl border border-blue-100 inline-block shadow-sm">
-                            {getResolvedDaFe()}
-                        </span>
-                    </div>
-                </div>
-
-                <div className="p-6 rounded-[2rem] border bg-amber-50/30 border-amber-200/60 shadow-sm">
-                    <h4 className="text-[10px] font-black text-amber-800 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
-                        <BookOpen className="w-3.5 h-3.5 text-amber-600" /> Nota Marginal
-                    </h4>
-                    <p className="text-xs font-bold text-slate-700 leading-relaxed font-mono uppercase italic">
-                        "{data.notaMarginal || 'SIN NOTAS MARGINALES ADICIONALES HASTA LA FECHA.'}"
-                    </p>
-                </div>
-            </div>
+const InfoCard = ({ label, val, icon: Icon }) => (
+    <div className="bg-white/80 backdrop-blur-sm p-5 rounded-[2rem] border border-white shadow-sm flex items-center gap-4">
+        <div className="bg-blue-50 p-2.5 rounded-xl text-[#4B7BA7]"><Icon className="w-4 h-4"/></div>
+        <div className="text-left">
+            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-0.5">{label}</span>
+            <span className="text-xs font-black text-gray-800 uppercase tracking-tight line-clamp-1">{val}</span>
         </div>
-    );
-};
-
-const DetailItem = ({ icon: Icon, label, value, isItalic = false }) => (
-    <div className="space-y-1 text-left">
-        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-            {Icon && <Icon className="w-3 h-3 text-slate-400" />} {label}
-        </span>
-        <span className={`text-xs font-bold text-slate-800 uppercase block ${isItalic ? 'italic font-medium text-slate-500' : ''}`}>
-            {value || '---'}
-        </span>
     </div>
 );
 
@@ -167,26 +34,68 @@ const Badge = ({ color, icon: Icon, label }) => {
     );
 };
 
-const InfoCard = ({ label, val, icon: Icon }) => (
-    <div className="bg-white/80 backdrop-blur-sm p-5 rounded-[2rem] border border-white shadow-sm flex items-center gap-4">
-        <div className="bg-blue-50 p-2.5 rounded-xl text-[#4B7BA7]"><Icon className="w-4 h-4"/></div>
-        <div className="text-left">
-            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-0.5">{label}</span>
-            <span className="text-xs font-black text-gray-800 uppercase tracking-tight">{val}</span>
-        </div>
-    </div>
-);
-
-
 const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) => {
     const componenteImpresionRef = useRef();
-    const { getParrocos } = useAppData(); // 🚀 Importamos getParrocos
+    const { getParrocos } = useAppData(); 
+
+    // 🚀 ESTADOS PARA LAS NOTAS MARGINALES DINÁMICAS
+    const [marginalNotes, setMarginalNotes] = useState([]);
+    const [selectedNotes, setSelectedNotes] = useState([]);
+    const [templates, setTemplates] = useState({});
+
+    const parishId = partida?.parishId || partida?.parish_id || auxiliaryData?.entity_id || auxiliaryData?.id;
+
+    // 🚀 1. CARGA DE NOTAS Y PLANTILLAS
+    useEffect(() => {
+        if (isOpen && parishId) {
+            // Extraer plantillas de certificación
+            const storedData = localStorage.getItem(`marginalNotesTemplates_${parishId}`);
+            if (storedData) setTemplates(JSON.parse(storedData));
+        }
+        
+        if (isOpen && partida?.id) {
+            const fetchNotes = async () => {
+                const { data, error } = await supabase
+                    .from('marginal_notes')
+                    .select('*')
+                    .eq('sacrament_id', partida.id)
+                    .order('created_at', { ascending: true });
+                if (!error && data) {
+                    setMarginalNotes(data);
+                    // Por defecto, marcamos todas las notas encontradas para imprimir
+                    setSelectedNotes(data.map(n => n.id));
+                }
+            };
+            fetchNotes();
+        }
+    }, [isOpen, partida?.id, parishId]);
 
     if (!isOpen || !partida) return null;
 
-    const parishId = partida.parishId || partida.parish_id || auxiliaryData?.entity_id || auxiliaryData?.id;
+    // 🚀 2. CONSTRUCCIÓN DE LA NOTA MARGINAL "A LA CARTA"
+    const baseNotaOriginal = partida.notaMarginal && partida.notaMarginal !== "---" ? partida.notaMarginal : "";
+    const mandatoryNote = templates.certificacion_estandar || "LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO.";
+    
+    // Obtenemos los textos de las notas que el usuario dejó seleccionadas (con checkbox)
+    const selectedNotesContent = marginalNotes
+        .filter(n => selectedNotes.includes(n.id))
+        .map(n => n.content)
+        .join(' // ');
 
-    // 🚀 OBTENEMOS EL "DA FE" HISTÓRICO PARA INYECTARLO AL PDF
+    // Concatenamos: Nota Base Original (si hay) + Notas Dinámicas + Certificación Obligatoria
+    let finalNotaMarginalFormada = [];
+    if (baseNotaOriginal) finalNotaMarginalFormada.push(baseNotaOriginal);
+    if (selectedNotesContent) finalNotaMarginalFormada.push(selectedNotesContent);
+
+    let finalNotaMarginal = '';
+    if (finalNotaMarginalFormada.length > 0) {
+        const cleanMandatory = mandatoryNote.replace(/SIN NOTAS MARGINALES ADICIONALES HASTA LA FECHA\.?/i, '').trim();
+        finalNotaMarginal = `${finalNotaMarginalFormada.join(' // ')} // ${cleanMandatory}`.trim();
+    } else {
+        finalNotaMarginal = mandatoryNote; // Si no hay notas extra, va la obligatoria por defecto.
+    }
+
+    // 🚀 3. RESOLVER EL "DA FE" HISTÓRICO
     let rawDaFe = partida.daFe || partida.dafe || partida.da_fe;
     if (!rawDaFe || rawDaFe === '---' || rawDaFe.includes('ENCARGADO') || !isNaN(Number(String(rawDaFe).trim()))) {
         let ministroRaw = partida.ministro;
@@ -208,12 +117,8 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
         }
     }
     
-    // Inyectamos el Sacerdote Histórico calculado temporalmente al objeto partida para que el PDF lo lea
-    const partidaParaImprimir = { ...partida, daFe: rawDaFe };
-
-    const notaVisual = partida.notaMarginal && partida.notaMarginal !== "---" 
-        ? partida.notaMarginal 
-        : "REGISTRO SIN NOTAS MARGINALES ADICIONALES (CERTIFICACIÓN ESTÁNDAR).";
+    // Inyectamos el Sacerdote Histórico y la Nota Compuesta "A la Carta" al PDF
+    const partidaParaImprimir = { ...partida, daFe: rawDaFe, notaMarginal: finalNotaMarginal };
 
     const estaAnulada = partida.tipoIdentidad === 'id_anulada_correccion' || partida.estado === 'anulada';
     const esReposicion = partida.tipoIdentidad === 'id_creada_reposicion';
@@ -266,14 +171,14 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                 </div>
                                 <div>
                                     <div className="flex items-center gap-3">
-                                        <h2 className="text-2xl font-black text-gray-900 tracking-tighter uppercase">Inspección de Partida</h2>
+                                        <h2 className="text-2xl font-black text-gray-900 tracking-tighter uppercase">Impresión de Partida</h2>
                                         <div className="flex gap-2">
                                             {estaAnulada && <Badge color="red" icon={AlertCircle} label="Anulada" />}
                                             {esReposicion && <Badge color="amber" icon={ShieldCheck} label="Reposición" />}
                                             {!estaAnulada && <Badge color="green" icon={CheckCircle2} label="Vigente" />}
                                         </div>
                                     </div>
-                                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.3em] mt-1">Sincronizado con Base de Datos Central</p>
+                                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.3em] mt-1">Configure las notas al margen antes de imprimir</p>
                                 </div>
                             </div>
                             <button onClick={onClose} className="p-3 hover:bg-gray-100 rounded-full transition-all text-gray-400 hover:text-gray-900">
@@ -281,21 +186,73 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                             </button>
                         </div>
 
-                        {/* VISUALIZADOR DE DOCUMENTO */}
-                        <div className="flex-1 overflow-y-auto bg-slate-200/50 p-6 md:p-12 flex flex-col items-center gap-10 custom-scrollbar">
+                        {/* VISUALIZADOR Y CONFIGURADOR */}
+                        <div className="flex-1 overflow-y-auto bg-slate-200/50 p-6 md:p-12 flex flex-col items-center gap-6 custom-scrollbar">
                             
                             {/* Panel de Ubicación Física */}
-                            <div className="w-full max-w-[8.5in] grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="w-full max-w-[8.5in] grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <InfoCard 
                                     label="Ubicación en Archivo" 
                                     val={`Libro ${partida.Libro} • Folio ${partida.folio} • Acta ${partida.numero}`} 
                                     icon={BookOpen}
                                 />
-                                <div className="md:col-span-2 bg-white/80 backdrop-blur-sm p-5 rounded-[2rem] border border-white shadow-sm flex items-start gap-4">
-                                    <div className="bg-amber-100 p-2 rounded-xl text-amber-600"><AlertCircle className="w-4 h-4"/></div>
-                                    <div className="flex-1">
-                                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-1">Nota Marginal Proyectada</span>
-                                        <p className="text-[11px] font-bold text-gray-600 leading-relaxed italic line-clamp-2 uppercase">"{notaVisual}"</p>
+                                <InfoCard 
+                                    label="Bautizado" 
+                                    val={`${partida.apellidos} ${partida.nombres}`} 
+                                    icon={User}
+                                />
+                            </div>
+
+                            {/* 🚀 SELECTOR INTELIGENTE DE NOTAS MARGINALES A LA CARTA */}
+                            <div className="w-full max-w-[8.5in] bg-white/80 backdrop-blur-sm p-6 rounded-[2rem] border border-gray-200 shadow-sm mt-2 mb-4">
+                                <div className="flex items-center gap-3 mb-5 border-b border-gray-100 pb-3">
+                                    <div className="bg-amber-100 p-2 rounded-xl text-amber-600"><FileText className="w-4 h-4"/></div>
+                                    <h4 className="text-sm font-black text-gray-800 uppercase tracking-widest">Configuración de Notas a Imprimir</h4>
+                                </div>
+                                
+                                <div className="space-y-3">
+                                    {baseNotaOriginal && (
+                                        <div className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 border border-gray-200 opacity-60">
+                                            <input type="checkbox" checked disabled className="mt-1 w-4 h-4 text-gray-400 rounded cursor-not-allowed" />
+                                            <div className="flex-1">
+                                                <span className="text-[10px] font-black uppercase text-gray-500 block mb-0.5">Nota Original de la Partida Física</span>
+                                                <p className="text-[11px] font-bold text-gray-700 uppercase italic leading-relaxed">"{baseNotaOriginal}"</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {marginalNotes.length > 0 ? (
+                                        marginalNotes.map(note => (
+                                            <label key={note.id} className="flex items-start gap-3 p-3 rounded-xl border border-[#4B7BA7]/30 bg-blue-50/20 hover:bg-blue-50/50 cursor-pointer transition-colors shadow-sm">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={selectedNotes.includes(note.id)}
+                                                    onChange={(e) => {
+                                                        if (e.target.checked) setSelectedNotes([...selectedNotes, note.id]);
+                                                        else setSelectedNotes(selectedNotes.filter(id => id !== note.id));
+                                                    }}
+                                                    className="mt-1 w-4 h-4 text-[#4B7BA7] rounded focus:ring-[#4B7BA7] cursor-pointer"
+                                                />
+                                                <div className="flex-1">
+                                                    <span className="text-[10px] font-black uppercase text-[#4B7BA7] block mb-0.5 border-b border-blue-100/50 pb-1">
+                                                        ANEXO DINÁMICO: {note.note_type} • {note.note_date}
+                                                    </span>
+                                                    <p className="text-xs font-bold text-gray-800 uppercase italic leading-relaxed mt-1">"{note.content}"</p>
+                                                </div>
+                                            </label>
+                                        ))
+                                    ) : (
+                                        <p className="text-[11px] font-bold text-gray-400 uppercase italic px-2">No se encontraron anexos ni cruces sacramentales para este bautizado.</p>
+                                    )}
+                                    
+                                    <div className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                                        <input type="checkbox" checked disabled className="mt-1 w-4 h-4 text-slate-400 rounded cursor-not-allowed opacity-50" />
+                                        <div className="flex-1">
+                                            <span className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">Certificación (Obligatoria)</span>
+                                            <p className="text-[11px] font-bold text-slate-600 uppercase italic leading-relaxed">
+                                                "{mandatoryNote}"
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -316,7 +273,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                     {/* Componente de Impresión Final */}
                                     <div ref={componenteImpresionRef} className="print-root">
                                         <BaptismPrintTemplate 
-                                            data={partidaParaImprimir} // 🚀 Pasamos el objeto con el Sacerdote Histórico Inyectado
+                                            data={partidaParaImprimir} // 🚀 El PDF recibe la súper Nota Marginal Concatenada
                                             parroquiaInfo={auxiliaryData} 
                                         />
                                     </div>
@@ -330,7 +287,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                 <div className="flex flex-col">
                                     <span className="text-[9px] font-black text-gray-300 uppercase tracking-widest leading-none mb-1">Estado de Integridad</span>
                                     <span className="text-xs font-bold text-green-500 flex items-center gap-1.5 uppercase">
-                                        <CheckCircle2 className="w-3.5 h-3.5" /> Registro Firmado
+                                        <CheckCircle2 className="w-3.5 h-3.5" /> Registro Preparado
                                     </span>
                                 </div>
                                 <div className="h-8 w-px bg-gray-100 hidden md:block"></div>
@@ -348,7 +305,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                     onClick={ejecutarImpresion} 
                                     className="flex-1 sm:flex-none bg-[#4B7BA7] hover:bg-[#3A6286] text-white shadow-xl shadow-blue-900/20 font-black px-12 py-7 rounded-2xl gap-3 transition-all transform active:scale-95 text-[11px] uppercase tracking-widest"
                                 >
-                                    <Printer className="w-5 h-5" /> Imprimir Acta
+                                    <Printer className="w-5 h-5" /> Imprimir Partida Oficial
                                 </Button>
                             </div>
                         </div>

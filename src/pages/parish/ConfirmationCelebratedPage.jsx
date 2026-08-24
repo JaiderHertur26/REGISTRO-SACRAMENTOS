@@ -6,11 +6,12 @@ import { Button } from '@/components/ui/button';
 import { 
     Save, Calendar, User, Users, 
     BookOpen, PenTool, Loader2, Fingerprint,
-    ShieldCheck, ArrowLeft, Search, Droplet, FileText
+    ShieldCheck, ArrowLeft, Search, Droplet
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabaseClient';
+import { generateUUID } from '@/utils/supabaseHelpers';
 import SearchBaptismPartidaModal from '@/components/modals/SearchBaptismPartidaModal';
 import { motion } from 'framer-motion';
 
@@ -30,28 +31,16 @@ const ConfirmationCelebratedPage = () => {
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
-    
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+    
+    // 🚀 NUEVO: Guardar el ID del Bautismo seleccionado para enlazar la Nota Marginal
+    const [selectedBaptismId, setSelectedBaptismId] = useState(null);
 
-    // 🚀 ESTADO: Libro, Folio y Número inician en blanco para obligar la digitación manual
     const [formData, setFormData] = useState({
-        Libro: '', 
-        folio: '', 
-        numero: '',
-        fechaSacramento: '', 
-        lugarSacramento: '', 
-        apellidos: '', 
-        nombres: '', 
-        sexo: '', 
-        fechaNacimiento: '', 
-        edad: '',
-        nombrePadre: '', 
-        nombreMadre: '', 
-        lugarBautismo: '',
-        padrinos: '', 
-        ministro: '', 
-        daFe: '',
-        notaMarginal: ''
+        Libro: '', folio: '', numero: '',
+        fechaSacramento: '', lugarSacramento: '', apellidos: '', nombres: '', 
+        sexo: '', fechaNacimiento: '', edad: '', nombrePadre: '', nombreMadre: '', 
+        lugarBautismo: '', padrinos: '', ministro: '', daFe: '', notaMarginal: ''
     });
 
     useEffect(() => {
@@ -132,6 +121,9 @@ const ConfirmationCelebratedPage = () => {
 
         const raw = partida.raw_data || partida || {};
 
+        // 🚀 GUARDAMOS EL ID DEL BAUTISMO ENLAZADO
+        setSelectedBaptismId(partida.id);
+
         setFormData(prev => ({
             ...prev,
             nombres: partida.nombres || partida.firstName || raw.nombres || prev.nombres,
@@ -143,7 +135,7 @@ const ConfirmationCelebratedPage = () => {
             lugarBautismo: partida.lugarBautismo || partida.baptismPlace || raw.lugarBautismo || raw.LUGBAU || prev.lugarBautismo
         }));
         
-        toast({ title: "Datos Importados", description: `Se han cargado los datos de la partida origen.`, className: "bg-red-50 border-red-200 text-red-900" });
+        toast({ title: "Bautismo Enlazado", description: `Datos cargados y vinculados para generación de nota marginal.`, className: "bg-red-50 border-red-200 text-red-900" });
         setIsSearchModalOpen(false);
     };
 
@@ -182,6 +174,7 @@ const ConfirmationCelebratedPage = () => {
 
             const cleanDate = (d) => (d && String(d).trim() !== '') ? d : null;
 
+            // 1. INSERTAR CONFIRMACIÓN
             const { error: errConf } = await supabase.from('confirmations').insert([{
                 parish_id: parishId,
                 book_number: formData.Libro,
@@ -206,9 +199,45 @@ const ConfirmationCelebratedPage = () => {
 
             if (errConf) throw errConf;
 
-            // 🚀 SE ELIMINÓ COMPLETAMENTE EL BLOQUE QUE ACTUALIZABA EL CONSECUTIVO EN PARISH_PARAMETERS
+            // 🚀 2. INYECCIÓN AUTOMÁTICA DE LA NOTA MARGINAL AL BAUTISMO ENLAZADO
+            if (selectedBaptismId) {
+                const storedTemplates = localStorage.getItem(`marginalNotesTemplates_${parishId}`);
+                const templates = storedTemplates ? JSON.parse(storedTemplates) : {};
+                
+                const templateNota = templates.bautismo_confirmado || "EL [FECHA_CONFIRMACION] FUE CONFIRMADO(A) EN LA PARROQUIA [PARROQUIA_CONFIRMACION]. DIÓCESIS DE [DIOCESIS_CONFIRMACION]. L-[LIBRO_CONF], F-[FOLIO_CONF], N-[NUMERO_CONF].";
+                
+                const misDatos = getMisDatosList(parishId);
+                const nombreInstitucion = misDatos && misDatos.length > 0 ? misDatos[0].nombre : nombreParroquia;
+                const nombreDiocesis = misDatos && misDatos.length > 0 ? misDatos[0].diocesis : 'ARQUIDIÓCESIS DE BARRANQUILLA';
 
-            toast({ title: "Asentamiento Exitoso", description: "La confirmación ha sido inyectada en la base de datos.", className: "bg-green-50 text-green-900 border-green-200" });
+                const formatearFechaNota = (dStr) => {
+                    if (!dStr) return '';
+                    const d = new Date(dStr.includes('T') ? dStr : `${dStr}T12:00:00`);
+                    return `${d.getDate()} DE ${d.toLocaleString('es-CO', { month: 'long' }).toUpperCase()} DE ${d.getFullYear()}`;
+                };
+
+                const notaRedactada = templateNota
+                    .replace('[FECHA_CONFIRMACION]', formatearFechaNota(formData.fechaSacramento))
+                    .replace('[PARROQUIA_CONFIRMACION]', (nombreInstitucion || '').toUpperCase())
+                    .replace('[DIOCESIS_CONFIRMACION]', (nombreDiocesis || '').toUpperCase())
+                    .replace('[LIBRO_CONF]', String(formData.Libro).padStart(4, '0'))
+                    .replace('[FOLIO_CONF]', String(formData.folio).padStart(4, '0'))
+                    .replace('[NUMERO_CONF]', String(formData.numero).padStart(4, '0'));
+
+                const { error: errNota } = await supabase.from('marginal_notes').insert({
+                    id: generateUUID(),
+                    sacrament_id: selectedBaptismId,
+                    sacrament_type: 'bautismo',
+                    note_type: 'confirmacion',
+                    note_date: new Date().toISOString().split('T')[0],
+                    content: notaRedactada,
+                    parish_id: parishId
+                });
+
+                if (errNota) console.error("Error al inyectar nota marginal cruzada:", errNota);
+            }
+
+            toast({ title: "Asentamiento Exitoso", description: "La confirmación ha sido inyectada permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
             navigate('/parroquia/confirmacion/partidas');
 
         } catch (error) {
@@ -281,7 +310,7 @@ const ConfirmationCelebratedPage = () => {
                                     <div className="w-8 h-8 rounded-2xl bg-red-600 text-white flex items-center justify-center text-xs font-black shadow-lg shadow-red-900/20">03</div>
                                     <h3 className="text-sm font-black text-gray-800 uppercase tracking-[0.2em] flex items-center gap-2"><User className="w-4 h-4 text-[#D4AF37]" /> Identidad del Confirmado</h3>
                                 </div>
-                                <Button type="button" variant="outline" onClick={() => setIsSearchModalOpen(true)} className="border-[#D4AF37] text-[#D4AF37] hover:bg-yellow-50 h-8 text-xs font-bold uppercase tracking-widest px-4 rounded-xl shadow-sm">
+                                <Button type="button" variant="outline" onClick={() => setIsSearchModalOpen(true)} className="border-red-600 text-red-600 hover:bg-red-50 h-8 text-xs font-bold uppercase tracking-widest px-4 rounded-xl shadow-sm">
                                     <Search className="w-3.5 h-3.5 mr-2" /> Buscar Partida Origen
                                 </Button>
                             </div>
@@ -343,9 +372,9 @@ const ConfirmationCelebratedPage = () => {
                             <div><label className={labelClass}>Padrinos</label><input name="padrinos" required value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
                         </section>
 
-                        {/* 07. NOTAS MARGINALES */}
+                        {/* 07. NOTAS MARGINALES EXCLUSIVAS DE ESTA CONFIRMACIÓN */}
                         <section>
-                            <SectionHeader number="07" title="Notas Marginales" icon={FileText} />
+                            <SectionHeader number="07" title="Notas Marginales Adicionales" icon={FileText} />
                             <div>
                                 <label className={labelClass}>Anotaciones (Opcional)</label>
                                 <textarea 
