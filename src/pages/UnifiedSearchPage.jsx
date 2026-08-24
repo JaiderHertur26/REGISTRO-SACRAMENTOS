@@ -6,7 +6,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { 
     Search, Church, Calendar, BookOpen, 
-    Loader2, Globe, MapPin 
+    Loader2, Globe, MapPin, Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/components/ui/use-toast';
@@ -31,7 +31,7 @@ const UnifiedSearchPage = () => {
 
     const nombreEntidad = user?.parishName || user?.parish_name || 'BÚSQUEDA CENTRAL';
 
-    // 1. CARGA INICIAL
+    // 🚀 1. CARGA INICIAL (DIÓCESIS Y DATOS GLOBALES)
     useEffect(() => {
         const fetchInitialEntities = async () => {
             try {
@@ -43,13 +43,14 @@ const UnifiedSearchPage = () => {
                 if (dioRes.data) setDiocesesList(dioRes.data);
                 if (misRes.data) setMisDatosList(misRes.data);
             } catch (error) {
+                console.error("Error cargando entidades iniciales:", error);
                 toast({ title: "Error de conexión", description: "No se pudieron cargar las jurisdicciones.", variant: "destructive" });
             }
         };
         fetchInitialEntities();
     }, [toast]);
 
-    // 2. EFECTO EN CASCADA: PARROQUIAS
+    // 🚀 2. EFECTO EN CASCADA: CARGAR PARROQUIAS DINÁMICAMENTE
     useEffect(() => {
         const loadParishes = async () => {
             if (!searchParams.dioceseId || searchParams.dioceseId === 'all') {
@@ -59,17 +60,19 @@ const UnifiedSearchPage = () => {
             try {
                 const { data } = await supabase
                     .from('parishes')
-                    .select('id, name, city, diocese_id')
+                    .select('id, name, city, address, diocese_id')
                     .eq('diocese_id', searchParams.dioceseId)
                     .order('name', { ascending: true });
                 
                 if (data) setFilteredParishes(data);
-            } catch (error) {}
+            } catch (error) {
+                console.error("Error cargando parroquias:", error);
+            }
         };
         loadParishes();
     }, [searchParams.dioceseId]);
 
-    const dioceseOptions = useMemo(() => [{ id: 'all', name: 'TODAS LAS DIÓCESIS' }, ...diocesesList], [diocesesList]);
+    const dioceseOptions = useMemo(() => [{ id: 'all', name: 'TODAS LAS DIÓCESIS (GLOBAL)' }, ...diocesesList], [diocesesList]);
 
     const sacramentOptions = [
         { value: 'baptism', label: 'BAUTISMO' },
@@ -77,7 +80,7 @@ const UnifiedSearchPage = () => {
         { value: 'marriage', label: 'MATRIMONIO' },
     ];
 
-    // 🚀 3. MOTOR DE BÚSQUEDA (DIRECTO A LAS COLUMNAS NATIVAS)
+    // 🚀 3. MOTOR DE BÚSQUEDA PROFUNDO (BÚSQUEDA OPTIMIZADA DESDE DB)
     const handleSearch = async (e) => {
         e.preventDefault();
         
@@ -115,24 +118,47 @@ const UnifiedSearchPage = () => {
             const type = searchParams.sacramentType;
             const fetchPromises = [];
 
-            // 🚀 BÚSQUEDA EXCLUSIVA EN COLUMNAS NATIVAS
+            // 🚀 CONSTRUCTOR DE CONSULTAS BLINDADO (Filtra directo en Supabase para evitar perder datos)
             const buildQuery = (table) => {
-                let q = supabase.from(table).select('*').limit(5000);
+                // Para matrimonios traemos campos base. Para los demás traemos nombres y apellidos.
+                let selectFields = table === 'marriages' || table === 'matrimonios' 
+                    ? 'id, parish_id, raw_data, celebration_date' 
+                    : 'id, parish_id, raw_data, celebration_date, nombres, apellidos';
+
+                let q = supabase.from(table).select(selectFields).limit(5000);
                 
-                if (!isGlobal) q = q.in('parish_id', queryParishIds);
-
-                const fName = searchParams.firstName.trim();
-                const lName = searchParams.lastName.trim();
-
-                if (table === 'baptisms' || table === 'confirmations') {
-                    if (fName) q = q.ilike('nombres', `%${fName}%`);
-                    if (lName) q = q.ilike('apellidos', `%${lName}%`);
+                // Filtro de parroquias (Omitido si es global)
+                if (!isGlobal) {
+                    if (queryParishIds.length === 1) {
+                        q = q.eq('parish_id', queryParishIds[0]);
+                    } else {
+                        q = q.in('parish_id', queryParishIds);
+                    }
                 }
 
-                // El filtro de fechas ahora se hace 100% sobre la base de datos oficial
+                // Filtro de fechas directo en BD
                 if (searchParams.dateStart) q = q.gte('celebration_date', searchParams.dateStart);
                 if (searchParams.dateEnd) q = q.lte('celebration_date', searchParams.dateEnd);
 
+                const firstTerm = searchParams.firstName.trim().split(' ')[0];
+                const lastTerm = searchParams.lastName.trim().split(' ')[0];
+
+                if (table !== 'marriages' && table !== 'matrimonios') {
+                    // Búsqueda en Bautismos y Confirmaciones
+                    let orConditions = [];
+                    if (firstTerm) orConditions.push(`nombres.ilike.%${firstTerm}%,raw_data->>nombres.ilike.%${firstTerm}%,raw_data->>NOMBRES.ilike.%${firstTerm}%`);
+                    if (lastTerm) orConditions.push(`apellidos.ilike.%${lastTerm}%,raw_data->>apellidos.ilike.%${lastTerm}%,raw_data->>APELLIDOS.ilike.%${lastTerm}%`);
+                    
+                    if (orConditions.length > 0) q = q.or(orConditions.join(','));
+                } else {
+                    // Búsqueda en Matrimonios (Dentro del JSONB)
+                    let marriageOrs = [];
+                    if (firstTerm) marriageOrs.push(`raw_data->>ESPOSO.ilike.%${firstTerm}%,raw_data->>ESPOSA.ilike.%${firstTerm}%,raw_data->>groomName.ilike.%${firstTerm}%,raw_data->>brideName.ilike.%${firstTerm}%`);
+                    if (lastTerm) marriageOrs.push(`raw_data->>ESPOSO.ilike.%${lastTerm}%,raw_data->>ESPOSA.ilike.%${lastTerm}%,raw_data->>groomSurname.ilike.%${lastTerm}%,raw_data->>brideSurname.ilike.%${lastTerm}%`);
+                    
+                    if (marriageOrs.length > 0) q = q.or(marriageOrs.join(','));
+                }
+                
                 return q;
             };
 
@@ -141,6 +167,7 @@ const UnifiedSearchPage = () => {
             if (!type || type === 'marriage') {
                 fetchPromises.push(
                     buildQuery('marriages').then(res => ({ type: 'marriage', data: res.data || [] }))
+                    .catch(() => buildQuery('matrimonios').then(res => ({ type: 'marriage', data: res.data || [] })))
                 );
             }
 
@@ -153,9 +180,10 @@ const UnifiedSearchPage = () => {
                 });
             });
 
+            // Si es búsqueda global, descargar los nombres de las parroquias encontradas
             let allParishesRef = [...filteredParishes];
             if (isGlobal && allFoundParishIds.size > 0) {
-                const { data: missingParishes } = await supabase.from('parishes').select('id, name, city, diocese_id').in('id', Array.from(allFoundParishIds));
+                const { data: missingParishes } = await supabase.from('parishes').select('id, name, city, address, diocese_id').in('id', Array.from(allFoundParishIds));
                 if (missingParishes) {
                     allParishesRef = missingParishes;
                 }
@@ -164,13 +192,12 @@ const UnifiedSearchPage = () => {
             fetchedResults.forEach(fetchResult => {
                 const sacType = fetchResult.type;
                 
-                // 🚀 MAPEO EXACTO: Usamos la fecha y nombres reales de la tabla
                 const cloudRecords = fetchResult.data.map(dbRow => ({
                     id: dbRow.id,
                     parishId: dbRow.parish_id,
                     dbNombres: dbRow.nombres,
                     dbApellidos: dbRow.apellidos,
-                    dbDate: dbRow.celebration_date, // ¡Esta es la clave para que la fecha no falle!
+                    dbDate: dbRow.celebration_date,
                     ...(dbRow.raw_data || {})
                 }));
 
@@ -178,17 +205,20 @@ const UnifiedSearchPage = () => {
                     const parish = allParishesRef.find(p => p.id === record.parishId);
                     if (!parish) return;
 
+                    // El filtro del Frontend hace la revisión microscópica ignorando tildes y exactitudes
                     if (matchesSearch(record, searchParams, sacType)) {
-                        let parishAddress = 'Dirección no registrada';
-                        const misDatosMatch = misDatosList.find(md => md.entity_id === parish.id);
-                        if (misDatosMatch) {
-                            let pData = misDatosMatch.payload;
-                            if (typeof pData === 'string') {
-                                try { pData = JSON.parse(pData); } catch(e) { pData = {}; }
-                            }
-                            if (Array.isArray(pData)) pData = pData[0] || {};
-                            if (pData.direccion && pData.direccion.trim() !== '') {
-                                parishAddress = pData.direccion;
+                        let parishAddress = parish.address || 'Dirección no registrada';
+                        
+                        // Intentar sacar de mis_datos como fallback
+                        if (parishAddress === 'Dirección no registrada') {
+                            const misDatosMatch = misDatosList.find(md => md.entity_id === parish.id);
+                            if (misDatosMatch) {
+                                let pData = misDatosMatch.payload;
+                                if (typeof pData === 'string') {
+                                    try { pData = JSON.parse(pData); } catch(e) { pData = {}; }
+                                }
+                                if (Array.isArray(pData)) pData = pData[0] || {};
+                                if (pData.direccion && pData.direccion.trim() !== '') parishAddress = pData.direccion;
                             }
                         }
 
@@ -198,6 +228,7 @@ const UnifiedSearchPage = () => {
                             ...record,
                             type: typeLabel,
                             parishName: parish.name,
+                            city: parish.city || '',
                             dioceseId: parish.diocese_id || parish.dioceseId,
                             parishAddress
                         });
@@ -205,7 +236,10 @@ const UnifiedSearchPage = () => {
                 });
             });
 
+            // Ordenar por fecha (los más recientes primero)
+            all.sort((a, b) => new Date(b.dbDate || b.fechaSacramento || 0) - new Date(a.dbDate || a.fechaSacramento || 0));
             setResults(all);
+            
         } catch (error) {
             console.error("Error consultando Supabase:", error);
             toast({ title: "Error de Búsqueda", description: "Ocurrió un error al conectar con los servidores.", variant: "destructive" });
@@ -221,14 +255,14 @@ const UnifiedSearchPage = () => {
     };
 
     const matchesSearch = (r, p, type) => {
-        // Prioridad 1: Nombres nativos de la base de datos (r.dbNombres)
+        // En matrimonios unimos ESPOSO y ESPOSA para buscar en ambos
         const recordName = type === 'marriage' ? `${r.groomName || r.ESPOSO || ''} ${r.brideName || r.ESPOSA || ''}` : (r.dbNombres || r.firstName || r.nombres || r.NOMBRES || '');
         const recordLastName = type === 'marriage' ? `${r.groomSurname || ''} ${r.brideSurname || ''}` : (r.dbApellidos || r.lastName || r.apellidos || r.APELLIDOS || '');
         
         if (p.firstName && !normalizeText(recordName).includes(normalizeText(p.firstName))) return false;
         if (p.lastName && !normalizeText(recordLastName).includes(normalizeText(p.lastName))) return false;
 
-        return true; // Las fechas ya fueron filtradas nativamente por la base de datos
+        return true;
     };
 
     return (
@@ -239,10 +273,10 @@ const UnifiedSearchPage = () => {
                 <header className="mb-8 lg:mb-12">
                     <div className="flex items-center gap-3 mb-2 text-[#4B7BA7]">
                         <Globe className="w-5 h-5" />
-                        <span className="text-[10px] font-black uppercase tracking-[0.3em]">Herramienta Interna de Verificación</span>
+                        <span className="text-[10px] font-black uppercase tracking-[0.3em]">Herramienta de Verificación Global</span>
                     </div>
                     <h1 className="text-3xl lg:text-4xl font-black text-gray-900 tracking-tight">Buscador Unificado de Sacramentos</h1>
-                    <p className="text-gray-500 font-medium mt-2 text-sm lg:text-base">Localice actas en los archivos digitales de las Diócesis autorizadas.</p>
+                    <p className="text-gray-500 font-medium mt-2 text-sm lg:text-base">Localice actas en los archivos digitales de su Diócesis o a nivel Nacional.</p>
                 </header>
 
                 <section className="bg-white rounded-[2rem] lg:rounded-[2.5rem] shadow-xl shadow-blue-900/5 p-6 lg:p-8 border border-gray-100 mb-12">
@@ -256,7 +290,7 @@ const UnifiedSearchPage = () => {
                                 onChange={e => setSearchParams({...searchParams, dioceseId: e.target.value, parishId: 'all'})} 
                                 className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#D4AF37]"
                             >
-                                <option value="">-- SELECCIONE UNA DIÓCESIS --</option>
+                                <option value="">-- SELECCIONE UN ALCANCE --</option>
                                 {dioceseOptions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                             </select>
                         </div>
@@ -281,17 +315,17 @@ const UnifiedSearchPage = () => {
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Tipo de Acta</label>
                             <select value={searchParams.sacramentType} onChange={e => setSearchParams({...searchParams, sacramentType: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#D4AF37]">
-                                <option value="">TODOS</option>
+                                <option value="">TODOS (Bautismo, Confirmación, Matrimonio)</option>
                                 {sacramentOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                             </select>
                         </div>
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nombres</label>
-                            <input type="text" value={searchParams.firstName} onChange={e => setSearchParams({...searchParams, firstName: e.target.value})} placeholder="EJ: PEDRO" className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none uppercase focus:ring-2 focus:ring-[#D4AF37]" />
+                            <input type="text" value={searchParams.firstName} onChange={e => setSearchParams({...searchParams, firstName: e.target.value})} placeholder="EJ: PEDRO PABLO" className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none uppercase focus:ring-2 focus:ring-[#D4AF37]" />
                         </div>
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Apellidos</label>
-                            <input type="text" value={searchParams.lastName} onChange={e => setSearchParams({...searchParams, lastName: e.target.value})} placeholder="EJ: ROJAS" className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none uppercase focus:ring-2 focus:ring-[#D4AF37]" />
+                            <input type="text" value={searchParams.lastName} onChange={e => setSearchParams({...searchParams, lastName: e.target.value})} placeholder="EJ: ROJAS PEREZ" className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none uppercase focus:ring-2 focus:ring-[#D4AF37]" />
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                             <div className="space-y-2">
@@ -305,7 +339,7 @@ const UnifiedSearchPage = () => {
                         </div>
                         <div className="lg:col-span-3 flex justify-end pt-2 lg:pt-4">
                             <Button disabled={searchLoading} className="w-full lg:w-auto px-12 py-6 lg:py-7 rounded-2xl bg-[#4B7BA7] hover:bg-[#3A6286] text-white font-black uppercase tracking-widest text-[10px] shadow-lg active:scale-95 transition-all">
-                                {searchLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <><Search className="w-4 h-4 mr-2" /> Buscar Actas</>}
+                                {searchLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <><Search className="w-4 h-4 mr-2" /> Localizar Actas</>}
                             </Button>
                         </div>
                     </form>
@@ -322,20 +356,19 @@ const UnifiedSearchPage = () => {
                             {results.length === 0 ? (
                                 <div className="bg-white p-12 lg:p-20 rounded-[2rem] lg:rounded-[2.5rem] border border-dashed border-gray-200 text-center">
                                     <Search className="w-12 h-12 lg:w-16 lg:h-16 text-gray-200 mx-auto mb-4" />
-                                    <p className="font-bold text-gray-400 uppercase tracking-widest text-[10px] lg:text-xs">No se localizaron registros</p>
+                                    <p className="font-bold text-gray-400 uppercase tracking-widest text-[10px] lg:text-xs">No se localizaron registros para esta búsqueda</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
                                     {results.map(r => {
                                         const name = r.type === 'MATRIMONIO' ? `${r.groomName || r.ESPOSO || ''} & ${r.brideName || r.ESPOSA || ''}` : `${(r.dbNombres || r.firstName || r.nombres || r.NOMBRES || '')} ${(r.dbApellidos || r.lastName || r.apellidos || r.APELLIDOS || '')}`;
-                                        
-                                        // Usamos SIEMPRE la fecha de la base de datos primero
-                                        const rawDate = r.dbDate || r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"];
-                                        const date = rawDate ? new Date(rawDate.includes('T') ? rawDate : `${rawDate}T12:00:00`).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' }) : '---';
+                                        const date = r.dbDate || r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"] || r["FECHA DE CONFIRMACIÓN"];
 
                                         return (
                                             <motion.div whileHover={{ y: -5 }} key={`${r.type}-${r.id}`} className="bg-white p-6 lg:p-8 rounded-[2rem] shadow-xl shadow-blue-900/5 border-l-8 border-[#D4AF37] relative group overflow-hidden flex flex-col justify-between">
-                                                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><BookOpen className="w-20 h-20 lg:w-24 lg:h-24" /></div>
+                                                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform">
+                                                    {r.type === 'MATRIMONIO' ? <Users className="w-20 h-20 lg:w-24 lg:h-24" /> : <BookOpen className="w-20 h-20 lg:w-24 lg:h-24" />}
+                                                </div>
                                                 
                                                 <div>
                                                     <span className="bg-blue-50 text-[#4B7BA7] px-3 py-1 rounded-full text-[8px] lg:text-[9px] font-black uppercase tracking-widest">{r.type}</span>
@@ -345,11 +378,13 @@ const UnifiedSearchPage = () => {
                                                 <div className="space-y-2 pt-4 lg:pt-6 mt-4 lg:mt-6 border-t border-gray-50">
                                                     <div className="flex items-center gap-3 text-gray-500">
                                                         <Calendar className="w-4 h-4 text-[#D4AF37] shrink-0" />
-                                                        <span className="text-[10px] lg:text-xs font-bold uppercase">{date}</span>
+                                                        <span className="text-[10px] lg:text-xs font-bold uppercase">{date || 'Fecha no registrada'}</span>
                                                     </div>
                                                     <div className="flex items-center gap-3 text-gray-500">
                                                         <Church className="w-4 h-4 text-[#4B7BA7] shrink-0" />
-                                                        <span className="text-[10px] lg:text-xs font-bold uppercase truncate">{r.parishName}</span>
+                                                        <span className="text-[10px] lg:text-xs font-bold uppercase truncate" title={r.parishName}>
+                                                            {r.parishName} {r.city ? `(${r.city})` : ''}
+                                                        </span>
                                                     </div>
                                                     <div className="flex items-start gap-3 text-gray-400 mt-2">
                                                         <MapPin className="w-4 h-4 text-gray-300 shrink-0 mt-0.5" />
