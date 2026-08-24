@@ -10,7 +10,7 @@ import {
     ChevronLeft, ChevronRight, Save, 
     CheckCircle2, AlertCircle, Loader2, Printer,
     LayoutList, BookOpenCheck,
-    Layers, CheckSquare, Square, Lock
+    Layers, CheckSquare, Square, Lock, FileText, Search
 } from 'lucide-react';
 import ConfirmationTicket from '@/components/ConfirmationTicket';
 import { supabase } from '@/lib/supabaseClient'; 
@@ -30,10 +30,15 @@ const ConfirmationSentarRegistrosPage = () => {
 
     const [resolvedParishId, setResolvedParishId] = useState(null);
     const [nombreParroquia, setNombreParroquia] = useState('PARROQUIA PADRE MISERICORDIOSO');
+    
+    // 🚀 ESTADOS DE PESTAÑAS Y BUSCADOR
     const [mode, setMode] = useState('individual'); 
     const [pendingConfirmations, setPendingConfirmations] = useState([]);
+    const [reportedConfirmations, setReportedConfirmations] = useState([]); // Historial
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedIds, setSelectedIds] = useState([]);
+    const [printingRecord, setPrintingRecord] = useState(null); // Para imprimir desde el historial
+    const [searchTerm, setSearchTerm] = useState(''); // 🚀 BUSCADOR
     
     const [nextNumbers, setNextNumbers] = useState({ book: '0001', page: '0001', entry: '0001' });
     const [fullParamsCache, setFullParamsCache] = useState(null); 
@@ -64,7 +69,6 @@ const ConfirmationSentarRegistrosPage = () => {
         setIsLoading(true);
 
         try {
-            // 🚀 AHORA SÍ: Consulta directa a la nueva tabla de borradores (pending_confirmations)
             const { data: tempData, error: tempError } = await supabase
                 .from('pending_confirmations')
                 .select('*')
@@ -77,7 +81,7 @@ const ConfirmationSentarRegistrosPage = () => {
             if (!tempError && tempData && tempData.length > 0) {
                 const cloudPending = tempData.map(pb => {
                     const raw = typeof pb.raw_data === 'string' ? JSON.parse(pb.raw_data) : (pb.raw_data || {});
-                    return { ...raw, id: pb.id, status: 'pending' };
+                    return { ...raw, id: pb.id, status: 'pending', reportado: pb.reportado }; // 🚀 Traemos la columna
                 });
                 
                 recordsMapped = cloudPending.map(r => {
@@ -102,6 +106,8 @@ const ConfirmationSentarRegistrosPage = () => {
 
                     return {
                         ...r,
+                        id: r.id,
+                        reportado: r.reportado, // 🚀 Conservamos el estatus
                         numeroRegistro: r.numeroRegistro || r.inscripcionNumero || '---',
                         lugarSacramento: r.lugarSacramento || r.place || r.sacramentPlace || '---',
                         fechaSacramento: fechaSac,
@@ -111,7 +117,12 @@ const ConfirmationSentarRegistrosPage = () => {
                 });
             }
             
-            setPendingConfirmations(recordsMapped);
+            // 🚀 SEPARAMOS PENDIENTES Y REPORTADOS
+            const pendientes = recordsMapped.filter(r => !r.reportado);
+            const reportados = recordsMapped.filter(r => r.reportado);
+
+            setPendingConfirmations(pendientes);
+            setReportedConfirmations(reportados);
 
             const p = await getConfirmationParameters(resolvedParishId);
             setFullParamsCache(p);
@@ -149,10 +160,11 @@ const ConfirmationSentarRegistrosPage = () => {
 
     const handleReprint = () => {
         if (!currentConfirmation) return;
+        setPrintingRecord(null); // Aseguramos que imprima el actual pendiente
         setTimeout(() => window.print(), 300);
     };
 
-    // 🚀 LÓGICA DIRECTA A BASE DE DATOS (Mueve de Pending a Oficial sin depender del Context)
+    // 🚀 LÓGICA DIRECTA A BASE DE DATOS: Inserta y marca como Reportado
     const handleRegisterIndividual = async () => {
         if (!currentConfirmation || isSaving || currentIsFuture) return;
 
@@ -190,9 +202,9 @@ const ConfirmationSentarRegistrosPage = () => {
             const { error: insertError } = await supabase.from('confirmations').insert([finalData]);
             if (insertError) throw insertError;
 
-            // 3. Borrar de la tabla de pendientes
-            const { error: deleteError } = await supabase.from('pending_confirmations').delete().eq('id', currentConfirmation.id);
-            if (deleteError) throw deleteError;
+            // 3. Marcar como reportado en lugar de borrar
+            const { error: updateError } = await supabase.from('pending_confirmations').update({ reportado: true }).eq('id', currentConfirmation.id);
+            if (updateError) throw updateError;
 
             // 4. Actualizar Consecutivos
             const p = fullParamsCache || await getConfirmationParameters(resolvedParishId);
@@ -213,7 +225,7 @@ const ConfirmationSentarRegistrosPage = () => {
 
             await updateConfirmationParameters(resolvedParishId, updatedParams);
             
-            toast({ title: "Éxito", description: "Confirmación asentada permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Éxito", description: "Confirmación asentada y reportada permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
             await loadData();
             if (currentIndex >= pendingConfirmations.length - 1) setCurrentIndex(Math.max(0, pendingConfirmations.length - 2));
 
@@ -241,6 +253,7 @@ const ConfirmationSentarRegistrosPage = () => {
         else setSelectedIds([...selectedIds, id]);
     };
 
+    // 🚀 LÓGICA DIRECTA SUPABASE PARA LOTE
     const handleBatchConfirm = async () => {
         if (selectedIds.length === 0 || isSaving) return;
         if (!window.confirm(`¿Asentar ${selectedIds.length} registros permanentemente?`)) return;
@@ -298,9 +311,9 @@ const ConfirmationSentarRegistrosPage = () => {
             const { error: insertError } = await supabase.from('confirmations').insert(recordsToInsert);
             if (insertError) throw insertError;
 
-            // 2. Eliminar Lote de Pendientes
-            const { error: deleteError } = await supabase.from('pending_confirmations').delete().in('id', selectedIds);
-            if (deleteError) throw deleteError;
+            // 2. Marcar Lote como Reportado (No borrar)
+            const { error: updateError } = await supabase.from('pending_confirmations').update({ reportado: true }).in('id', selectedIds);
+            if (updateError) throw updateError;
 
             // 3. Actualizar Parámetros
             const updatedParams = { ...p, ordinarioFolio: cFolio, ordinarioNumero: cNumero, ordinarioLibro: cLibro };
@@ -317,27 +330,37 @@ const ConfirmationSentarRegistrosPage = () => {
         }
     };
 
+    // 🚀 FUNCIÓN PARA IMPRIMIR DESDE EL HISTORIAL
+    const handlePrintReported = (record) => {
+        setPrintingRecord(record);
+        setTimeout(() => window.print(), 300);
+    };
+
+    // 🚀 LÓGICA DE FILTRADO PARA EL BUSCADOR
+    const filteredReported = reportedConfirmations.filter(c => {
+        const fullName = `${c.nombres || ''} ${c.apellidos || ''}`.toLowerCase();
+        return fullName.includes(searchTerm.toLowerCase());
+    });
+
     if (isLoading) return (
         <DashboardLayout entityName={nombreParroquia}>
             <div className="flex justify-center py-20"><Loader2 className="animate-spin text-red-600 w-8 h-8" /></div>
         </DashboardLayout>
     );
 
-    if (pendingConfirmations.length === 0) return (
-        <DashboardLayout entityName={nombreParroquia}>
-            <div className="flex flex-col items-center justify-center min-h-[400px] bg-white rounded-[3rem] p-12 text-center border-2 border-dashed border-gray-200 shadow-sm">
-                <CheckCircle2 className="w-16 h-16 text-green-200 mb-4" />
-                <h3 className="text-xl font-bold uppercase text-gray-400">Archivo al Día</h3>
-                <p className="text-xs text-gray-400 mt-1">No hay borradores pendientes de confirmación en la nube.</p>
-                <Button variant="outline" className="mt-6 rounded-xl text-red-600 border-red-200 hover:bg-red-50" onClick={() => navigate('/parroquia/confirmacion/partidas')}>Ver Actas Permanentes</Button>
-            </div>
-        </DashboardLayout>
+    const EmptyState = ({ message, hideButton }) => (
+        <div className="flex flex-col items-center justify-center min-h-[400px] bg-white rounded-[3rem] p-12 text-center border-2 border-dashed border-gray-200 shadow-sm">
+            <CheckCircle2 className="w-16 h-16 text-green-200 mb-4" />
+            <h3 className="text-xl font-bold uppercase text-gray-400">Archivo al Día</h3>
+            <p className="text-xs text-gray-400 mt-1">{message}</p>
+            {!hideButton && <Button variant="outline" className="mt-6 rounded-xl text-red-600 border-red-200 hover:bg-red-50" onClick={() => navigate('/parroquia/confirmacion/partidas')}>Ver Actas Permanentes</Button>}
+        </div>
     );
 
     return (
         <DashboardLayout entityName={nombreParroquia}>
             <div className="hidden print:block">
-                {currentConfirmation && <ConfirmationTicket confirmationData={currentConfirmation} parishInfo={parishInfo} />}
+                {(printingRecord || currentConfirmation) && <ConfirmationTicket confirmationData={printingRecord || currentConfirmation} parishInfo={parishInfo} />}
             </div>
 
             <div className="print:hidden max-w-7xl mx-auto px-4 pb-20">
@@ -350,17 +373,21 @@ const ConfirmationSentarRegistrosPage = () => {
                         </div>
                     </div>
 
-                    <div className="bg-white p-1.5 rounded-[1.5rem] border shadow-sm flex items-center gap-1">
-                        <button onClick={() => setMode('individual')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all", mode === 'individual' ? "bg-red-50 text-red-700 shadow-sm border border-red-100" : "text-gray-500 hover:bg-gray-50")}>
+                    <div className="bg-white p-1.5 rounded-[1.5rem] border shadow-sm flex items-center gap-1 overflow-x-auto">
+                        <button onClick={() => setMode('individual')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all whitespace-nowrap", mode === 'individual' ? "bg-red-50 text-red-700 shadow-sm border border-red-100" : "text-gray-500 hover:bg-gray-50")}>
                             <BookOpenCheck className="w-4 h-4 inline mr-2" /> Individual
                         </button>
-                        <button onClick={() => setMode('batch')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all", mode === 'batch' ? "bg-red-50 text-red-700 shadow-sm border border-red-100" : "text-gray-500 hover:bg-gray-50")}>
+                        <button onClick={() => setMode('batch')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all whitespace-nowrap", mode === 'batch' ? "bg-red-50 text-red-700 shadow-sm border border-red-100" : "text-gray-500 hover:bg-gray-50")}>
                             <LayoutList className="w-4 h-4 inline mr-2" /> Por Lote
+                        </button>
+                        <button onClick={() => setMode('reported')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all whitespace-nowrap", mode === 'reported' ? "bg-red-600 text-white shadow-lg shadow-red-900/20" : "text-gray-500 hover:bg-gray-50")}>
+                            <FileText className="w-4 h-4 inline mr-2" /> Boletas Emitidas
                         </button>
                     </div>
                 </div>
 
                 {mode === 'individual' && (
+                    pendingConfirmations.length === 0 ? <EmptyState message="No hay borradores pendientes de confirmación en la nube." /> :
                     <div className="animate-in fade-in duration-500 space-y-6">
                         <div className="bg-white p-4 rounded-t-[2rem] border shadow-sm flex items-center justify-between border-b-0">
                             <Button variant="outline" onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))} disabled={currentIndex === 0}><ChevronLeft className="w-4 h-4 text-gray-600" /></Button>
@@ -414,6 +441,7 @@ const ConfirmationSentarRegistrosPage = () => {
                 )}
 
                 {mode === 'batch' && (
+                    pendingConfirmations.length === 0 ? <EmptyState message="No hay borradores pendientes en la nube para procesar por lote." /> :
                     <div className="animate-in fade-in duration-500 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden">
                         <table className="w-full text-left">
                             <thead className="bg-gray-50 border-b font-black text-[10px] text-gray-400 uppercase">
@@ -472,6 +500,77 @@ const ConfirmationSentarRegistrosPage = () => {
                                 {isSaving ? <Loader2 className="animate-spin mr-2 w-5 h-5" /> : <CheckCircle2 className="mr-2 w-5 h-5" />} Asentar Selección
                             </Button>
                         </div>
+                    </div>
+                )}
+
+                {/* 🚀 NUEVA SECCIÓN DE BOLETAS EMITIDAS CON BUSCADOR */}
+                {mode === 'reported' && (
+                    reportedConfirmations.length === 0 ? <EmptyState message="Aún no tienes registros que hayan sido reportados/asentados." hideButton /> :
+                    <div className="animate-in fade-in duration-500 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden">
+                        
+                        <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-50/50">
+                            <div>
+                                <h3 className="text-sm font-black text-gray-800 uppercase tracking-widest flex items-center gap-2">
+                                    <FileText className="w-4 h-4 text-red-600" /> Historial de Boletas
+                                </h3>
+                            </div>
+                            <div className="relative w-full md:w-96">
+                                <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input 
+                                    type="text" 
+                                    placeholder="BUSCAR CONFIRMADO POR NOMBRE O APELLIDO..." 
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full h-11 pl-11 pr-4 text-xs font-bold text-gray-700 uppercase border border-gray-200 rounded-xl focus:ring-4 focus:ring-red-600/10 focus:border-red-600 outline-none transition-all shadow-sm"
+                                />
+                            </div>
+                        </div>
+
+                        {filteredReported.length === 0 ? (
+                            <div className="p-16 text-center border-t border-dashed border-gray-100">
+                                <Search className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+                                <p className="text-gray-400 font-bold uppercase text-xs">No se encontraron resultados para "{searchTerm}"</p>
+                            </div>
+                        ) : (
+                            <table className="w-full text-left">
+                                <thead className="bg-gray-50 border-b font-black text-[10px] text-gray-400 uppercase">
+                                    <tr>
+                                        <th className="px-8 py-6 w-24">Estado</th>
+                                        <th className="px-6 py-6">Confirmado</th>
+                                        <th className="px-6 py-6">Fecha Sacramento</th>
+                                        <th className="px-6 py-6 text-right">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {filteredReported.map(conf => (
+                                        <tr key={conf.id} className="hover:bg-red-50/30 transition-colors">
+                                            <td className="px-8 py-4">
+                                                <span className="text-[8px] font-black bg-red-50 text-red-600 border border-red-200 px-3 py-1.5 rounded-full uppercase flex items-center w-max gap-1">
+                                                    <CheckCircle2 className="w-3 h-3" /> Reportado
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <p className="font-black uppercase text-xs text-gray-800">{conf.apellidos}, {conf.nombres}</p>
+                                                <p className="text-[9px] font-bold text-gray-400 uppercase">#{conf.numeroRegistro || '---'}</p>
+                                            </td>
+                                            <td className="px-6 py-4 text-[11px] font-black uppercase text-gray-600">
+                                                {conf.fechaSacramento}
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                                <Button 
+                                                    variant="outline" 
+                                                    size="sm" 
+                                                    onClick={() => handlePrintReported(conf)} 
+                                                    className="text-red-600 border-red-200 hover:bg-red-50 rounded-xl uppercase text-[10px] font-bold tracking-widest"
+                                                >
+                                                    <Printer className="w-3 h-3 mr-2" /> Boleta
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
                     </div>
                 )}
             </div>
