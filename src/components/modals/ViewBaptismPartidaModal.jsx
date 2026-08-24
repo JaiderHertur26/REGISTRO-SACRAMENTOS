@@ -38,51 +38,100 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
     const componenteImpresionRef = useRef();
     const { getParrocos } = useAppData(); 
 
-    // 🚀 ESTADOS PARA LAS NOTAS MARGINALES DINÁMICAS
+    // 🚀 ESTADOS PARA LAS NOTAS MARGINALES A LA CARTA
     const [marginalNotes, setMarginalNotes] = useState([]);
     const [selectedNotes, setSelectedNotes] = useState([]);
     const [templates, setTemplates] = useState({});
 
     const parishId = partida?.parishId || partida?.parish_id || auxiliaryData?.entity_id || auxiliaryData?.id;
 
-    // 🚀 1. CARGA DE NOTAS Y PLANTILLAS
+    // 🚀 1. EL MOTOR DE BÚSQUEDA CRUZADA (MAGIA PURA)
     useEffect(() => {
         if (isOpen && parishId) {
-            // Extraer plantillas de certificación
             const storedData = localStorage.getItem(`marginalNotesTemplates_${parishId}`);
             if (storedData) setTemplates(JSON.parse(storedData));
         }
         
-        if (isOpen && partida?.id) {
-            const fetchNotes = async () => {
-                const { data, error } = await supabase
-                    .from('marginal_notes')
-                    .select('*')
-                    .eq('sacrament_id', partida.id)
-                    .order('created_at', { ascending: true });
-                if (!error && data) {
-                    setMarginalNotes(data);
-                    // Por defecto, marcamos todas las notas encontradas para imprimir
-                    setSelectedNotes(data.map(n => n.id));
+        if (isOpen && partida) {
+            const fetchAllNotes = async () => {
+                let allNotes = [];
+
+                // A. Buscar Notas Manuales (Decretos, Anulaciones)
+                if (partida.id) {
+                    const { data: mnData, error: mnError } = await supabase
+                        .from('marginal_notes')
+                        .select('*')
+                        .eq('sacrament_id', partida.id)
+                        .order('created_at', { ascending: true });
+                    
+                    if (!mnError && mnData) {
+                        allNotes = [...allNotes, ...mnData];
+                    }
                 }
+
+                // B. BÚSQUEDA AUTOMÁTICA DE CONFIRMACIÓN (Cruce de Sacramentos)
+                if (partida.nombres && partida.apellidos) {
+                    const cleanNombres = partida.nombres.trim();
+                    const cleanApellidos = partida.apellidos.trim();
+
+                    const { data: confData, error: confError } = await supabase
+                        .from('confirmations')
+                        .select('*')
+                        .eq('parish_id', parishId)
+                        .ilike('nombres', cleanNombres)
+                        .ilike('apellidos', cleanApellidos);
+
+                    if (!confError && confData && confData.length > 0) {
+                        // Rescatamos la plantilla inteligente
+                        const storedTemplates = localStorage.getItem(`marginalNotesTemplates_${parishId}`);
+                        const tempObj = storedTemplates ? JSON.parse(storedTemplates) : {};
+                        const templateConf = tempObj.bautismo_confirmado || "EL [FECHA_CONFIRMACION] FUE CONFIRMADO(A) EN LA PARROQUIA [PARROQUIA_CONFIRMACION]. DIÓCESIS DE [DIOCESIS_CONFIRMACION]. L-[LIBRO_CONF], F-[FOLIO_CONF], N-[NUMERO_CONF].";
+
+                        confData.forEach(conf => {
+                            // Parseo seguro de fecha
+                            const d = new Date((conf.celebration_date || '').includes('T') ? conf.celebration_date : `${conf.celebration_date}T12:00:00`);
+                            const dateStr = !isNaN(d.getTime()) ? `${d.getDate()} DE ${d.toLocaleString('es-CO', { month: 'long' }).toUpperCase()} DE ${d.getFullYear()}` : conf.celebration_date;
+
+                            // Inyección de variables
+                            const content = templateConf
+                                .replace('[FECHA_CONFIRMACION]', dateStr)
+                                .replace('[PARROQUIA_CONFIRMACION]', (auxiliaryData?.nombre || 'ESTA PARROQUIA').toUpperCase())
+                                .replace('[DIOCESIS_CONFIRMACION]', (auxiliaryData?.diocesis || 'ARQUIDIÓCESIS DE BARRANQUILLA').toUpperCase())
+                                .replace('[LIBRO_CONF]', String(conf.book_number || '').padStart(4, '0'))
+                                .replace('[FOLIO_CONF]', String(conf.folio || '').padStart(4, '0'))
+                                .replace('[NUMERO_CONF]', String(conf.number || '').padStart(4, '0'));
+
+                            allNotes.push({
+                                id: `auto-conf-${conf.id}`,
+                                note_type: 'CONFIRMACIÓN (CRUCE AUTOMÁTICO)',
+                                note_date: conf.celebration_date,
+                                content: content,
+                                isAuto: true
+                            });
+                        });
+                    }
+                }
+
+                setMarginalNotes(allNotes);
+                // Marcamos todas por defecto
+                setSelectedNotes(allNotes.map(n => n.id));
             };
-            fetchNotes();
+            
+            fetchAllNotes();
         }
-    }, [isOpen, partida?.id, parishId]);
+    }, [isOpen, partida, parishId, auxiliaryData]);
 
     if (!isOpen || !partida) return null;
 
-    // 🚀 2. CONSTRUCCIÓN DE LA NOTA MARGINAL "A LA CARTA"
+    // 🚀 2. CONSTRUCCIÓN DEL MENÚ A LA CARTA
     const baseNotaOriginal = partida.notaMarginal && partida.notaMarginal !== "---" ? partida.notaMarginal : "";
     const mandatoryNote = templates.certificacion_estandar || "LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO.";
     
-    // Obtenemos los textos de las notas que el usuario dejó seleccionadas (con checkbox)
     const selectedNotesContent = marginalNotes
         .filter(n => selectedNotes.includes(n.id))
         .map(n => n.content)
         .join(' // ');
 
-    // Concatenamos: Nota Base Original (si hay) + Notas Dinámicas + Certificación Obligatoria
     let finalNotaMarginalFormada = [];
     if (baseNotaOriginal) finalNotaMarginalFormada.push(baseNotaOriginal);
     if (selectedNotesContent) finalNotaMarginalFormada.push(selectedNotesContent);
@@ -92,7 +141,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
         const cleanMandatory = mandatoryNote.replace(/SIN NOTAS MARGINALES ADICIONALES HASTA LA FECHA\.?/i, '').trim();
         finalNotaMarginal = `${finalNotaMarginalFormada.join(' // ')} // ${cleanMandatory}`.trim();
     } else {
-        finalNotaMarginal = mandatoryNote; // Si no hay notas extra, va la obligatoria por defecto.
+        finalNotaMarginal = mandatoryNote;
     }
 
     // 🚀 3. RESOLVER EL "DA FE" HISTÓRICO
@@ -117,7 +166,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
         }
     }
     
-    // Inyectamos el Sacerdote Histórico y la Nota Compuesta "A la Carta" al PDF
+    // Inyectamos todo en el objeto que recibe el PDF
     const partidaParaImprimir = { ...partida, daFe: rawDaFe, notaMarginal: finalNotaMarginal };
 
     const estaAnulada = partida.tipoIdentidad === 'id_anulada_correccion' || partida.estado === 'anulada';
@@ -234,8 +283,8 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                                     className="mt-1 w-4 h-4 text-[#4B7BA7] rounded focus:ring-[#4B7BA7] cursor-pointer"
                                                 />
                                                 <div className="flex-1">
-                                                    <span className="text-[10px] font-black uppercase text-[#4B7BA7] block mb-0.5 border-b border-blue-100/50 pb-1">
-                                                        ANEXO DINÁMICO: {note.note_type} • {note.note_date}
+                                                    <span className="text-[10px] font-black uppercase text-[#4B7BA7] block mb-0.5 border-b border-blue-100/50 pb-1 flex items-center gap-1.5">
+                                                        {note.isAuto && <ShieldCheck className="w-3 h-3" />} {note.note_type}
                                                     </span>
                                                     <p className="text-xs font-bold text-gray-800 uppercase italic leading-relaxed mt-1">"{note.content}"</p>
                                                 </div>
