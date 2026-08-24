@@ -54,7 +54,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
             const fetchAllNotes = async () => {
                 let allNotes = [];
 
-                // A. Buscar Notas Manuales (Decretos, Anulaciones)
+                // 🚀 A. Buscar Notas Manuales (Decretos, Anulaciones)
                 if (partida.id) {
                     const { data: mnData, error: mnError } = await supabase
                         .from('marginal_notes')
@@ -67,7 +67,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                     }
                 }
 
-                // B. BÚSQUEDA AUTOMÁTICA DE CONFIRMACIÓN (Cruce de Sacramentos)
+                // 🚀 B. BÚSQUEDA AUTOMÁTICA DE CONFIRMACIÓN (Cruce de Sacramentos)
                 if (partida.nombres && partida.apellidos) {
                     const cleanNombres = partida.nombres.trim();
                     const cleanApellidos = partida.apellidos.trim();
@@ -109,15 +109,24 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
 
                 // 🚀 C. BÚSQUEDA AUTOMÁTICA DE REGISTRO CIVIL (VÍNCULO CIVIL)
                 const raw = partida.raw_data || partida || {};
-                const nuip = raw.nuip || raw.NUIP || partida.nuip;
+                const nuip = raw.nuip || raw.NUIP || partida.nuip || '';
+                const serial = raw.serialRegistro || raw.serial_registro || partida.serial_registro || partida.serialRegistro || '';
                 
-                if (nuip && String(nuip).trim() !== '' && String(nuip).trim() !== '---') {
+                if ((nuip && String(nuip).trim() !== '' && String(nuip).trim() !== '---') || 
+                    (serial && String(serial).trim() !== '' && String(serial).trim() !== '---')) {
+                    
                     const storedTemplates = localStorage.getItem(`marginalNotesTemplates_${parishId}`);
                     const tempObj = storedTemplates ? JSON.parse(storedTemplates) : {};
-                    const templateRC = tempObj.vinculo_civil || "REGISTRO CIVIL: NUIP/NIP [NUIP]. EXPEDIDO EN [OFICINA_REGISTRO] EL DÍA [FECHA_EXPEDICION_RC].";
+                    
+                    // Aseguramos que la plantilla tenga soporte para Serial también
+                    let templateRC = tempObj.vinculo_civil || "REGISTRO CIVIL: NUIP/NIP [NUIP] - SERIAL [SERIAL_ACTA]. EXPEDIDO EN [OFICINA_REGISTRO] EL DÍA [FECHA_EXPEDICION_RC].";
 
-                    const oficina = raw.oficinaRegistro || raw.oficina_registro || partida.oficina_registro || raw.NOTARIA || '---';
-                    const fechaExp = raw.fechaExpedicionRegistro || raw.fecha_expedicion_registro || partida.fecha_expedicion_registro || raw["FECHA DE REGISTRO"] || '---';
+                    if (serial && !templateRC.includes('[SERIAL_ACTA]')) {
+                        templateRC = templateRC.replace('REGISTRO CIVIL:', 'REGISTRO CIVIL: SERIAL [SERIAL_ACTA] -');
+                    }
+
+                    const oficina = raw.oficinaRegistro || raw.oficina_registro || partida.oficina_registro || partida.oficinaRegistro || raw.NOTARIA || '---';
+                    const fechaExp = raw.fechaExpedicionRegistro || raw.fecha_expedicion_registro || partida.fecha_expedicion_registro || partida.fechaExpedicionRegistro || raw["FECHA DE REGISTRO"] || '---';
                     
                     let dateStrRC = fechaExp;
                     if (fechaExp !== '---') {
@@ -125,10 +134,14 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                         dateStrRC = !isNaN(dRC.getTime()) ? `${dRC.getDate()} DE ${dRC.toLocaleString('es-CO', { month: 'long' }).toUpperCase()} DE ${dRC.getFullYear()}` : fechaExp;
                     }
 
-                    const contentRC = templateRC
-                        .replace('[NUIP]', String(nuip).toUpperCase())
+                    let contentRC = templateRC
+                        .replace('[NUIP]', String(nuip || '---').toUpperCase())
+                        .replace('[SERIAL_ACTA]', String(serial || '---').toUpperCase())
                         .replace('[OFICINA_REGISTRO]', String(oficina).toUpperCase())
                         .replace('[FECHA_EXPEDICION_RC]', String(dateStrRC).toUpperCase());
+
+                    // Limpieza visual si falta alguno de los dos datos (NUIP o Serial)
+                    contentRC = contentRC.replace('NUIP/NIP --- -', '').replace('NUIP/NIP ---', '').replace('SERIAL --- -', '').replace('- SERIAL ---', '').trim();
 
                     allNotes.push({
                         id: `auto-rc-${partida.id || 'rc'}`,
@@ -153,7 +166,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
     // 🚀 2. CONSTRUCCIÓN DE LA NOTA MARGINAL "A LA CARTA"
     let baseNotaOriginal = partida.notaMarginal && partida.notaMarginal !== "---" ? String(partida.notaMarginal).toUpperCase() : "";
     
-    // Limpieza de basura histórica del Excel
+    // Limpieza de basura histórica del Excel para que no contamine las notas nuevas
     baseNotaOriginal = baseNotaOriginal.replace(/LA INFORMACI[OÓ]N SUMINISTRADA ES FIEL.*/ig, '').trim();
     baseNotaOriginal = baseNotaOriginal.replace(/ESTA INFORMACI[OÓ]N SUMINISTRADA ES FIEL.*/ig, '').trim();
     baseNotaOriginal = baseNotaOriginal.replace(/SE EXPIDE EN.*/ig, '').trim();
@@ -256,6 +269,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                         exit={{ opacity: 0, scale: 0.9, y: 30 }}
                         className="bg-white rounded-[3rem] shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden border border-white/20"
                     >
+                        {/* CABECERA DE CONTROL */}
                         <div className="flex items-center justify-between px-8 py-6 bg-white border-b border-gray-100 shrink-0">
                             <div className="flex items-center gap-5">
                                 <div className={cn(
@@ -281,8 +295,10 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                             </button>
                         </div>
 
+                        {/* VISUALIZADOR Y CONFIGURADOR */}
                         <div className="flex-1 overflow-y-auto bg-slate-200/50 p-6 md:p-12 flex flex-col items-center gap-6 custom-scrollbar">
                             
+                            {/* Panel de Ubicación Física */}
                             <div className="w-full max-w-[8.5in] grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <InfoCard 
                                     label="Ubicación en Archivo" 
@@ -296,6 +312,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                 />
                             </div>
 
+                            {/* 🚀 SELECTOR INTELIGENTE DE NOTAS MARGINALES A LA CARTA */}
                             <div className="w-full max-w-[8.5in] bg-white/80 backdrop-blur-sm p-6 rounded-[2rem] border border-gray-200 shadow-sm mt-2 mb-4">
                                 <div className="flex items-center gap-3 mb-5 border-b border-gray-100 pb-3">
                                     <div className="bg-amber-100 p-2 rounded-xl text-amber-600"><FileText className="w-4 h-4"/></div>
@@ -350,6 +367,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                 </div>
                             </div>
 
+                            {/* EL DOCUMENTO (VISTA PREVIA DE IMPRESIÓN) */}
                             <div className="relative group">
                                 <div className="absolute -inset-4 bg-gradient-to-tr from-[#D4AF37]/10 to-transparent blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
                                 <div className="relative shadow-[0_30px_100px_rgba(0,0,0,0.18)] bg-white w-full max-w-[8.5in] min-h-[11in] transform transition-transform duration-700">
@@ -362,9 +380,10 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                         </div>
                                     )}
 
+                                    {/* Componente de Impresión Final */}
                                     <div ref={componenteImpresionRef} className="print-root">
                                         <BaptismPrintTemplate 
-                                            data={partidaParaImprimir} 
+                                            data={partidaParaImprimir} // 🚀 El PDF recibe la súper Nota Marginal Concatenada
                                             parroquiaInfo={auxiliaryData} 
                                         />
                                     </div>
@@ -372,6 +391,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                             </div>
                         </div>
 
+                        {/* ACCIONES FINALES */}
                         <div className="px-10 py-8 bg-white border-t border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-6 shrink-0">
                             <div className="flex items-center gap-6 text-left">
                                 <div className="flex flex-col">
