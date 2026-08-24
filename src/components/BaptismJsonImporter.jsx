@@ -17,6 +17,13 @@ const cleanTitle = (nameStr) => {
     return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|SACERDOTE\s*)/i, '').trim();
 };
 
+// 🚀 Utilidad para asegurar el mismo formato de Libro/Folio/Numero al comparar con la DB
+const padDbValue = (val) => {
+    if (val === null || val === undefined) return '---';
+    const str = String(val).trim();
+    return (str !== '' && !isNaN(str)) ? str.padStart(4, '0') : (str || '---');
+};
+
 const BaptismJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth();
@@ -103,8 +110,9 @@ const BaptismJsonImporter = () => {
                 if (rawData.length === 0) throw new Error("El archivo no contiene registros válidos.");
 
                 let existingKeys = new Set();
+                let existingInsbautiKeys = new Set();
                 
-                // 🚀 Solo traemos la BD Oficial si estamos subiendo BAUTIZOS (evitamos saturar la app)
+                // 🚀 BUSCAMOS DUPLICADOS EN LA BASE DE DATOS SEGÚN EL TIPO DE ARCHIVO
                 if (detectedType === 'BAUTIZOS') {
                     const { data: existingData, error: dbError } = await supabase
                         .from('baptisms')
@@ -113,9 +121,23 @@ const BaptismJsonImporter = () => {
 
                     if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
                     
+                    // Aplicamos padDbValue para igualar formato "1" a "0001"
                     existingKeys = new Set((existingData || []).map(b => 
-                        `${String(b.book_number).padStart(4, '0')}-${String(b.folio).padStart(4, '0')}-${String(b.number).padStart(4, '0')}`
+                        `${padDbValue(b.book_number)}-${padDbValue(b.folio)}-${padDbValue(b.number)}`
                     ));
+                } else if (detectedType === 'INSBAUTI') {
+                    // Validamos con la tabla de espera para no subir INSBAUTI duplicados
+                    const { data: existingData, error: dbError } = await supabase
+                        .from('pending_baptisms')
+                        .select('raw_data')
+                        .eq('parish_id', parishId);
+
+                    if (dbError) throw new Error("Fallo de conexión con la Base de Datos de Espera.");
+
+                    existingInsbautiKeys = new Set((existingData || []).map(b => {
+                        const raw = b.raw_data || {};
+                        return raw.numeroRegistro || `${raw.nombres}-${raw.apellidos}`;
+                    }));
                 }
 
                 const processed = [];
@@ -201,16 +223,16 @@ const BaptismJsonImporter = () => {
                         if (cleanItem.Libro === '0000' || !cleanItem.Libro || cleanItem.Libro === '---') {
                             errors.push(`Fila ${rowNum}: Faltan datos críticos (Libro/Folio).`);
                         } else if (existingKeys.has(keyBautizos) || internalKeys.has(keyBautizos)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe).`);
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe en el sistema o archivo).`);
                         } else {
                             processed.push(cleanItem);
                             internalKeys.add(keyBautizos);
                             validCount++;
                         }
                     } else if (detectedType === 'INSBAUTI') {
-                        // REGLAS INSBAUTI (Inscripciones de Despacho)
-                        if (internalKeys.has(keyInsbauti)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (Inscripción duplicada dentro del archivo).`);
+                        // REGLAS INSBAUTI (Inscripciones de Despacho) - ¡AHORA VALIDA CON BD!
+                        if (internalKeys.has(keyInsbauti) || existingInsbautiKeys.has(keyInsbauti)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreBautizado}" (La inscripción ya existe en la base de datos o está duplicada en este archivo).`);
                         } else {
                             processed.push(cleanItem);
                             internalKeys.add(keyInsbauti);
