@@ -36,6 +36,41 @@ const purificarRegistroConfirmacion = (obj) => {
     return cleaned;
 };
 
+// 🚀 ESTANDARIZADOR DE FECHAS (Convierte formatos raros a YYYY-MM-DD para el PDF)
+const formatToISODate = (val) => {
+    if (!val) return '';
+    const dateString = String(val).trim();
+    
+    // Si ya viene como YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}/.test(dateString)) return dateString.substring(0, 10);
+    
+    // Si viene como DD/MM/YYYY o DD-MM-YYYY
+    const separator = dateString.includes('/') ? '/' : (dateString.includes('-') ? '-' : null);
+    if (separator) {
+        const parts = dateString.split(separator);
+        if (parts.length === 3) {
+            if (parts[2].length === 4) { // DD/MM/YYYY
+                const day = parts[0].padStart(2, '0');
+                const month = parts[1].padStart(2, '0');
+                return `${parts[2]}-${month}-${day}`;
+            } else if (parts[0].length === 4) { // YYYY/MM/DD
+                const month = parts[1].padStart(2, '0');
+                const day = parts[2].padStart(2, '0');
+                return `${parts[0]}-${month}-${day}`;
+            }
+        }
+    }
+    
+    // Si viene como número de serie de Excel (Ej: 44234)
+    if (!isNaN(dateString) && Number(dateString) > 20000) {
+        const excelEpoch = new Date(1899, 11, 30);
+        const dateObj = new Date(excelEpoch.getTime() + Number(dateString) * 86400000);
+        return dateObj.toISOString().split('T')[0];
+    }
+
+    return dateString;
+};
+
 // Utilidad para asegurar el mismo formato de Libro/Folio/Numero al comparar con la DB
 const padDbValue = (val) => {
     if (val === null || val === undefined) return '---';
@@ -59,7 +94,6 @@ const ConfirmationJsonImporter = () => {
 
     const parishId = user?.parish_id || user?.parishId;
 
-    // --- 1. CARGAR HISTORIAL DE PÁRROCOS ---
     useEffect(() => {
         if (parishId) {
             const parrocos = getParrocos(parishId) || [];
@@ -74,7 +108,6 @@ const ConfirmationJsonImporter = () => {
         }
     }, [parishId, getParrocos]);
 
-    // --- 2. MÁQUINA DEL TIEMPO: BUSCADOR HISTÓRICO EXACTO ---
     const getHistoricalPriest = (dateString) => {
         if (!dateString || listaSacerdotes.length === 0) return null;
         
@@ -94,12 +127,10 @@ const ConfirmationJsonImporter = () => {
         return null;
     };
 
-    // --- 3. PROCESAMIENTO Y LECTURA INTELIGENTE DEL ARCHIVO ---
     const handleFileChange = async (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
 
-        // 🚀 1. IDENTIFICADOR DEL ARCHIVO EXACTO
         const fileName = selectedFile.name.toUpperCase();
         let detectedType = null;
         
@@ -134,7 +165,6 @@ const ConfirmationJsonImporter = () => {
                 let existingKeys = new Set();
                 let existingInsconfiKeys = new Set();
                 
-                // 🚀 BUSCAMOS DUPLICADOS EN LA BASE DE DATOS SEGÚN EL TIPO DE ARCHIVO
                 if (detectedType === 'CONFIRMA') {
                     const { data: existingData, error: dbError } = await supabase
                         .from('confirmations')
@@ -143,12 +173,10 @@ const ConfirmationJsonImporter = () => {
 
                     if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
                     
-                    // Aseguramos formato estricto idéntico al de subida
                     existingKeys = new Set((existingData || []).map(b => 
                         `${padDbValue(b.book_number)}-${padDbValue(b.folio)}-${padDbValue(b.number)}`
                     ));
                 } else if (detectedType === 'INSCONFI') {
-                    // Ahora validamos con la tabla de espera para no subir INSCONFI duplicados
                     const { data: existingData, error: dbError } = await supabase
                         .from('pending_confirmations')
                         .select('raw_data')
@@ -174,33 +202,39 @@ const ConfirmationJsonImporter = () => {
                     const isReportado = item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE' || item["SENTADO"] === true || String(item["SENTADO"]).toUpperCase() === 'TRUE';
                     const destinoStr = detectedType === 'CONFIRMA' ? 'oficial' : (isReportado ? 'boleta' : 'cola');
                     
-                    // Mapeo exhaustivo para Confirmaciones
+                    // 🚀 MAPEO EXPANDIDO Y FORMATEO DE FECHAS ESTRICTO
                     const mappedItem = {
-                        numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
-                        fechaInscripcion: item["FECHA DE INSCRIPCIÓN"] || item.fechaInscripcion || '',
+                        numeroRegistro: item["Nº REGISTRO PREVIO"] || item["REGISTRO PREVIO"] || item.numeroRegistro || '',
+                        fechaInscripcion: formatToISODate(item["FECHA DE INSCRIPCIÓN"] || item["FECHA INSCRIPCION"] || item.fechaInscripcion || ''),
                         Libro: item["LIBRO"] || item.Libro || item.libro || '---',
                         folio: item["FOLIO"] || item.folio || '---',
-                        numero: item["NÚMERO"] || item.numero || item.numeroActa || '---',
-                        fechaSacramento: item["FECHA DE CONFIRMACIÓN"] || item.fechaSacramento || '',
-                        lugarSacramento: item["LUGAR DE CONFIRMACION"] || item["LUGAR"] || item.lugarSacramento || '',
+                        numero: item["NÚMERO"] || item["NUMERO"] || item.numero || item.numeroActa || '---',
+                        
+                        // Captura de fechas reparada para PDFs
+                        fechaSacramento: formatToISODate(item["FECHA DE CONFIRMACIÓN"] || item["FECHA DE CONFIRMACION"] || item["FECHA CONFIRMACION"] || item.fechaSacramento || ''),
+                        fechaNacimiento: formatToISODate(item["FECHA DE NACIMIENTO"] || item["FECHA NACIMIENTO"] || item["NACIMIENTO"] || item.fechaNacimiento || ''),
+                        
+                        lugarSacramento: item["LUGAR DE CONFIRMACION"] || item["LUGAR CONFIRMACION"] || item["LUGAR"] || item.lugarSacramento || '',
                         apellidos: item["APELLIDOS"] || item.apellidos || '',
                         nombres: item["NOMBRES"] || item.nombres || '',
-                        fechaNacimiento: item["FECHA DE NACIMIENTO"] || item.fechaNacimiento || '',
                         edad: item["EDAD"] || item.edad || '',
                         sexo: item["SEXO"] || item.sexo || '',
                         codigoBautizo: item["CODIGO DE BAUTIZO"] || item.codigoBautizo || '',
-                        lugarBautismo: item["LUGAR DE BAUTISMO"] || item.lugarBautismo || '',
-                        libroBautismo: item["LIBRO DE BAUTIZO"] || item.libroBautismo || '',
-                        folioBautismo: item["FOLIO DE BAUTIZO"] || item.folioBautismo || '',
-                        numeroBautismo: item["NÚMERO DE BAUTIZO"] || item.numeroBautismo || '',
-                        nombrePadre: item["NOMBRE DEL PADRE"] || item.nombrePadre || '',
-                        nombreMadre: item["NOMBRE DE LA MADRE"] || item.nombreMadre || '',
-                        padrinos: item["PADRINO / MADRINA"] || item.padrinos || '',
+                        
+                        // Captura agresiva del Lugar de Bautismo
+                        lugarBautismo: item["LUGAR DE BAUTISMO"] || item["LUGAR BAUTISMO"] || item["PARROQUIA DE BAUTISMO"] || item["PARROQUIA BAUTIZO"] || item["PARROQUIA BAUTISMO"] || item["BAUTIZADO EN"] || item.lugarBautismo || '',
+                        
+                        libroBautismo: item["LIBRO DE BAUTIZO"] || item["LIBRO BAUTIZO"] || item.libroBautismo || '',
+                        folioBautismo: item["FOLIO DE BAUTIZO"] || item["FOLIO BAUTIZO"] || item.folioBautismo || '',
+                        numeroBautismo: item["NÚMERO DE BAUTIZO"] || item["NUMERO BAUTIZO"] || item.numeroBautismo || '',
+                        nombrePadre: item["NOMBRE DEL PADRE"] || item["NOMBRE PADRE"] || item["PADRE"] || item.nombrePadre || '',
+                        nombreMadre: item["NOMBRE DE LA MADRE"] || item["NOMBRE MADRE"] || item["MADRE"] || item.nombreMadre || '',
+                        padrinos: item["PADRINO / MADRINA"] || item["PADRINOS"] || item["PADRINO"] || item["MADRINA"] || item.padrinos || '',
                         direccion: item["DIRECCION"] || item.direccion || '',
                         responsable: item["RESPONSABLE"] || item.responsable || '',
                         ministro: item["MINISTRO"] || item.ministro || '',
-                        daFe: item["DA FE"] || item.daFe || '',
-                        notaMarginal: item["NOTAS MARGINALES"] || item.notaMarginal || '',
+                        daFe: item["DA FE"] || item["DAFE"] || item.daFe || '',
+                        notaMarginal: item["NOTAS MARGINALES"] || item["NOTA MARGINAL"] || item.notaMarginal || '',
                         reportado: isReportado
                     };
 
@@ -240,7 +274,6 @@ const ConfirmationJsonImporter = () => {
                     if (!cleanItem.nombres || !cleanItem.apellidos) {
                         errors.push(`Fila ${rowNum}: Faltan Nombres o Apellidos críticos.`);
                     } else if (detectedType === 'CONFIRMA') {
-                        // REGLAS CONFIRMA.JSON (Libro Oficial)
                         if (cleanItem.Libro === '0000' || !cleanItem.Libro || cleanItem.Libro === '---') {
                             errors.push(`Fila ${rowNum}: Faltan datos críticos (Libro/Folio).`);
                         } else if (existingKeys.has(keyConfirmaciones) || internalKeys.has(keyConfirmaciones)) {
@@ -251,7 +284,6 @@ const ConfirmationJsonImporter = () => {
                             validCount++;
                         }
                     } else if (detectedType === 'INSCONFI') {
-                        // REGLAS INSCONFI.JSON (Inscripciones de Despacho) - ¡AHORA VALIDA CON BD TAMBIÉN!
                         if (internalKeys.has(keyInsconfi) || existingInsconfiKeys.has(keyInsconfi)) {
                             warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (La inscripción ya existe en la base de datos o está duplicada en este archivo).`);
                         } else {
@@ -275,7 +307,6 @@ const ConfirmationJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
-    // --- 4. INYECCIÓN BIFURCADA (MAGIA TRIFÁSICA) ---
     const handleImport = async () => {
         if (!validationResult || validationResult.dataToImport.length === 0) return;
         setIsProcessing(true);
@@ -309,6 +340,7 @@ const ConfirmationJsonImporter = () => {
                         ministro: item.ministro || null,
                         da_fe: item.daFe || null,
                         nota_marginal: item.notaMarginal || null,
+                        // El merge ahora incluye las fechas formateadas correctamente
                         raw_data: { ...rawOriginal, ...cleanMappedData }, 
                         created_at: new Date().toISOString()
                     };
@@ -456,7 +488,6 @@ const ConfirmationJsonImporter = () => {
                     {validationResult && (
                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             
-                            {/* ESTADÍSTICAS DINÁMICAS SEGÚN EL ARCHIVO */}
                             {fileType === 'CONFIRMA' ? (
                                 <div className="grid grid-cols-3 gap-4">
                                     <StatCard label="Libro Oficial" val={totalOficial} color="emerald" />
