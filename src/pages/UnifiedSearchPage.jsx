@@ -50,7 +50,7 @@ const UnifiedSearchPage = () => {
         fetchInitialEntities();
     }, [toast]);
 
-    // 🚀 2. CARGAR PARROQUIAS DE LA DIÓCESIS
+    // 🚀 2. CARGAR PARROQUIAS
     useEffect(() => {
         const loadParishes = async () => {
             if (!searchParams.dioceseId || searchParams.dioceseId === 'all') {
@@ -76,11 +76,11 @@ const UnifiedSearchPage = () => {
 
     const sacramentOptions = [
         { value: 'baptism', label: 'BAUTISMO' },
-        { value: 'confirmation', label: 'CONFIRMACIÓN' },
-        { value: 'marriage', label: 'MATRIMONIO' },
+        { value: 'confirmation', label: 'CONFIRMACIÓN' }
+        // Se omiten matrimonios por ahora según instrucción
     ];
 
-    // 🚀 3. EL BUSCADOR OPTIMIZADO Y BLINDADO
+    // 🚀 3. EL BUSCADOR (BASADO 100% EN TU CÓDIGO FUNCIONAL)
     const handleSearch = async (e) => {
         e.preventDefault();
         
@@ -97,7 +97,6 @@ const UnifiedSearchPage = () => {
         setResults(null);
 
         try {
-            let all = [];
             let isGlobal = searchParams.dioceseId === 'all';
             let queryParishIds = [];
 
@@ -118,19 +117,14 @@ const UnifiedSearchPage = () => {
             const type = searchParams.sacramentType;
             const fetchPromises = [];
             
-            // ELIMINADA la tabla 'matrimonios' en español para evitar el Error 404
             const tablesToSearch = [];
-            if (!type || type === 'baptism') tablesToSearch.push('baptisms');
-            if (!type || type === 'confirmation') tablesToSearch.push('confirmations');
-            if (!type || type === 'marriage') tablesToSearch.push('marriages');
+            if (!type || type === 'baptism') tablesToSearch.push({ name: 'baptisms', label: 'BAUTISMO' });
+            if (!type || type === 'confirmation') tablesToSearch.push({ name: 'confirmations', label: 'CONFIRMACIÓN' });
 
-            // 🛡️ FORMATEADOR SEGURO: Evita el Error 400 Bad Request cuando el nombre tiene espacios
-            const getSafeTerm = (term) => `"%${term.replace(/"/g, '')}%"`;
-
+            // CONSULTA DIRECTA A SUPABASE (Como en ConfirmationPartidasPage)
             tablesToSearch.forEach(table => {
-                let q = supabase.from(table).select('*').limit(10000); 
+                let q = supabase.from(table.name).select('*');
                 
-                // Filtro por Parroquia
                 if (!isGlobal && queryParishIds.length > 0) {
                     if (queryParishIds.length === 1) {
                         q = q.eq('parish_id', queryParishIds[0]);
@@ -138,88 +132,126 @@ const UnifiedSearchPage = () => {
                         q = q.in('parish_id', queryParishIds);
                     }
                 }
-
-                const fName = searchParams.firstName.trim();
-                const lName = searchParams.lastName.trim();
-
-                if (table === 'baptisms' || table === 'confirmations') {
-                    // El método nativo .ilike() maneja los espacios automáticamente (Cero errores)
-                    if (fName) q = q.ilike('nombres', `%${fName}%`);
-                    if (lName) q = q.ilike('apellidos', `%${lName}%`);
-                } else if (table === 'marriages') {
-                    // Para buscar dentro del JSONB con OR, formateamos con doble comilla para evitar Error 400
-                    if (fName || lName) {
-                        const termToSearch = fName.length > lName.length ? fName : lName; 
-                        const safeTerm = getSafeTerm(termToSearch);
-                        q = q.or(`raw_data->>ESPOSO.ilike.${safeTerm},raw_data->>ESPOSA.ilike.${safeTerm},raw_data->>groomName.ilike.${safeTerm},raw_data->>brideName.ilike.${safeTerm},raw_data->>groomSurname.ilike.${safeTerm},raw_data->>brideSurname.ilike.${safeTerm}`);
-                    }
-                }
                 
-                fetchPromises.push(q.then(res => ({ type: table, data: res.data || [] })));
+                q = q.limit(15000); // Límite seguro para no saturar memoria
+                fetchPromises.push(q.then(res => ({ typeLabel: table.label, data: res.data || [] })));
             });
 
             const fetchedResults = await Promise.all(fetchPromises);
 
-            // Mapear parroquias encontradas
-            let allFoundParishIds = new Set();
+            // PROCESAMIENTO HÍBRIDO (El secreto de tu código)
+            let allProcessedData = [];
+
             fetchedResults.forEach(fetchResult => {
-                fetchResult.data.forEach(row => { if (row.parish_id) allFoundParishIds.add(row.parish_id); });
+                const tableProcessed = fetchResult.data.map(r => {
+                    // Esta es la línea clave que tienes en ConfirmationPartidasPage
+                    const raw = typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : (r.raw_data || {});
+                    
+                    return {
+                        id: r.id,
+                        parishId: r.parish_id,
+                        type: fetchResult.typeLabel,
+                        status: r.status || 'vigente',
+                        Libro: r.book_number || raw.Libro || raw.libro || '---',
+                        folio: r.folio || raw.folio || raw.page_number || '---',
+                        numero: r.number || raw.numero || raw.entry_number || '---',
+                        // Unificamos nombres desde columna o JSON crudo
+                        apellidos: (r.apellidos || raw.apellidos || raw.lastName || '').toUpperCase(),
+                        nombres: (r.nombres || raw.nombres || raw.firstName || '').toUpperCase(),
+                        fechaSacramento: r.celebration_date || raw.fechaSacramento || raw.sacramentDate || raw.fechaBautismo || raw.fechaConfirmacion || ''
+                    };
+                });
+                
+                allProcessedData = [...allProcessedData, ...tableProcessed];
             });
 
+            // Mapear info de las parroquias encontradas
             let allParishesRef = [...filteredParishes];
-            if (isGlobal && allFoundParishIds.size > 0) {
-                const { data: missingParishes } = await supabase.from('parishes').select('id, name, city, address, diocese_id').in('id', Array.from(allFoundParishIds));
-                if (missingParishes) allParishesRef = missingParishes;
+            if (isGlobal) {
+                let allFoundParishIds = new Set(allProcessedData.map(d => d.parishId).filter(Boolean));
+                if (allFoundParishIds.size > 0) {
+                    const { data: missingParishes } = await supabase.from('parishes').select('id, name, city, address, diocese_id').in('id', Array.from(allFoundParishIds));
+                    if (missingParishes) allParishesRef = missingParishes;
+                }
             }
 
-            fetchedResults.forEach(fetchResult => {
-                const sacType = fetchResult.type;
-                
-                const cloudRecords = fetchResult.data.map(dbRow => ({
-                    id: dbRow.id,
-                    parishId: dbRow.parish_id,
-                    dbNombres: dbRow.nombres,
-                    dbApellidos: dbRow.apellidos,
-                    dbDate: dbRow.celebration_date,
-                    ...(dbRow.raw_data || {})
-                }));
+            // Normalizador de texto
+            const normalizeText = (str) => {
+                if (!str) return '';
+                return String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, ' ').trim();
+            };
 
-                cloudRecords.forEach(record => {
-                    const parish = allParishesRef.find(p => p.id === record.parishId);
-                    if (!parish) return;
+            const termFirst = normalizeText(searchParams.firstName);
+            const termLast = normalizeText(searchParams.lastName);
 
-                    // El filtro JavaScript atrapa todo con una precisión del 100%
-                    if (matchesSearch(record, searchParams, sacType)) {
-                        let parishAddress = parish.address || 'Dirección no registrada';
-                        
-                        if (parishAddress === 'Dirección no registrada') {
-                            const misDatosMatch = misDatosList.find(md => md.entity_id === parish.id);
-                            if (misDatosMatch) {
-                                let pData = misDatosMatch.payload;
-                                if (typeof pData === 'string') {
-                                    try { pData = JSON.parse(pData); } catch(e) { pData = {}; }
-                                }
-                                if (Array.isArray(pData)) pData = pData[0] || {};
-                                if (pData.direccion && pData.direccion.trim() !== '') parishAddress = pData.direccion;
-                            }
-                        }
+            // FILTRADO JAVASCRIPT (Idéntico al .filter() de tu componente)
+            let finalFiltered = allProcessedData.filter(r => {
+                const nom = normalizeText(r.nombres);
+                const ape = normalizeText(r.apellidos);
 
-                        const typeLabel = sacType === 'baptism' ? 'BAUTISMO' : sacType === 'confirmation' ? 'CONFIRMACIÓN' : 'MATRIMONIO';
+                if (termFirst && !nom.includes(termFirst)) return false;
+                if (termLast && !ape.includes(termLast)) return false;
 
-                        all.push({
-                            ...record,
-                            type: typeLabel,
-                            parishName: parish.name,
-                            city: parish.city || '',
-                            dioceseId: parish.diocese_id || parish.dioceseId,
-                            parishAddress
-                        });
+                // Filtro de fechas
+                if (searchParams.dateStart || searchParams.dateEnd) {
+                    if (!r.fechaSacramento) return false;
+                    
+                    let rTime;
+                    const rStr = String(r.fechaSacramento).trim();
+                    if (rStr.includes('/')) {
+                        const parts = rStr.split('/');
+                        rTime = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T12:00:00`).getTime();
+                    } else {
+                        rTime = new Date(rStr.includes('T') ? rStr : `${rStr}T12:00:00`).getTime();
                     }
+
+                    if (isNaN(rTime)) return false;
+
+                    if (searchParams.dateStart) {
+                        const sTime = new Date(`${searchParams.dateStart}T00:00:00`).getTime();
+                        if (rTime < sTime) return false;
+                    }
+                    if (searchParams.dateEnd) {
+                        const eTime = new Date(`${searchParams.dateEnd}T23:59:59`).getTime();
+                        if (rTime > eTime) return false;
+                    }
+                }
+
+                return true;
+            });
+
+            // Enriquecer con datos de la parroquia
+            const enrichedResults = [];
+            finalFiltered.forEach(record => {
+                const parish = allParishesRef.find(p => p.id === record.parishId);
+                if (!parish) return;
+
+                let parishAddress = parish.address || 'Dirección no registrada';
+                if (parishAddress === 'Dirección no registrada') {
+                    const misDatosMatch = misDatosList.find(md => md.entity_id === parish.id);
+                    if (misDatosMatch) {
+                        let pData = misDatosMatch.payload;
+                        if (typeof pData === 'string') {
+                            try { pData = JSON.parse(pData); } catch(e) { pData = {}; }
+                        }
+                        if (Array.isArray(pData)) pData = pData[0] || {};
+                        if (pData.direccion && pData.direccion.trim() !== '') parishAddress = pData.direccion;
+                    }
+                }
+
+                enrichedResults.push({
+                    ...record,
+                    parishName: parish.name,
+                    city: parish.city || '',
+                    dioceseId: parish.diocese_id || parish.dioceseId,
+                    parishAddress
                 });
             });
 
-            all.sort((a, b) => new Date(b.dbDate || b.fechaSacramento || 0) - new Date(a.dbDate || a.fechaSacramento || 0));
-            setResults(all);
+            // Ordenar de más reciente a más antiguo
+            enrichedResults.sort((a, b) => new Date(b.fechaSacramento || 0) - new Date(a.fechaSacramento || 0));
+            
+            setResults(enrichedResults);
             
         } catch (error) {
             console.error("Error consultando Supabase:", error);
@@ -227,56 +259,6 @@ const UnifiedSearchPage = () => {
         } finally {
             setSearchLoading(false);
         }
-    };
-
-    const normalizeText = (str) => {
-        if (!str) return '';
-        return String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, ' ').trim();
-    };
-
-    // 🚀 FILTRO JAVASCRIPT EXTREMO: Cruza datos crudos para evitar pérdidas
-    const matchesSearch = (r, p, type) => {
-        
-        // 1. FILTRO DE FECHAS SEGURO
-        if (p.dateStart || p.dateEnd) {
-            const recordDate = r.dbDate || r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"] || r["FECHA DE CONFIRMACIÓN"];
-            if (!recordDate) return false; 
-            
-            let rTime;
-            const rStr = String(recordDate).trim();
-            if (rStr.includes('/')) {
-                const parts = rStr.split('/');
-                rTime = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T12:00:00`).getTime();
-            } else {
-                rTime = new Date(rStr.includes('T') ? rStr : `${rStr}T12:00:00`).getTime();
-            }
-
-            if (isNaN(rTime)) return false;
-
-            if (p.dateStart) {
-                const sTime = new Date(`${p.dateStart}T00:00:00`).getTime();
-                if (rTime < sTime) return false;
-            }
-            if (p.dateEnd) {
-                const eTime = new Date(`${p.dateEnd}T23:59:59`).getTime();
-                if (rTime > eTime) return false;
-            }
-        }
-
-        // 2. FILTRO TEXTUAL INFALIBLE (Une todos los campos posibles en una cadena y busca ahí)
-        let fullRecordText = '';
-        if (type === 'marriage' || type === 'MATRIMONIO') {
-            fullRecordText = `${r.groomName || ''} ${r.ESPOSO || ''} ${r.brideName || ''} ${r.ESPOSA || ''} ${r.groomSurname || ''} ${r.brideSurname || ''}`;
-        } else {
-            fullRecordText = `${r.dbNombres || ''} ${r.firstName || ''} ${r.nombres || ''} ${r.NOMBRES || ''} ${r.dbApellidos || ''} ${r.lastName || ''} ${r.apellidos || ''} ${r.APELLIDOS || ''}`;
-        }
-
-        fullRecordText = normalizeText(fullRecordText);
-
-        if (p.firstName && !fullRecordText.includes(normalizeText(p.firstName))) return false;
-        if (p.lastName && !fullRecordText.includes(normalizeText(p.lastName))) return false;
-
-        return true;
     };
 
     return (
@@ -329,7 +311,7 @@ const UnifiedSearchPage = () => {
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Tipo de Acta</label>
                             <select value={searchParams.sacramentType} onChange={e => setSearchParams({...searchParams, sacramentType: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#D4AF37]">
-                                <option value="">TODOS (Bautismo, Confirmación, Matrimonio)</option>
+                                <option value="">BAUTISMO Y CONFIRMACIÓN</option>
                                 {sacramentOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                             </select>
                         </div>
@@ -375,24 +357,23 @@ const UnifiedSearchPage = () => {
                             ) : (
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
                                     {results.map(r => {
-                                        const name = r.type === 'MATRIMONIO' ? `${r.groomName || r.ESPOSO || ''} & ${r.brideName || r.ESPOSA || ''}` : `${(r.dbNombres || r.firstName || r.nombres || r.NOMBRES || '')} ${(r.dbApellidos || r.lastName || r.apellidos || r.APELLIDOS || '')}`;
-                                        const date = r.dbDate || r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"] || r["FECHA DE CONFIRMACIÓN"];
-
                                         return (
                                             <motion.div whileHover={{ y: -5 }} key={`${r.type}-${r.id}`} className="bg-white p-6 lg:p-8 rounded-[2rem] shadow-xl shadow-blue-900/5 border-l-8 border-[#D4AF37] relative group overflow-hidden flex flex-col justify-between">
                                                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform">
-                                                    {r.type === 'MATRIMONIO' ? <Users className="w-20 h-20 lg:w-24 lg:h-24" /> : <BookOpen className="w-20 h-20 lg:w-24 lg:h-24" />}
+                                                    <BookOpen className="w-20 h-20 lg:w-24 lg:h-24" />
                                                 </div>
                                                 
                                                 <div>
                                                     <span className="bg-blue-50 text-[#4B7BA7] px-3 py-1 rounded-full text-[8px] lg:text-[9px] font-black uppercase tracking-widest">{r.type}</span>
-                                                    <h4 className="text-lg lg:text-xl font-black text-gray-900 uppercase mt-3 tracking-tighter leading-tight pr-10">{name}</h4>
+                                                    <h4 className="text-lg lg:text-xl font-black text-gray-900 uppercase mt-3 tracking-tighter leading-tight pr-10">
+                                                        {r.nombres} {r.apellidos}
+                                                    </h4>
                                                 </div>
 
                                                 <div className="space-y-2 pt-4 lg:pt-6 mt-4 lg:mt-6 border-t border-gray-50">
                                                     <div className="flex items-center gap-3 text-gray-500">
                                                         <Calendar className="w-4 h-4 text-[#D4AF37] shrink-0" />
-                                                        <span className="text-[10px] lg:text-xs font-bold uppercase">{date || 'Fecha no registrada'}</span>
+                                                        <span className="text-[10px] lg:text-xs font-bold uppercase">{r.fechaSacramento || 'Fecha no registrada'}</span>
                                                     </div>
                                                     <div className="flex items-center gap-3 text-gray-500">
                                                         <Church className="w-4 h-4 text-[#4B7BA7] shrink-0" />
