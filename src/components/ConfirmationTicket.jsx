@@ -62,6 +62,9 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
     const padrinos = formatData(confirmationData.padrinos || confirmationData.godparents);
     const ministro = formatData(confirmationData.ministro || confirmationData.minister);
     
+    // 🚀 Extraemos la hora
+    const hora = formatData(confirmationData.hora || '');
+    
     const lugarSacramento = formatData(confirmationData.lugarSacramento || confirmationData.place || nombreP);
     
     const lugarBautismo = formatData(confirmationData.lugarBautismo || confirmationData.baptismPlace || '');
@@ -158,14 +161,14 @@ const ConfirmationTicket = ({ confirmationData, parishInfo }) => {
                 <FieldLine label="CONFIRMANDO" value={confirmando} />
                 
                 <div style={{ display: 'flex', gap: '15px' }}>
-                    <FieldLine label="FECHA NACIMIENTO." value={formatDate(confirmationData.fechaNacimiento || confirmationData.birthDate)} />
-                                    </div>
-
-                <div style={{ display: 'flex', gap: '15px' }}>
-                    
-                    <FieldLine label="FECHA CONFIRMACION." value={formatDate(confirmationData.fechaSacramento || confirmationData.sacramentDate)} />
+                    <FieldLine label="FECHA NACIMIENTO" value={formatDate(confirmationData.fechaNacimiento || confirmationData.birthDate)} />
                 </div>
 
+                {/* 🚀 DIVIDIMOS ESTA LÍNEA PARA INCLUIR LA FECHA Y LA HORA */}
+                <div style={{ display: 'flex', gap: '15px' }}>
+                    <FieldLine label="FECHA CONFIRMACIÓN" value={formatDate(confirmationData.fechaSacramento || confirmationData.sacramentDate)} width="70%" />
+                    <FieldLine label="HORA" value={hora} width="30%" />
+                </div>
 
                 <div style={{ display: 'flex', gap: '15px' }}>
                     <FieldLine label="SEXO" value={sexoReal} width="50%" />

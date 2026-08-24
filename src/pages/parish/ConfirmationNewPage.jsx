@@ -39,7 +39,7 @@ const ConfirmationNewPage = () => {
         numeroRegistro: '', 
         fechaInscripcion: new Date().toISOString().split('T')[0],
         Libro: '---', folio: '---', numero: '---',
-        fechaSacramento: '', lugarSacramento: nombreParroquia,
+        fechaSacramento: '', hora: '', lugarSacramento: nombreParroquia,
         apellidos: '', nombres: '', sexo: '', 
         fechaNacimiento: '', edad: '', direccion: '', 
         nombrePadre: '', nombreMadre: '', 
@@ -190,7 +190,8 @@ const ConfirmationNewPage = () => {
             const { error: insertError } = await supabase.from('pending_confirmations').insert([{
                 parish_id: parishId,
                 raw_data: dataToSave,
-                status: 'pending'
+                status: 'pending',
+                hora: formData.hora || null // 🚀 AÑADIDO: Inyección directa a la nueva columna
             }]);
 
             if (insertError) throw insertError;
@@ -279,8 +280,10 @@ const ConfirmationNewPage = () => {
 
                             <section>
                                 <SectionHeader number="02" title="Datos de la Celebración" icon={Calendar} />
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                {/* 🚀 CAMBIO A 3 COLUMNAS PARA INCLUIR LA HORA */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
                                     <div><label className={labelClass}>Fecha Confirmación</label><input type="date" name="fechaSacramento" required value={formData.fechaSacramento} onChange={handleChange} className={inputClass} /></div>
+                                    <div><label className={labelClass}>Hora Confirmación</label><input type="time" name="hora" value={formData.hora} onChange={handleChange} className={inputClass} /></div>
                                     <div><label className={labelClass}>Parroquia / Lugar</label><input type="text" name="lugarSacramento" required value={formData.lugarSacramento} onChange={handleChange} className={inputClass} /></div>
                                 </div>
                             </section>
