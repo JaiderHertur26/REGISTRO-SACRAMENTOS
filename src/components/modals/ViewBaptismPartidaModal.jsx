@@ -119,10 +119,10 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                     const tempObj = storedTemplates ? JSON.parse(storedTemplates) : {};
                     
                     // Aseguramos que la plantilla tenga soporte para Serial también
-                    let templateRC = tempObj.vinculo_civil || "REGISTRO CIVIL: NUIP/NIP [NUIP] - SERIAL [SERIAL_ACTA]. EXPEDIDO EN [OFICINA_REGISTRO] EL DÍA [FECHA_EXPEDICION_RC].";
+                    let templateRC = tempObj.vinculo_civil || "REGISTRO CIVIL: NUIP/NIP [NUIP] - [SERIAL_ACTA]. EXPEDIDO EN [OFICINA_REGISTRO] EL DÍA [FECHA_EXPEDICION_RC].";
 
                     if (serial && !templateRC.includes('[SERIAL_ACTA]')) {
-                        templateRC = templateRC.replace('REGISTRO CIVIL:', 'REGISTRO CIVIL: SERIAL [SERIAL_ACTA] -');
+                        templateRC = templateRC.replace('REGISTRO CIVIL:', 'REGISTRO CIVIL: [SERIAL_ACTA] -');
                     }
 
                     const oficina = raw.oficinaRegistro || raw.oficina_registro || partida.oficina_registro || partida.oficinaRegistro || raw.NOTARIA || '---';
