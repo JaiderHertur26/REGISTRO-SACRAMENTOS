@@ -176,30 +176,15 @@ const ConfirmationJsonImporter = () => {
                     const isReportado = item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE' || item["SENTADO"] === true || String(item["SENTADO"]).toUpperCase() === 'TRUE';
                     const destinoStr = detectedType === 'CONFIRMA' ? 'oficial' : (isReportado ? 'boleta' : 'cola');
                     
-// 🚀 FUNCIÓN EXTRACTORA SEGURA
-const extractKey = (obj, validKeys) => {
-    for (let k of validKeys) {
-        if (obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== '') {
-            return obj[k];
-        }
-    }
-    return '---';
-};                    
-
-// Mapeo exhaustivo para Confirmaciones
+                    // Mapeo exhaustivo para Confirmaciones
                     const mappedItem = {
-    numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
-    fechaInscripcion: item["FECHA DE INSCRIPCIÓN"] || item.fechaInscripcion || '',
-    
-    // 👇 APLICAMOS LA EXTRACCIÓN SEGURA AQUÍ 👇
-    Libro: extractKey(item, ["LIBRO", "Libro", "libro"]),
-    folio: extractKey(item, ["FOLIO", "Folio", "folio"]),
-    numero: extractKey(item, ["NÚMERO", "NUMERO", "Numero", "numero", "numeroActa"]),
-    // 👆 --------------------------------- 👆
-
-    fechaSacramento: item["FECHA DE CONFIRMACIÓN"] || item.fechaSacramento || '',
-    lugarSacramento: item["LUGAR DE CONFIRMACION"] || item["LUGAR"] || item.lugarSacramento || '',
-    // ... el resto de tu mappedItem queda exactamente igual
+                        numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
+                        fechaInscripcion: item["FECHA DE INSCRIPCIÓN"] || item.fechaInscripcion || '',
+                        Libro: item["LIBRO"] || item.Libro || item.libro || '---',
+                        folio: item["FOLIO"] || item.folio || '---',
+                        numero: item["NÚMERO"] || item.numero || item.numeroActa || '---',
+                        fechaSacramento: item["FECHA DE CONFIRMACIÓN"] || item.fechaSacramento || '',
+                        lugarSacramento: item["LUGAR DE CONFIRMACION"] || item["LUGAR"] || item.lugarSacramento || '',
                         apellidos: item["APELLIDOS"] || item.apellidos || '',
                         nombres: item["NOMBRES"] || item.nombres || '',
                         fechaNacimiento: item["FECHA DE NACIMIENTO"] || item.fechaNacimiento || '',
