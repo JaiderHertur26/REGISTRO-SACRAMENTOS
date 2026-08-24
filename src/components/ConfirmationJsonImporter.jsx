@@ -127,61 +127,18 @@ const ConfirmationJsonImporter = () => {
 
                 let existingKeys = new Set();
                 
-                // 🚀 CARGA DE DUPLICADOS DEPENDIENDO DEL ARCHIVO
+                // 🚀 Solo traemos la BD Oficial si estamos subiendo CONFIRMA (Libros Antiguos)
                 if (detectedType === 'CONFIRMA') {
-                    // Busca duplicados en el Libro Oficial
                     const { data: existingData, error: dbError } = await supabase
                         .from('confirmations')
                         .select('book_number, folio, number')
-                        .eq('parish_id', parishId)
-                        .limit(10000); // Límite amplio para garantizar la extracción completa
+                        .eq('parish_id', parishId);
 
                     if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
                     
-                    (existingData || []).forEach(b => {
-                        const l = String(b.book_number || '').padStart(4, '0');
-                        const f = String(b.folio || '').padStart(4, '0');
-                        const n = String(b.number || '').padStart(4, '0');
-                        existingKeys.add(`LFN-${l}-${f}-${n}`);
-                    });
-                } else if (detectedType === 'INSCONFI') {
-                    // 1. Busca duplicados en la Cola de Espera / Boletas Emitidas
-                    const { data: pendingData, error: pError } = await supabase
-                        .from('pending_confirmations')
-                        .select('numero_registro, raw_data')
-                        .eq('parish_id', parishId)
-                        .limit(10000);
-
-                    if (pError) throw new Error("Fallo de conexión al buscar inscripciones previas.");
-
-                    (pendingData || []).forEach(p => {
-                        if (p.numero_registro) {
-                            existingKeys.add(`REG-${p.numero_registro}`);
-                        }
-                        const raw = typeof p.raw_data === 'string' ? JSON.parse(p.raw_data) : (p.raw_data || {});
-                        const n = String(raw.NOMBRES || raw.nombres || '').trim().toUpperCase();
-                        const a = String(raw.APELLIDOS || raw.apellidos || '').trim().toUpperCase();
-                        if (n && a) {
-                            existingKeys.add(`NAME-${n}-${a}`);
-                        }
-                    });
-
-                    // 2. Busca duplicados en la Base de Datos Oficial (Escudo Final)
-                    const { data: officialData, error: oError } = await supabase
-                        .from('confirmations')
-                        .select('nombres, apellidos')
-                        .eq('parish_id', parishId)
-                        .limit(10000);
-                        
-                    if (!oError && officialData) {
-                        officialData.forEach(o => {
-                            const n = String(o.nombres || '').trim().toUpperCase();
-                            const a = String(o.apellidos || '').trim().toUpperCase();
-                            if (n && a) {
-                                existingKeys.add(`NAME-${n}-${a}`);
-                            }
-                        });
-                    }
+                    existingKeys = new Set((existingData || []).map(b => 
+                        `${String(b.book_number).padStart(4, '0')}-${String(b.folio).padStart(4, '0')}-${String(b.number).padStart(4, '0')}`
+                    ));
                 }
 
                 const processed = [];
@@ -200,12 +157,12 @@ const ConfirmationJsonImporter = () => {
                     // Mapeo exhaustivo para Confirmaciones
                     const mappedItem = {
                         numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
-                        fechaInscripcion: item["FECHA DE INSCRIPCIÓN"] || item["FECHA DE INSCRIPCION"] || item.fechaInscripcion || '',
+                        fechaInscripcion: item["FECHA DE INSCRIPCIÓN"] || item.fechaInscripcion || '',
                         Libro: item["LIBRO"] || item.Libro || item.libro || '---',
                         folio: item["FOLIO"] || item.folio || '---',
                         numero: item["NÚMERO"] || item.numero || item.numeroActa || '---',
-                        fechaSacramento: item["FECHA DE CONFIRMACIÓN"] || item["FECHA DE CONFIRMACION"] || item.fechaSacramento || '',
-                        lugarSacramento: item["LUGAR DE CONFIRMACION"] || item["LUGAR DE CONFIRMACIÓN"] || item["LUGAR"] || item.lugarSacramento || '',
+                        fechaSacramento: item["FECHA DE CONFIRMACIÓN"] || item.fechaSacramento || '',
+                        lugarSacramento: item["LUGAR DE CONFIRMACION"] || item["LUGAR"] || item.lugarSacramento || '',
                         apellidos: item["APELLIDOS"] || item.apellidos || '',
                         nombres: item["NOMBRES"] || item.nombres || '',
                         fechaNacimiento: item["FECHA DE NACIMIENTO"] || item.fechaNacimiento || '',
@@ -235,7 +192,6 @@ const ConfirmationJsonImporter = () => {
                         mappedItem.ministro = sacerdoteEpoca || '';
                     } else {
                         let original = String(mappedItem.ministro).toUpperCase();
-                        // Asignación segura del título correcto
                         if (original.includes('PBRO') || original.includes('PADRE') || original.includes('FRAY') || original.includes('SACERDOTE')) {
                             mappedItem.ministro = `PBRO. ${minClean}`;
                         } else {
@@ -260,41 +216,30 @@ const ConfirmationJsonImporter = () => {
                     cleanItem.destino = destinoStr;
                     cleanItem.rawOriginal = item;
 
+                    const keyConfirmaciones = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
+                    const keyInsconfi = cleanItem.numeroRegistro || `${cleanItem.nombres}-${cleanItem.apellidos}`;
                     const nombreConfirmado = `${cleanItem.nombres} ${cleanItem.apellidos}`.trim();
 
                     if (!cleanItem.nombres || !cleanItem.apellidos) {
                         errors.push(`Fila ${rowNum}: Faltan Nombres o Apellidos críticos.`);
                     } else if (detectedType === 'CONFIRMA') {
-                        // 🚀 REGLAS DE DUPLICADOS PARA CONFIRMA.JSON (Libro Oficial)
-                        const keyConfirmaciones = `LFN-${String(cleanItem.Libro).padStart(4, '0')}-${String(cleanItem.folio).padStart(4, '0')}-${String(cleanItem.numero).padStart(4, '0')}`;
-                        
+                        // REGLAS CONFIRMA.JSON (Libro Oficial)
                         if (cleanItem.Libro === '0000' || !cleanItem.Libro || cleanItem.Libro === '---') {
                             errors.push(`Fila ${rowNum}: Faltan datos críticos (Libro/Folio).`);
-                        } else if (existingKeys.has(keyConfirmaciones)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe en la nube).`);
-                        } else if (internalKeys.has(keyConfirmaciones)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (Acta repetida dentro de este mismo archivo).`);
+                        } else if (existingKeys.has(keyConfirmaciones) || internalKeys.has(keyConfirmaciones)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe).`);
                         } else {
                             processed.push(cleanItem);
                             internalKeys.add(keyConfirmaciones);
                             validCount++;
                         }
                     } else if (detectedType === 'INSCONFI') {
-                        // 🚀 REGLAS DE DUPLICADOS PARA INSCONFI.JSON (Despacho / Inscripciones)
-                        const keyReg = `REG-${cleanItem.numeroRegistro}`;
-                        const keyName = `NAME-${String(cleanItem.nombres).trim().toUpperCase()}-${String(cleanItem.apellidos).trim().toUpperCase()}`;
-                        
-                        const isDupeInDB = (cleanItem.numeroRegistro && existingKeys.has(keyReg)) || existingKeys.has(keyName);
-                        const isDupeInFile = (cleanItem.numeroRegistro && internalKeys.has(keyReg)) || internalKeys.has(keyName);
-
-                        if (isDupeInDB) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (Esta persona ya se encuentra registrada en el sistema).`);
-                        } else if (isDupeInFile) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (Inscripción repetida dentro de este mismo archivo).`);
+                        // REGLAS INSCONFI.JSON (Inscripciones de Despacho)
+                        if (internalKeys.has(keyInsconfi)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (Inscripción duplicada dentro del archivo).`);
                         } else {
                             processed.push(cleanItem);
-                            if (cleanItem.numeroRegistro) internalKeys.add(keyReg);
-                            internalKeys.add(keyName);
+                            internalKeys.add(keyInsconfi);
                             validCount++;
                         }
                     }
@@ -370,7 +315,6 @@ const ConfirmationJsonImporter = () => {
                 // 🚀 ARCHIVO: INSCONFI.json -> VA A LA TABLA DE ESPERA (Boletas o Cola)
                 const pendingRecords = validationResult.dataToImport.map(item => {
                     const { rawOriginal, destino, reportado, ...cleanMappedData } = item;
-                    const fechaCreacion = item.fechaInscripcion || rawOriginal["FECHA DE INSCRIPCIÓN"] || rawOriginal["FECHA DE INSCRIPCION"];
                     
                     return {
                         id: generateUUID(),
@@ -379,7 +323,7 @@ const ConfirmationJsonImporter = () => {
                         raw_data: { ...rawOriginal, ...cleanMappedData }, 
                         status: item.destino === 'boleta' ? 'seated' : 'pending',
                         reportado: item.reportado, 
-                        created_at: fechaCreacion ? new Date(fechaCreacion).toISOString() : new Date().toISOString()
+                        created_at: item.rawOriginal["FECHA DE INSCRIPCIÓN"] ? new Date(item.rawOriginal["FECHA DE INSCRIPCIÓN"]).toISOString() : new Date().toISOString()
                     };
                 });
 
@@ -545,7 +489,7 @@ const ConfirmationJsonImporter = () => {
                 <div className="mt-10 pt-8 border-t border-gray-100 animate-in fade-in duration-700">
                     <div className="bg-gray-50/50 px-6 py-4 rounded-t-3xl border border-b-0 border-gray-100 flex items-center justify-between">
                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
-                            <Info className="w-4 h-4 text-red-600" /> Vista Previa de Asignación Automática (Top 5)
+                            <Info className="w-4 h-4 text-red-600" /> Vista Previa de Asignación (Top 5)
                         </span>
                     </div>
                     <div className="border border-gray-100 rounded-b-3xl overflow-hidden bg-white shadow-sm">
@@ -561,8 +505,7 @@ const StatCard = ({ label, val, color }) => {
     const colors = {
         emerald: "bg-emerald-50 border-emerald-100 text-emerald-700",
         red: "bg-red-50 border-red-100 text-red-700",
-        amber: "bg-amber-50 border-amber-100 text-amber-700",
-        blue: "bg-blue-50 border-blue-100 text-blue-700"
+        amber: "bg-amber-50 border-amber-100 text-amber-700"
     };
     return (
         <div className={cn("p-5 rounded-3xl border text-center shadow-sm", colors[color])}>
