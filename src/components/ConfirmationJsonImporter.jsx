@@ -36,6 +36,13 @@ const purificarRegistroConfirmacion = (obj) => {
     return cleaned;
 };
 
+// Utilidad para asegurar el mismo formato de Libro/Folio/Numero al comparar con la DB
+const padDbValue = (val) => {
+    if (val === null || val === undefined) return '---';
+    const str = String(val).trim();
+    return (str !== '' && !isNaN(str)) ? str.padStart(4, '0') : (str || '---');
+};
+
 const ConfirmationJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth();
@@ -45,7 +52,7 @@ const ConfirmationJsonImporter = () => {
     const [isProcessing, setIsProcessing] = useState(false);
     const [importComplete, setImportComplete] = useState(false);
     const [validationResult, setValidationResult] = useState(null);
-    const [fileType, setFileType] = useState(null); // 🚀 GUARDA SI ES 'CONFIRMA' o 'INSCONFI'
+    const [fileType, setFileType] = useState(null); 
     
     const [parrocoActual, setParrocoActual] = useState('');
     const [listaSacerdotes, setListaSacerdotes] = useState([]);
@@ -96,7 +103,6 @@ const ConfirmationJsonImporter = () => {
         const fileName = selectedFile.name.toUpperCase();
         let detectedType = null;
         
-        // Bloqueo Inteligente de nombres de archivo
         if (fileName === 'CONFIRMA.JSON') {
             detectedType = 'CONFIRMA';
         } else if (fileName === 'INSCONFI.JSON') {
@@ -126,8 +132,9 @@ const ConfirmationJsonImporter = () => {
                 if (rawData.length === 0) throw new Error("El archivo no contiene registros válidos para procesar.");
 
                 let existingKeys = new Set();
+                let existingInsconfiKeys = new Set();
                 
-                // 🚀 Solo traemos la BD Oficial si estamos subiendo CONFIRMA (Libros Antiguos)
+                // 🚀 BUSCAMOS DUPLICADOS EN LA BASE DE DATOS SEGÚN EL TIPO DE ARCHIVO
                 if (detectedType === 'CONFIRMA') {
                     const { data: existingData, error: dbError } = await supabase
                         .from('confirmations')
@@ -136,9 +143,23 @@ const ConfirmationJsonImporter = () => {
 
                     if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
                     
+                    // Aseguramos formato estricto idéntico al de subida
                     existingKeys = new Set((existingData || []).map(b => 
-                        `${String(b.book_number).padStart(4, '0')}-${String(b.folio).padStart(4, '0')}-${String(b.number).padStart(4, '0')}`
+                        `${padDbValue(b.book_number)}-${padDbValue(b.folio)}-${padDbValue(b.number)}`
                     ));
+                } else if (detectedType === 'INSCONFI') {
+                    // Ahora validamos con la tabla de espera para no subir INSCONFI duplicados
+                    const { data: existingData, error: dbError } = await supabase
+                        .from('pending_confirmations')
+                        .select('raw_data')
+                        .eq('parish_id', parishId);
+
+                    if (dbError) throw new Error("Fallo de conexión con la Base de Datos de Espera.");
+
+                    existingInsconfiKeys = new Set((existingData || []).map(b => {
+                        const raw = b.raw_data || {};
+                        return raw.numeroRegistro || `${raw.nombres}-${raw.apellidos}`;
+                    }));
                 }
 
                 const processed = [];
@@ -150,7 +171,6 @@ const ConfirmationJsonImporter = () => {
                 rawData.forEach((item, index) => {
                     const rowNum = index + 1;
                     
-                    // 🚀 Analiza REPORTADO (O SENTADO como fallback por compatibilidad)
                     const isReportado = item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE' || item["SENTADO"] === true || String(item["SENTADO"]).toUpperCase() === 'TRUE';
                     const destinoStr = detectedType === 'CONFIRMA' ? 'oficial' : (isReportado ? 'boleta' : 'cola');
                     
@@ -186,7 +206,6 @@ const ConfirmationJsonImporter = () => {
 
                     const sacerdoteEpoca = getHistoricalPriest(mappedItem.fechaSacramento);
 
-                    // Reparación del Ministro (Generalmente Obispo)
                     let minClean = cleanTitle(mappedItem.ministro);
                     if (!minClean || minClean === '---' || !isNaN(Number(minClean))) {
                         mappedItem.ministro = sacerdoteEpoca || '';
@@ -199,7 +218,6 @@ const ConfirmationJsonImporter = () => {
                         }
                     }
 
-                    // Reparación de Da Fe (Generalmente Párroco)
                     let rawDaFe = String(mappedItem.daFe).trim();
                     if (!rawDaFe || rawDaFe === '---' || rawDaFe.includes('ENCARGADO') || !isNaN(Number(rawDaFe))) {
                         rawDaFe = sacerdoteEpoca || parrocoActual;
@@ -211,7 +229,6 @@ const ConfirmationJsonImporter = () => {
 
                     const cleanItem = purificarRegistroConfirmacion(mappedItem);
                     
-                    // Restaurar los valores del mapeo trifásico y JSON original
                     cleanItem.reportado = isReportado;
                     cleanItem.destino = destinoStr;
                     cleanItem.rawOriginal = item;
@@ -227,16 +244,16 @@ const ConfirmationJsonImporter = () => {
                         if (cleanItem.Libro === '0000' || !cleanItem.Libro || cleanItem.Libro === '---') {
                             errors.push(`Fila ${rowNum}: Faltan datos críticos (Libro/Folio).`);
                         } else if (existingKeys.has(keyConfirmaciones) || internalKeys.has(keyConfirmaciones)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe).`);
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe en el sistema o archivo).`);
                         } else {
                             processed.push(cleanItem);
                             internalKeys.add(keyConfirmaciones);
                             validCount++;
                         }
                     } else if (detectedType === 'INSCONFI') {
-                        // REGLAS INSCONFI.JSON (Inscripciones de Despacho)
-                        if (internalKeys.has(keyInsconfi)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (Inscripción duplicada dentro del archivo).`);
+                        // REGLAS INSCONFI.JSON (Inscripciones de Despacho) - ¡AHORA VALIDA CON BD TAMBIÉN!
+                        if (internalKeys.has(keyInsconfi) || existingInsconfiKeys.has(keyInsconfi)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (La inscripción ya existe en la base de datos o está duplicada en este archivo).`);
                         } else {
                             processed.push(cleanItem);
                             internalKeys.add(keyInsconfi);
@@ -269,7 +286,6 @@ const ConfirmationJsonImporter = () => {
             const batchSize = 200;
 
             if (fileType === 'CONFIRMA') {
-                // 🚀 ARCHIVO: CONFIRMA.json -> VA A LA TABLA OFICIAL PERMANENTE
                 const dbRecords = validationResult.dataToImport.map(item => {
                     const { rawOriginal, destino, reportado, ...cleanMappedData } = item;
                     
@@ -293,7 +309,6 @@ const ConfirmationJsonImporter = () => {
                         ministro: item.ministro || null,
                         da_fe: item.daFe || null,
                         nota_marginal: item.notaMarginal || null,
-                        // 🚀 Fusión para el respaldo histórico
                         raw_data: { ...rawOriginal, ...cleanMappedData }, 
                         created_at: new Date().toISOString()
                     };
@@ -312,14 +327,12 @@ const ConfirmationJsonImporter = () => {
                 });
 
             } else if (fileType === 'INSCONFI') {
-                // 🚀 ARCHIVO: INSCONFI.json -> VA A LA TABLA DE ESPERA (Boletas o Cola)
                 const pendingRecords = validationResult.dataToImport.map(item => {
                     const { rawOriginal, destino, reportado, ...cleanMappedData } = item;
                     
                     return {
                         id: generateUUID(),
                         parish_id: parishId,
-                        // 🚀 Fusión para que el Ticket pueda leer los datos mapeados en minúscula
                         raw_data: { ...rawOriginal, ...cleanMappedData }, 
                         status: item.destino === 'boleta' ? 'seated' : 'pending',
                         reportado: item.reportado, 
