@@ -105,7 +105,7 @@ const AdminGeneralDashboard = () => {
   // =========================================================================
   const menuItems = [
     { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
-    { label: 'Buscador Unificado', path: '/buscar', icon: Search }, // <-- AÑADIDO
+    { label: 'Buscador Unificado', path: '/buscar', icon: Search },
     { label: 'Diócesis/Arquidiócesis', path: '/admin/dioceses', icon: Church },
     { label: 'Ajustes', path: '/admin/settings', icon: SettingsIcon },
   ];
