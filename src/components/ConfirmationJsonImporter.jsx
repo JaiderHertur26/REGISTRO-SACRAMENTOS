@@ -92,7 +92,7 @@ const ConfirmationJsonImporter = () => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
 
-        // 🚀 1. IDENTIFICADOR DEL ARCHIVO EXACTO
+        // 🚀 IDENTIFICADOR DEL ARCHIVO EXACTO
         const fileName = selectedFile.name.toUpperCase();
         let detectedType = null;
         
@@ -127,8 +127,9 @@ const ConfirmationJsonImporter = () => {
 
                 let existingKeys = new Set();
                 
-                // 🚀 Solo traemos la BD Oficial si estamos subiendo CONFIRMA (Libros Antiguos)
+                // 🚀 CARGA DE DUPLICADOS DEPENDIENDO DEL ARCHIVO
                 if (detectedType === 'CONFIRMA') {
+                    // Busca duplicados en el Libro Oficial
                     const { data: existingData, error: dbError } = await supabase
                         .from('confirmations')
                         .select('book_number, folio, number')
@@ -136,9 +137,33 @@ const ConfirmationJsonImporter = () => {
 
                     if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
                     
-                    existingKeys = new Set((existingData || []).map(b => 
-                        `${String(b.book_number).padStart(4, '0')}-${String(b.folio).padStart(4, '0')}-${String(b.number).padStart(4, '0')}`
-                    ));
+                    (existingData || []).forEach(b => {
+                        const l = String(b.book_number || '').padStart(4, '0');
+                        const f = String(b.folio || '').padStart(4, '0');
+                        const n = String(b.number || '').padStart(4, '0');
+                        existingKeys.add(`LFN-${l}-${f}-${n}`);
+                    });
+                } else if (detectedType === 'INSCONFI') {
+                    // Busca duplicados en la Cola de Espera / Boletas Emitidas
+                    const { data: pendingData, error: pError } = await supabase
+                        .from('pending_confirmations')
+                        .select('numero_registro, raw_data')
+                        .eq('parish_id', parishId);
+
+                    if (pError) throw new Error("Fallo de conexión al buscar inscripciones previas.");
+
+                    (pendingData || []).forEach(p => {
+                        if (p.numero_registro) {
+                            existingKeys.add(`REG-${p.numero_registro}`);
+                        }
+                        // Escudo adicional: Buscar por Nombre y Apellido
+                        const raw = typeof p.raw_data === 'string' ? JSON.parse(p.raw_data) : (p.raw_data || {});
+                        const n = String(raw.NOMBRES || raw.nombres || '').trim().toUpperCase();
+                        const a = String(raw.APELLIDOS || raw.apellidos || '').trim().toUpperCase();
+                        if (n && a) {
+                            existingKeys.add(`NAME-${n}-${a}`);
+                        }
+                    });
                 }
 
                 const processed = [];
@@ -154,7 +179,6 @@ const ConfirmationJsonImporter = () => {
                     const isReportado = item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE' || item["SENTADO"] === true || String(item["SENTADO"]).toUpperCase() === 'TRUE';
                     const destinoStr = detectedType === 'CONFIRMA' ? 'oficial' : (isReportado ? 'boleta' : 'cola');
                     
-                    // Mapeo exhaustivo para Confirmaciones
                     const mappedItem = {
                         numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
                         fechaInscripcion: item["FECHA DE INSCRIPCIÓN"] || item.fechaInscripcion || '',
@@ -186,7 +210,7 @@ const ConfirmationJsonImporter = () => {
 
                     const sacerdoteEpoca = getHistoricalPriest(mappedItem.fechaSacramento);
 
-                    // Reparación del Ministro (Generalmente Obispo)
+                    // Reparación del Ministro
                     let minClean = cleanTitle(mappedItem.ministro);
                     if (!minClean || minClean === '---' || !isNaN(Number(minClean))) {
                         mappedItem.ministro = sacerdoteEpoca || '';
@@ -199,7 +223,7 @@ const ConfirmationJsonImporter = () => {
                         }
                     }
 
-                    // Reparación de Da Fe (Generalmente Párroco)
+                    // Reparación de Da Fe
                     let rawDaFe = String(mappedItem.daFe).trim();
                     if (!rawDaFe || rawDaFe === '---' || rawDaFe.includes('ENCARGADO') || !isNaN(Number(rawDaFe))) {
                         rawDaFe = sacerdoteEpoca || parrocoActual;
@@ -211,35 +235,46 @@ const ConfirmationJsonImporter = () => {
 
                     const cleanItem = purificarRegistroConfirmacion(mappedItem);
                     
-                    // Restaurar los valores del mapeo trifásico y JSON original
+                    // Restaurar metadatos cruciales
                     cleanItem.reportado = isReportado;
                     cleanItem.destino = destinoStr;
                     cleanItem.rawOriginal = item;
 
-                    const keyConfirmaciones = `${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
-                    const keyInsconfi = cleanItem.numeroRegistro || `${cleanItem.nombres}-${cleanItem.apellidos}`;
                     const nombreConfirmado = `${cleanItem.nombres} ${cleanItem.apellidos}`.trim();
 
                     if (!cleanItem.nombres || !cleanItem.apellidos) {
                         errors.push(`Fila ${rowNum}: Faltan Nombres o Apellidos críticos.`);
                     } else if (detectedType === 'CONFIRMA') {
-                        // REGLAS CONFIRMA.JSON (Libro Oficial)
+                        // 🚀 REGLAS DE DUPLICADOS PARA CONFIRMA.JSON
+                        const keyConfirmaciones = `LFN-${cleanItem.Libro}-${cleanItem.folio}-${cleanItem.numero}`;
+                        
                         if (cleanItem.Libro === '0000' || !cleanItem.Libro || cleanItem.Libro === '---') {
                             errors.push(`Fila ${rowNum}: Faltan datos críticos (Libro/Folio).`);
-                        } else if (existingKeys.has(keyConfirmaciones) || internalKeys.has(keyConfirmaciones)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe).`);
+                        } else if (existingKeys.has(keyConfirmaciones)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (El acta L:${cleanItem.Libro} F:${cleanItem.folio} N:${cleanItem.numero} ya existe en la Nube).`);
+                        } else if (internalKeys.has(keyConfirmaciones)) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (Acta repetida dentro de este mismo archivo).`);
                         } else {
                             processed.push(cleanItem);
                             internalKeys.add(keyConfirmaciones);
                             validCount++;
                         }
                     } else if (detectedType === 'INSCONFI') {
-                        // REGLAS INSCONFI.JSON (Inscripciones de Despacho)
-                        if (internalKeys.has(keyInsconfi)) {
-                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (Inscripción duplicada dentro del archivo).`);
+                        // 🚀 REGLAS DE DUPLICADOS PARA INSCONFI.JSON
+                        const keyReg = `REG-${cleanItem.numeroRegistro}`;
+                        const keyName = `NAME-${cleanItem.nombres}-${cleanItem.apellidos}`;
+                        
+                        const isDupeInDB = (cleanItem.numeroRegistro && existingKeys.has(keyReg)) || existingKeys.has(keyName);
+                        const isDupeInFile = (cleanItem.numeroRegistro && internalKeys.has(keyReg)) || internalKeys.has(keyName);
+
+                        if (isDupeInDB) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (Esta inscripción ya fue subida a la Nube previamente).`);
+                        } else if (isDupeInFile) {
+                            warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (Inscripción repetida dentro de este mismo archivo).`);
                         } else {
                             processed.push(cleanItem);
-                            internalKeys.add(keyInsconfi);
+                            if (cleanItem.numeroRegistro) internalKeys.add(keyReg);
+                            internalKeys.add(keyName);
                             validCount++;
                         }
                     }
@@ -293,7 +328,7 @@ const ConfirmationJsonImporter = () => {
                         ministro: item.ministro || null,
                         da_fe: item.daFe || null,
                         nota_marginal: item.notaMarginal || null,
-                        // 🚀 Fusión para el respaldo histórico
+                        // Fusión para el respaldo histórico
                         raw_data: { ...rawOriginal, ...cleanMappedData }, 
                         created_at: new Date().toISOString()
                     };
@@ -319,7 +354,7 @@ const ConfirmationJsonImporter = () => {
                     return {
                         id: generateUUID(),
                         parish_id: parishId,
-                        // 🚀 Fusión para que el Ticket pueda leer los datos mapeados en minúscula
+                        // Fusión para que el Ticket pueda leer los datos mapeados en minúscula
                         raw_data: { ...rawOriginal, ...cleanMappedData }, 
                         status: item.destino === 'boleta' ? 'seated' : 'pending',
                         reportado: item.reportado, 
@@ -489,7 +524,7 @@ const ConfirmationJsonImporter = () => {
                 <div className="mt-10 pt-8 border-t border-gray-100 animate-in fade-in duration-700">
                     <div className="bg-gray-50/50 px-6 py-4 rounded-t-3xl border border-b-0 border-gray-100 flex items-center justify-between">
                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
-                            <Info className="w-4 h-4 text-red-600" /> Vista Previa de Asignación (Top 5)
+                            <Info className="w-4 h-4 text-red-600" /> Vista Previa de Asignación Automática (Top 5)
                         </span>
                     </div>
                     <div className="border border-gray-100 rounded-b-3xl overflow-hidden bg-white shadow-sm">
