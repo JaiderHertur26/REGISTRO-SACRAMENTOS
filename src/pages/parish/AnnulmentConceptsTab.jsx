@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useAppData } from '@/context/AppDataContext';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, Edit, Trash2, FileText, Plus } from 'lucide-react';
+import { Search, Edit, Trash2, FileText, Plus, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Table from '@/components/ui/Table';
 import EditAnnulmentConceptModal from '@/components/modals/EditAnnulmentConceptModal';
 import { supabase } from '@/lib/supabaseClient'; 
+import { cn } from '@/lib/utils';
 
 const AnnulmentConceptsTab = ({ onSelectConcept }) => {
     const { user } = useAuth();
@@ -15,7 +16,7 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [concepts, setConcepts] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [dioceseId, setDioceseId] = useState(null); // 🚀 Guardamos la Diócesis
+    const [dioceseId, setDioceseId] = useState(null); 
     
     const [isEditOpen, setIsEditOpen] = useState(false);
     const [selectedConcept, setSelectedConcept] = useState(null);
@@ -52,11 +53,12 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
                 throw new Error("No se pudo determinar a qué Diócesis pertenece el usuario.");
             }
 
-            setDioceseId(targetDioceseId); // 🚀 Lo guardamos para pasárselo al Modal al crear
+            setDioceseId(targetDioceseId); 
 
+            // 🚀 AHORA TRAEMOS TODOS LOS CAMPOS TÉCNICOS
             const { data, error } = await supabase
                 .from('conceptos_anulacion')
-                .select('id, codigo, concepto, expide, tipo, created_at, diocese_id')
+                .select('id, codigo, concepto, seinscribe, gennota, gendocum, enlibro, expide, created_at, diocese_id')
                 .eq('diocese_id', targetDioceseId)
                 .order('codigo', { ascending: true });
 
@@ -107,7 +109,6 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
         setIsEditOpen(true);
     };
 
-    // 🚀 ABRIR MODAL VACÍO PARA CREAR
     const handleCreate = () => {
         setSelectedConcept(null);
         setIsEditOpen(true);
@@ -119,54 +120,55 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
             onSelectConcept(concept);
             toast({
                 title: "Concepto Seleccionado",
-                description: `Generando nota marginal para: ${concept.concepto}`,
-                className: "bg-blue-600 text-white"
+                description: `Preparando motor para: ${concept.concepto}`,
+                className: "bg-[#4B7BA7] text-white"
             });
         }
     };
 
+    // 🚀 TABLA INTELIGENTE QUE REFLEJA TU ESTRUCTURA JSON
     const columns = [
         { header: 'Código', render: (row) => <span className="font-mono text-xs font-black text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg">{row.codigo}</span> },
-        { header: 'Concepto', render: (row) => <span className="font-bold text-gray-900 uppercase text-xs tracking-tight">{row.concepto}</span> },
-        { header: 'Expide', render: (row) => <span className="text-gray-500 font-bold text-[10px] uppercase tracking-widest">{row.expide}</span> },
+        { header: 'Concepto / Decreto', render: (row) => <span className="font-bold text-gray-900 uppercase text-xs tracking-tight">{row.concepto}</span> },
         { 
-            header: 'Tipo', 
+            header: 'Libro Afectado', 
             render: (row) => {
-                let badgeClass = 'bg-gray-100 text-gray-800 border-gray-200';
-                let label = 'Desconocido';
-
-                if (row.tipo === 'porCorreccion') {
-                    badgeClass = 'bg-blue-50 text-blue-700 border-blue-200';
-                    label = 'Corrección';
-                } else if (row.tipo === 'porReposicion') {
-                    badgeClass = 'bg-green-50 text-green-700 border-green-200';
-                    label = 'Reposición';
-                } else if (row.tipo === 'porRepeticion') {
-                    badgeClass = 'bg-purple-50 text-purple-700 border-purple-200';
-                    label = 'Repetición';
-                } else if (row.tipo === 'porNulidad') {
-                    badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
-                    label = 'Nulidad';
-                } else if (row.concepto?.toLowerCase().includes('notificaci')) {
-                    badgeClass = 'bg-indigo-50 text-indigo-700 border-indigo-200';
-                    label = 'Notificación';
+                let label = 'GENERAL (TODOS)';
+                let colorClass = 'bg-gray-100 text-gray-600 border-gray-200';
+                
+                if (row.enlibro === 1) { 
+                    label = 'CONFIRMACIÓN'; 
+                    colorClass = 'bg-red-50 text-red-700 border-red-200'; 
+                } else if (row.enlibro === 2) { 
+                    label = 'BAUTISMO / MATRIMONIO'; 
+                    colorClass = 'bg-blue-50 text-[#4B7BA7] border-blue-200'; 
                 }
 
-                return (
-                    <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border ${badgeClass}`}>
-                        {label}
-                    </span>
-                );
+                return <span className={cn("text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded border whitespace-nowrap", colorClass)}>{label}</span>;
             } 
         },
+        { 
+            header: 'Acciones Automáticas', 
+            render: (row) => (
+                <div className="flex gap-1.5 flex-wrap">
+                    {row.seinscribe && <span className="text-[8px] font-black uppercase bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded shadow-sm">Se Inscribe</span>}
+                    {row.gennota && <span className="text-[8px] font-black uppercase bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded shadow-sm">Genera Nota</span>}
+                    {row.gendocum && <span className="text-[8px] font-black uppercase bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded shadow-sm">Emite Doc.</span>}
+                    {!row.seinscribe && !row.gennota && !row.gendocum && <span className="text-[8px] font-black uppercase text-gray-400">Sólo Texto</span>}
+                </div>
+            ) 
+        },
+        { header: 'Autoridad Expide', render: (row) => <span className="text-gray-500 font-bold text-[9px] uppercase tracking-widest">{row.expide || '---'}</span> },
         {
             header: 'Acciones',
-            className: 'text-right',
+            className: 'text-right w-24',
             render: (row) => (
                 <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="icon" className="h-9 w-9 text-green-600 hover:bg-green-50 rounded-xl" onClick={(e) => handleSelectForNotes(row, e)} title="Generar Nota Marginal">
-                        <FileText className="w-4 h-4" />
-                    </Button>
+                    {onSelectConcept && (
+                        <Button variant="ghost" size="icon" className="h-9 w-9 text-emerald-600 hover:bg-emerald-50 rounded-xl" onClick={(e) => handleSelectForNotes(row, e)} title="Usar Concepto">
+                            <FileText className="w-4 h-4" />
+                        </Button>
+                    )}
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-[#4B7BA7] hover:bg-blue-50 rounded-xl" onClick={(e) => handleEdit(row, e)} title="Editar">
                         <Edit className="w-4 h-4" />
                     </Button>
@@ -191,7 +193,6 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
                         onChange={e => setSearchTerm(e.target.value)}
                     />
                 </div>
-                {/* 🚀 BOTÓN PARA AÑADIR NUEVO CONCEPTO */}
                 <Button 
                     onClick={handleCreate}
                     className="w-full md:w-auto bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-8 py-6 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-900/20 transition-all active:scale-95"
@@ -219,7 +220,7 @@ const AnnulmentConceptsTab = ({ onSelectConcept }) => {
                 onClose={() => { setIsEditOpen(false); setSelectedConcept(null); }} 
                 concept={selectedConcept}
                 onSuccess={loadData} 
-                dioceseId={dioceseId} // 🚀 PASAMOS LA DIÓCESIS AL MODAL
+                dioceseId={dioceseId} 
             />
         </div>
     );
