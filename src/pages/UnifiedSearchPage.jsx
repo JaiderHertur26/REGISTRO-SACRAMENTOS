@@ -13,7 +13,6 @@ import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabaseClient';
 
 const UnifiedSearchPage = () => {
-    // 🔐 AL ESTAR AQUÍ, GARANTIZAMOS QUE EL USUARIO TIENE UN ROL
     const { user } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
@@ -32,7 +31,7 @@ const UnifiedSearchPage = () => {
 
     const nombreEntidad = user?.parishName || user?.parish_name || 'BÚSQUEDA CENTRAL';
 
-    // 🚀 1. CARGA INICIAL (SOLO DIÓCESIS) PARA EVITAR LÍMITE DE 1000 FILAS
+    // 🚀 1. CARGA INICIAL (SOLO DIÓCESIS) 
     useEffect(() => {
         const fetchInitialEntities = async () => {
             try {
@@ -51,7 +50,7 @@ const UnifiedSearchPage = () => {
         fetchInitialEntities();
     }, [toast]);
 
-    // 🚀 2. EFECTO EN CASCADA: CARGAR PARROQUIAS DINÁMICAMENTE COMO EN CANCILLERÍA
+    // 🚀 2. EFECTO EN CASCADA: CARGAR PARROQUIAS DINÁMICAMENTE
     useEffect(() => {
         const loadParishes = async () => {
             if (!searchParams.dioceseId || searchParams.dioceseId === 'all') {
@@ -59,7 +58,6 @@ const UnifiedSearchPage = () => {
                 return;
             }
             try {
-                // Al filtrar por diócesis antes, evitamos el límite de Supabase
                 const { data } = await supabase
                     .from('parishes')
                     .select('id, name, city, diocese_id')
@@ -82,7 +80,7 @@ const UnifiedSearchPage = () => {
         { value: 'marriage', label: 'MATRIMONIO' },
     ];
 
-    // 🚀 3. MOTOR DE BÚSQUEDA INTELIGENTE
+    // 🚀 3. MOTOR DE BÚSQUEDA INTELIGENTE Y PROFUNDO
     const handleSearch = async (e) => {
         e.preventDefault();
         
@@ -120,19 +118,22 @@ const UnifiedSearchPage = () => {
             const type = searchParams.sacramentType;
             const fetchPromises = [];
 
-            // Constructor dinámico de consultas para hacer la búsqueda rápida en la base de datos
+            // 🚀 CREADOR DE CONSULTAS BLINDADO: Extrae solo la primera palabra para evitar errores por tildes o espacios en la DB
             const buildQuery = (table) => {
                 let q = supabase.from(table).select('*');
                 if (!isGlobal) {
                     q = q.in('parish_id', queryParishIds);
                 }
                 
-                // Si buscan nombres, aplicamos el filtro desde el servidor (ilike)
-                if (searchParams.firstName.trim() && table !== 'marriages' && table !== 'matrimonios') {
-                    q = q.ilike('nombres', `%${searchParams.firstName.trim()}%`);
+                const firstTerm = searchParams.firstName.trim().split(' ')[0];
+                const lastTerm = searchParams.lastName.trim().split(' ')[0];
+
+                if (firstTerm && table !== 'marriages' && table !== 'matrimonios') {
+                    // Busca en la columna, en el JSON minúscula y en el JSON mayúscula
+                    q = q.or(`nombres.ilike.%${firstTerm}%,raw_data->>nombres.ilike.%${firstTerm}%,raw_data->>NOMBRES.ilike.%${firstTerm}%,raw_data->>firstName.ilike.%${firstTerm}%`);
                 }
-                if (searchParams.lastName.trim() && table !== 'marriages' && table !== 'matrimonios') {
-                    q = q.ilike('apellidos', `%${searchParams.lastName.trim()}%`);
+                if (lastTerm && table !== 'marriages' && table !== 'matrimonios') {
+                    q = q.or(`apellidos.ilike.%${lastTerm}%,raw_data->>apellidos.ilike.%${lastTerm}%,raw_data->>APELLIDOS.ilike.%${lastTerm}%,raw_data->>lastName.ilike.%${lastTerm}%`);
                 }
                 return q;
             };
@@ -148,7 +149,6 @@ const UnifiedSearchPage = () => {
 
             const fetchedResults = await Promise.all(fetchPromises);
 
-            // Identificar los IDs de todas las parroquias encontradas (esencial para la búsqueda global)
             let allFoundParishIds = new Set();
             fetchedResults.forEach(fetchResult => {
                 fetchResult.data.forEach(row => {
@@ -156,7 +156,6 @@ const UnifiedSearchPage = () => {
                 });
             });
 
-            // Si es global, buscar los nombres exactos de las parroquias encontradas
             let allParishesRef = [...filteredParishes];
             if (isGlobal && allFoundParishIds.size > 0) {
                 const { data: missingParishes } = await supabase.from('parishes').select('id, name, city, diocese_id').in('id', Array.from(allFoundParishIds));
@@ -178,6 +177,7 @@ const UnifiedSearchPage = () => {
                     const parish = allParishesRef.find(p => p.id === record.parishId);
                     if (!parish) return;
 
+                    // El filtro del Frontend hace la revisión exhaustiva
                     if (matchesSearch(record, searchParams, sacType)) {
                         let parishAddress = 'Dirección no registrada';
                         const misDatosMatch = misDatosList.find(md => md.entity_id === parish.id);
@@ -214,16 +214,45 @@ const UnifiedSearchPage = () => {
         }
     };
 
-    const matchesSearch = (r, p, type) => {
-        const recordName = type === 'marriage' ? `${r.groomName} ${r.brideName}` : (r.firstName || r.nombres || '');
-        const recordLastName = type === 'marriage' ? `${r.groomSurname} ${r.brideSurname}` : (r.lastName || r.apellidos || '');
-        
-        if (p.firstName && !recordName.toLowerCase().includes(p.firstName.toLowerCase())) return false;
-        if (p.lastName && !recordLastName.toLowerCase().includes(p.lastName.toLowerCase())) return false;
+    // 🚀 NORMALIZADOR (Ignora tildes y mayúsculas)
+    const normalizeText = (str) => {
+        if (!str) return '';
+        return String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    };
 
-        const recordDate = r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio;
-        if (p.dateStart && recordDate < p.dateStart) return false;
-        if (p.dateEnd && recordDate > p.dateEnd) return false;
+    const matchesSearch = (r, p, type) => {
+        // Lee todas las llaves posibles, tanto en minúscula como las antiguas en MAYÚSCULA
+        const recordName = type === 'marriage' ? `${r.groomName || r.ESPOSO || ''} ${r.brideName || r.ESPOSA || ''}` : (r.firstName || r.nombres || r.NOMBRES || '');
+        const recordLastName = type === 'marriage' ? `${r.groomSurname || ''} ${r.brideSurname || ''}` : (r.lastName || r.apellidos || r.APELLIDOS || '');
+        
+        if (p.firstName && !normalizeText(recordName).includes(normalizeText(p.firstName.trim()))) return false;
+        if (p.lastName && !normalizeText(recordLastName).includes(normalizeText(p.lastName.trim()))) return false;
+
+        // 🚀 FILTRO DE FECHAS SEGURO (Procesa DD/MM/YYYY y YYYY-MM-DD)
+        if (p.dateStart || p.dateEnd) {
+            const recordDate = r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"] || r["FECHA DE CONFIRMACIÓN"];
+            if (!recordDate) return false; 
+            
+            let rTime;
+            const rStr = String(recordDate).trim();
+            if (rStr.includes('/')) {
+                const parts = rStr.split('/');
+                rTime = new Date(`${parts[2]}-${parts[1]}-${parts[0]}T12:00:00`).getTime();
+            } else {
+                rTime = new Date(rStr.includes('T') ? rStr : `${rStr}T12:00:00`).getTime();
+            }
+
+            if (isNaN(rTime)) return false;
+
+            if (p.dateStart) {
+                const sTime = new Date(`${p.dateStart}T00:00:00`).getTime();
+                if (rTime < sTime) return false;
+            }
+            if (p.dateEnd) {
+                const eTime = new Date(`${p.dateEnd}T23:59:59`).getTime();
+                if (rTime > eTime) return false;
+            }
+        }
 
         return true;
     };
@@ -324,8 +353,8 @@ const UnifiedSearchPage = () => {
                             ) : (
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
                                     {results.map(r => {
-                                        const name = r.type === 'MATRIMONIO' ? `${r.groomName} & ${r.brideName}` : `${(r.firstName || r.nombres)} ${(r.lastName || r.apellidos)}`;
-                                        const date = r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio;
+                                        const name = r.type === 'MATRIMONIO' ? `${r.groomName || r.ESPOSO || ''} & ${r.brideName || r.ESPOSA || ''}` : `${(r.firstName || r.nombres || r.NOMBRES || '')} ${(r.lastName || r.apellidos || r.APELLIDOS || '')}`;
+                                        const date = r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"] || r["FECHA DE CONFIRMACIÓN"];
 
                                         return (
                                             <motion.div whileHover={{ y: -5 }} key={`${r.type}-${r.id}`} className="bg-white p-6 lg:p-8 rounded-[2rem] shadow-xl shadow-blue-900/5 border-l-8 border-[#D4AF37] relative group overflow-hidden flex flex-col justify-between">
