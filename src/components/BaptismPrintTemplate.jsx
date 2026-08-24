@@ -81,14 +81,18 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   }
   let daFe = `PBRO. ${cleanTitle(daFeRaw)}`;
 
-  // 🚀 INTELIGENCIA DE NOTAS: Prioriza la nota generada por el Modal a la Carta
+  // 🚀 INTELIGENCIA DE NOTAS: Si la nota viene formateada por el Modal, se respeta tal cual.
   const noteTextRaw = data.notaMarginal || data.nota_marginal || raw.notaMarginal || raw.nota_marginal || '';
   let finalNote = formatData(noteTextRaw);
   
-  finalNote = finalNote.replace(/LA INFORMACIÓN SUMINISTRADA ES FIEL.*/i, '').trim();
-  finalNote = finalNote.replace(/ESTA INFORMACIÓN SUMINISTRADA ES FIEL.*/i, '').trim();
-  finalNote = finalNote.replace(/SE EXPIDE EN.*/i, '').trim();
-  finalNote = finalNote.replace(/ES COPIA FIEL.*/i, '').trim();
+  // Si NO viene del modal, le aplicamos la limpieza para quitar los textos basura del Excel antiguo
+  if (!data.fromModal) {
+      finalNote = finalNote.replace(/LA INFORMACI[OÓ]N SUMINISTRADA ES FIEL.*/ig, '').trim();
+      finalNote = finalNote.replace(/ESTA INFORMACI[OÓ]N SUMINISTRADA ES FIEL.*/ig, '').trim();
+      finalNote = finalNote.replace(/SE EXPIDE EN.*/ig, '').trim();
+      finalNote = finalNote.replace(/ES COPIA FIEL.*/ig, '').trim();
+      finalNote = finalNote.replace(/\.+$/, '').trim();
+  }
   
   if (!finalNote || finalNote === '---' || finalNote === 'NULL') {
       finalNote = "SIN NOTAS MARGINALES ADICIONALES HASTA LA FECHA.";
@@ -145,21 +149,17 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
             }
         `}} />
 
-        {/* 1. ENCABEZADO INSTITUCIONAL */}
         <div style={{ textAlign: 'center', marginBottom: '20px', fontFamily: 'Arial, sans-serif', color: '#000' }}>
             <div style={{ fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase' }}>{diocesis}</div>
             <div style={{ fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', marginTop: '3px' }}>{parroquia}</div>
             <div style={{ fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', marginTop: '3px' }}>{ubicacionFinal}</div>
         </div>
 
-        {/* PREÁMBULO LEGAL */}
         <div style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', textAlign: 'justify', marginBottom: '12px', lineHeight: '1.6' }}>
             El suscrito Párroco <strong>CERTIFICA</strong> que en el archivo parroquial reposa un acta que a la letra dice:
         </div>
 
-        {/* CAJA DE REGISTRO */}
         <div style={{ border: '1.5px solid black', borderRadius: '4px', width: '100%', overflow: 'hidden' }}>
-            
             <div style={{ display: 'flex', borderBottom: '1.5px solid black', backgroundColor: '#f4f4f5' }}>
                 <div style={{ flex: 1, padding: '6px 12px', borderRight: '1.5px solid black', display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <span style={{ fontWeight: 'bold', fontSize: '11px', fontFamily: 'Arial, sans-serif' }}>LIBRO:</span>
@@ -188,19 +188,16 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
             <LinedRow label="MINISTRO:" value={ministro} />
             <LinedRow label="DOY FE:" value={daFe} />
 
-            {/* ANOTACIONES MARGINALES */}
             <div style={{ padding: '8px 12px', minHeight: '60px', backgroundColor: '#fff' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '11px', fontFamily: 'Arial, sans-serif', display: 'block', marginBottom: '6px' }}>ANOTACIONES MARGINALES:</span>
                 <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>{finalNote}</span>
             </div>
         </div>
 
-        {/* PÁRRAFO DE CERTIFICACIÓN FINAL */}
         <div style={{ fontFamily: 'Arial, sans-serif', fontSize: '13px', textAlign: 'justify', lineHeight: '1.6', marginTop: '15px' }}>
             Es copia fiel del original. Se expide en <strong>{ciudad.toUpperCase()}</strong> el día <strong>{getFechaExpedicion()}</strong>.
         </div>
 
-        {/* 5. ZONA DE FIRMAS */}
         <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', fontFamily: 'Arial, sans-serif', paddingBottom: '10px', paddingTop: '80px' }}>
             <div style={{ textAlign: 'center', width: '320px' }}>
                 <div style={{ borderTop: '1.5px solid black', width: '100%', marginBottom: '8px' }}></div>
@@ -209,7 +206,6 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
             </div>
         </div>
 
-        {/* 6. PIE DE PÁGINA INSTITUCIONAL */}
         <div style={{ paddingTop: '12px', textAlign: 'center', fontSize: '10px', color: '#555', borderTop: '1.5px solid #eee', fontFamily: 'Arial, sans-serif' }}>
             {header.direccion && header.direccion !== '---' && <span>{header.direccion.toUpperCase()}</span>}
             {telefono && telefono !== '---' && <span> • TEL: {telefono}</span>}

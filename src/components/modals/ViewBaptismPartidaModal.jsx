@@ -38,14 +38,12 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
     const componenteImpresionRef = useRef();
     const { getParrocos } = useAppData(); 
 
-    // 🚀 ESTADOS PARA LAS NOTAS MARGINALES A LA CARTA
     const [marginalNotes, setMarginalNotes] = useState([]);
     const [selectedNotes, setSelectedNotes] = useState([]);
     const [templates, setTemplates] = useState({});
 
     const parishId = partida?.parishId || partida?.parish_id || auxiliaryData?.entity_id || auxiliaryData?.id;
 
-    // 🚀 1. EL MOTOR DE BÚSQUEDA CRUZADA (MAGIA PURA)
     useEffect(() => {
         if (isOpen && parishId) {
             const storedData = localStorage.getItem(`marginalNotesTemplates_${parishId}`);
@@ -56,7 +54,6 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
             const fetchAllNotes = async () => {
                 let allNotes = [];
 
-                // A. Buscar Notas Manuales (Decretos, Anulaciones)
                 if (partida.id) {
                     const { data: mnData, error: mnError } = await supabase
                         .from('marginal_notes')
@@ -69,7 +66,6 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                     }
                 }
 
-                // B. BÚSQUEDA AUTOMÁTICA DE CONFIRMACIÓN (Cruce de Sacramentos)
                 if (partida.nombres && partida.apellidos) {
                     const cleanNombres = partida.nombres.trim();
                     const cleanApellidos = partida.apellidos.trim();
@@ -82,17 +78,14 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                         .ilike('apellidos', cleanApellidos);
 
                     if (!confError && confData && confData.length > 0) {
-                        // Rescatamos la plantilla inteligente
                         const storedTemplates = localStorage.getItem(`marginalNotesTemplates_${parishId}`);
                         const tempObj = storedTemplates ? JSON.parse(storedTemplates) : {};
                         const templateConf = tempObj.bautismo_confirmado || "EL [FECHA_CONFIRMACION] FUE CONFIRMADO(A) EN LA PARROQUIA [PARROQUIA_CONFIRMACION]. DIÓCESIS DE [DIOCESIS_CONFIRMACION]. L-[LIBRO_CONF], F-[FOLIO_CONF], N-[NUMERO_CONF].";
 
                         confData.forEach(conf => {
-                            // Parseo seguro de fecha
                             const d = new Date((conf.celebration_date || '').includes('T') ? conf.celebration_date : `${conf.celebration_date}T12:00:00`);
                             const dateStr = !isNaN(d.getTime()) ? `${d.getDate()} DE ${d.toLocaleString('es-CO', { month: 'long' }).toUpperCase()} DE ${d.getFullYear()}` : conf.celebration_date;
 
-                            // Inyección de variables
                             const content = templateConf
                                 .replace('[FECHA_CONFIRMACION]', dateStr)
                                 .replace('[PARROQUIA_CONFIRMACION]', (auxiliaryData?.nombre || 'ESTA PARROQUIA').toUpperCase())
@@ -113,7 +106,6 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                 }
 
                 setMarginalNotes(allNotes);
-                // Marcamos todas por defecto
                 setSelectedNotes(allNotes.map(n => n.id));
             };
             
@@ -123,8 +115,16 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
 
     if (!isOpen || !partida) return null;
 
-    // 🚀 2. CONSTRUCCIÓN DEL MENÚ A LA CARTA
-    const baseNotaOriginal = partida.notaMarginal && partida.notaMarginal !== "---" ? partida.notaMarginal : "";
+    // 🚀 2. CONSTRUCCIÓN DE LA NOTA MARGINAL "A LA CARTA"
+    let baseNotaOriginal = partida.notaMarginal && partida.notaMarginal !== "---" ? String(partida.notaMarginal).toUpperCase() : "";
+    
+    // 🧹 Limpieza de basura histórica del Excel para que no contamine las notas nuevas
+    baseNotaOriginal = baseNotaOriginal.replace(/LA INFORMACI[OÓ]N SUMINISTRADA ES FIEL.*/ig, '').trim();
+    baseNotaOriginal = baseNotaOriginal.replace(/ESTA INFORMACI[OÓ]N SUMINISTRADA ES FIEL.*/ig, '').trim();
+    baseNotaOriginal = baseNotaOriginal.replace(/SE EXPIDE EN.*/ig, '').trim();
+    baseNotaOriginal = baseNotaOriginal.replace(/ES COPIA FIEL.*/ig, '').trim();
+    baseNotaOriginal = baseNotaOriginal.replace(/\.+$/, '').trim(); // Elimina puntos suspensivos
+
     const mandatoryNote = templates.certificacion_estandar || "LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO.";
     
     const selectedNotesContent = marginalNotes
@@ -133,13 +133,21 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
         .join(' // ');
 
     let finalNotaMarginalFormada = [];
-    if (baseNotaOriginal) finalNotaMarginalFormada.push(baseNotaOriginal);
-    if (selectedNotesContent) finalNotaMarginalFormada.push(selectedNotesContent);
+    if (baseNotaOriginal && baseNotaOriginal !== "SIN NOTAS MARGINALES ADICIONALES HASTA LA FECHA.") {
+        finalNotaMarginalFormada.push(baseNotaOriginal);
+    }
+    if (selectedNotesContent) {
+        finalNotaMarginalFormada.push(selectedNotesContent);
+    }
 
     let finalNotaMarginal = '';
     if (finalNotaMarginalFormada.length > 0) {
         const cleanMandatory = mandatoryNote.replace(/SIN NOTAS MARGINALES ADICIONALES HASTA LA FECHA\.?/i, '').trim();
-        finalNotaMarginal = `${finalNotaMarginalFormada.join(' // ')} // ${cleanMandatory}`.trim();
+        if (cleanMandatory) {
+            finalNotaMarginal = `${finalNotaMarginalFormada.join(' // ')} // ${cleanMandatory}`.trim();
+        } else {
+            finalNotaMarginal = finalNotaMarginalFormada.join(' // ').trim();
+        }
     } else {
         finalNotaMarginal = mandatoryNote;
     }
@@ -166,8 +174,13 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
         }
     }
     
-    // Inyectamos todo en el objeto que recibe el PDF
-    const partidaParaImprimir = { ...partida, daFe: rawDaFe, notaMarginal: finalNotaMarginal };
+    // Inyectamos todo en el objeto que recibe el PDF con el flag "fromModal"
+    const partidaParaImprimir = { 
+        ...partida, 
+        daFe: rawDaFe, 
+        notaMarginal: finalNotaMarginal,
+        fromModal: true 
+    };
 
     const estaAnulada = partida.tipoIdentidad === 'id_anulada_correccion' || partida.estado === 'anulada';
     const esReposicion = partida.tipoIdentidad === 'id_creada_reposicion';
@@ -245,11 +258,13 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                     val={`Libro ${partida.Libro} • Folio ${partida.folio} • Acta ${partida.numero}`} 
                                     icon={BookOpen}
                                 />
-                                <InfoCard 
-                                    label="Bautizado" 
-                                    val={`${partida.apellidos} ${partida.nombres}`} 
-                                    icon={User}
-                                />
+                                <div className="md:col-span-2 bg-white/80 backdrop-blur-sm p-5 rounded-[2rem] border border-white shadow-sm flex items-start gap-4">
+                                    <div className="bg-amber-100 p-2 rounded-xl text-amber-600"><AlertCircle className="w-4 h-4"/></div>
+                                    <div className="flex-1">
+                                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-1">Nota Marginal Proyectada</span>
+                                        <p className="text-[11px] font-bold text-gray-600 leading-relaxed italic line-clamp-2 uppercase">"{finalNotaMarginal}"</p>
+                                    </div>
+                                </div>
                             </div>
 
                             {/* 🚀 SELECTOR INTELIGENTE DE NOTAS MARGINALES A LA CARTA */}
