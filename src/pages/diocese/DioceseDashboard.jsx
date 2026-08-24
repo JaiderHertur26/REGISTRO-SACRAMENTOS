@@ -203,6 +203,7 @@ const DioceseDashboard = () => {
 
   const menuItems = [
     { label: 'Dashboard', path: '/diocese/dashboard', icon: LayoutDashboard },
+    { label: 'Buscador Unificado', path: '/buscar', icon: Search }, // <-- AÑADIDO
     { label: 'Organización Eclesiástica', path: '/diocese/ecclesiastical', icon: Church },
     { label: 'Backups', path: '/backups', icon: Database },
   ];

@@ -18,12 +18,13 @@ import GlobalSyncIndicator from '@/components/GlobalSyncIndicator';
 import useSupabaseInit from '@/hooks/useSupabaseInit';
 
 /* =========================
-   PUBLIC PAGES
+   PUBLIC & SHARED PAGES
 ========================= */
 import PublicSearchPage from '@/pages/PublicSearchPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 import CommunicationsPage from '@/pages/CommunicationsPage';
 import LoginPage from '@/pages/LoginPage'; 
+import UnifiedSearchPage from '@/pages/UnifiedSearchPage'; // 🚀 AÑADIDO: El nuevo Buscador Interno
 
 /* =========================
    ADMIN PAGES
@@ -261,8 +262,9 @@ const AppContent = () => {
                 {/* --- ANNULMENT (CHANCERY) --- */}
                 <Route path="/chancery/decree-annulment" element={<ProtectedRoute requiredRole="chancery"><ChanceryAnnulmentConceptsPage /></ProtectedRoute>} />
 
-                {/* -------- SHARED -------- */}
+                {/* -------- SHARED (DISPONIBLES PARA CUALQUIER ROL AUTENTICADO) -------- */}
                 <Route path="/communications" element={<ProtectedRoute><CommunicationsPage /></ProtectedRoute>} />
+                <Route path="/buscar" element={<ProtectedRoute><UnifiedSearchPage /></ProtectedRoute>} /> {/* 🚀 AÑADIDO: Ruta del Buscador Interno */}
 
                 {/* -------- ERRORS -------- */}
                 <Route path="/404" element={<NotFoundPage />} />

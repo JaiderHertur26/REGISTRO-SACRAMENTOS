@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { 
-    Search, Church, Calendar, BookOpen, Lock, 
-    User, AlertCircle, Info, Mail, ShieldCheck, 
-    ArrowLeft, KeyRound, Loader2, Globe, MapPin
+    Church, Lock, User, AlertCircle, Info, 
+    ShieldCheck, ArrowLeft, KeyRound, Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/components/ui/use-toast';
@@ -19,66 +18,14 @@ const PublicSearchPage = () => {
   const { toast } = useToast();
 
   const [authView, setAuthView] = useState('login'); 
-  const [searchLoading, setSearchLoading] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
 
-  const [publicDioceses, setPublicDioceses] = useState([]);
-  const [publicParishes, setPublicParishes] = useState([]);
-  const [publicMisDatos, setPublicMisDatos] = useState([]); 
-
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [regData, setRegData] = useState({ token: '', email: '', password: '', confirmPassword: '' });
   const [forgotData, setForgotData] = useState({ username: '' });
-  const [searchParams, setSearchParams] = useState({ firstName: '', lastName: '', sacramentType: '', dateStart: '', dateEnd: '', dioceseId: '', parishId: '' });
-  
-  const [results, setResults] = useState(null);
-  const [filteredParishes, setFilteredParishes] = useState([]);
-
-  useEffect(() => {
-      const fetchPublicEntities = async () => {
-          try {
-              const [dioRes, parRes, misRes] = await Promise.all([
-                  supabase.from('dioceses').select('*'),
-                  supabase.from('parishes').select('*'),
-                  supabase.from('mis_datos').select('entity_id, payload')
-              ]);
-
-              if (dioRes.data) setPublicDioceses(dioRes.data);
-              if (misRes.data) setPublicMisDatos(misRes.data);
-              
-              if (parRes.data) {
-                  const mappedParishes = parRes.data.map(p => ({ ...p, dioceseId: p.diocese_id }));
-                  setPublicParishes(mappedParishes);
-              }
-          } catch (error) {
-              console.error("Error cargando entidades desde Supabase:", error);
-          }
-      };
-      fetchPublicEntities();
-  }, []);
-
-  useEffect(() => {
-    if (searchParams.dioceseId === 'all') {
-      const validParishes = publicParishes.filter(p => p.dioceseId !== null && p.dioceseId !== undefined);
-      setFilteredParishes(validParishes);
-    } else if (searchParams.dioceseId) {
-      const filtered = publicParishes.filter(p => p.dioceseId === searchParams.dioceseId);
-      setFilteredParishes(filtered);
-    } else {
-      setFilteredParishes([]); 
-    }
-  }, [searchParams.dioceseId, publicParishes]);
-
-  const dioceseOptions = useMemo(() => [{ id: 'all', name: 'TODAS LAS DIÓCESIS' }, ...publicDioceses], [publicDioceses]);
-
-  const sacramentOptions = [
-    { value: 'baptism', label: 'BAUTISMO' },
-    { value: 'confirmation', label: 'CONFIRMACIÓN' },
-    { value: 'marriage', label: 'MATRIMONIO' },
-  ];
 
   // =========================================================================
   // 🔐 LOGIN CON REDIRECCIÓN DE FUERZA BRUTA
@@ -133,7 +80,6 @@ const PublicSearchPage = () => {
       const tokenToFind = regData.token.trim();
       const emailToSave = regData.email.trim().toLowerCase();
 
-      // 1. Buscamos el token en Supabase
       const { data: tokenRecord, error: tokenErr } = await supabase
         .from('pending_tokens')
         .select('*')
@@ -148,7 +94,6 @@ const PublicSearchPage = () => {
       let assignedParishId = null;
       let assignedChanceryId = null;
 
-      // 2. Creamos la Entidad correspondiente según el Tipo de Token
       if (tokenRecord.type === 'DIOCESE') {
         roleType = ROLE_TYPES.DIOCESE;
         const { data: newDiocese, error: dErr } = await supabase.from('dioceses').insert([{
@@ -186,7 +131,6 @@ const PublicSearchPage = () => {
         assignedChanceryId = newChancery.id;
       }
 
-      // 3. Creamos el Usuario en el Búnker de Supabase Auth
       const { data: authData, error: authErr } = await supabase.auth.signUp({
           email: emailToSave,
           password: regData.password,
@@ -195,7 +139,6 @@ const PublicSearchPage = () => {
       if (authErr) throw authErr;
       if (!authData.user) throw new Error("No se pudo crear el usuario en el sistema de seguridad.");
 
-      // 4. Creamos el perfil público vinculado al Auth
       const { error: profErr } = await supabase.from('user_profiles').insert([{
           auth_user_id: authData.user.id,
           email: emailToSave,
@@ -209,12 +152,10 @@ const PublicSearchPage = () => {
 
       if (profErr) throw profErr;
 
-      // 5. Destruimos el Token para que nadie más lo use
       await supabase.from('pending_tokens').delete().eq('id', tokenRecord.id);
 
       toast({ title: "¡Entorno Activado!", description: "Configurando bóveda segura...", variant: "success" });
       
-      // 6. Iniciamos sesión automáticamente y enrutamos
       const autoLoginResult = await login(emailToSave, regData.password);
       
       if (autoLoginResult && autoLoginResult.success) {
@@ -233,132 +174,6 @@ const PublicSearchPage = () => {
     } finally {
       setRegLoading(false);
     }
-  };
-
-  // =========================================================================
-  // 🚀 CONSULTA PÚBLICA DE ACTAS
-  // =========================================================================
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    if (!searchParams.dioceseId) {
-        toast({ title: "Campo Requerido", description: "Seleccione una Diócesis para filtrar.", variant: "destructive" });
-        return;
-    }
-    if (!searchParams.firstName.trim() && !searchParams.lastName.trim()) { 
-        toast({ title: "Atención", description: "Ingrese Nombres o Apellidos.", variant: "destructive" }); 
-        return; 
-    }
-    
-    setSearchLoading(true);
-    setResults(null);
-
-    try {
-        let all = [];
-        let parishesToSearch = [];
-        
-        if (searchParams.parishId && searchParams.parishId !== 'all') {
-            const p = publicParishes.find(p => p.id === searchParams.parishId);
-            if (p) parishesToSearch.push(p);
-        } else if (searchParams.dioceseId && searchParams.dioceseId !== 'all') {
-            parishesToSearch = publicParishes.filter(p => p.dioceseId === searchParams.dioceseId);
-        } else if (searchParams.dioceseId === 'all') {
-            parishesToSearch = publicParishes;
-        }
-
-        if (parishesToSearch.length === 0) {
-            setResults([]);
-            setSearchLoading(false);
-            return;
-        }
-
-        const parishIds = parishesToSearch.map(p => p.id);
-        const type = searchParams.sacramentType;
-
-        const fetchPromises = [];
-
-        if (!type || type === 'baptism') {
-            fetchPromises.push(
-                supabase.from('baptisms').select('*').in('parish_id', parishIds)
-                .then(res => ({ type: 'baptism', data: res.data || [] }))
-            );
-        }
-        if (!type || type === 'confirmation') {
-            fetchPromises.push(
-                supabase.from('confirmations').select('*').in('parish_id', parishIds)
-                .then(res => ({ type: 'confirmation', data: res.data || [] }))
-            );
-        }
-        if (!type || type === 'marriage') {
-            fetchPromises.push(
-                supabase.from('marriages').select('*').in('parish_id', parishIds)
-                .then(res => ({ type: 'marriage', data: res.data || [] }))
-                .catch(() => supabase.from('matrimonios').select('*').in('parish_id', parishIds).then(res => ({ type: 'marriage', data: res.data || [] })))
-            );
-        }
-
-        const fetchedResults = await Promise.all(fetchPromises);
-
-        fetchedResults.forEach(fetchResult => {
-            const sacType = fetchResult.type;
-            
-            const cloudRecords = fetchResult.data.map(dbRow => ({
-                id: dbRow.id,
-                parishId: dbRow.parish_id,
-                ...(dbRow.raw_data || {})
-            }));
-
-            cloudRecords.forEach(record => {
-                const parish = parishesToSearch.find(p => p.id === record.parishId);
-                if (!parish) return;
-
-                if (matchesSearch(record, searchParams, sacType)) {
-                    let parishAddress = 'Dirección no registrada';
-                    const misDatosMatch = publicMisDatos.find(md => md.entity_id === parish.id);
-                    if (misDatosMatch) {
-                        let pData = misDatosMatch.payload;
-                        if (typeof pData === 'string') {
-                            try { pData = JSON.parse(pData); } catch(e) { pData = {}; }
-                        }
-                        if (Array.isArray(pData)) pData = pData[0] || {};
-                        if (pData.direccion && pData.direccion.trim() !== '') {
-                            parishAddress = pData.direccion;
-                        }
-                    }
-
-                    const typeLabel = sacType === 'baptism' ? 'BAUTISMO' : sacType === 'confirmation' ? 'CONFIRMACIÓN' : 'MATRIMONIO';
-
-                    all.push({
-                        ...record,
-                        type: typeLabel,
-                        parishName: parish.name,
-                        dioceseId: parish.dioceseId,
-                        parishAddress
-                    });
-                }
-            });
-        });
-
-        setResults(all);
-    } catch (error) {
-        console.error("Error consultando Supabase:", error);
-        toast({ title: "Error de Red", description: "No se pudieron descargar las actas.", variant: "destructive" });
-    } finally {
-        setSearchLoading(false);
-    }
-  };
-
-  const matchesSearch = (r, p, type) => {
-    const recordName = type === 'marriage' ? `${r.groomName} ${r.brideName}` : (r.firstName || r.nombres || '');
-    const recordLastName = type === 'marriage' ? `${r.groomSurname} ${r.brideSurname}` : (r.lastName || r.apellidos || '');
-    
-    if (p.firstName && !recordName.toLowerCase().includes(p.firstName.toLowerCase())) return false;
-    if (p.lastName && !recordLastName.toLowerCase().includes(p.lastName.toLowerCase())) return false;
-
-    const recordDate = r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio;
-    if (p.dateStart && recordDate < p.dateStart) return false;
-    if (p.dateEnd && recordDate > p.dateEnd) return false;
-
-    return true;
   };
 
   // --- RENDERIZADORES DE UI ---
@@ -429,7 +244,7 @@ const PublicSearchPage = () => {
 
   return (
     <div className="min-h-screen lg:h-screen w-full bg-slate-50 flex flex-col lg:flex-row lg:overflow-hidden font-sans">
-      <Helmet><title>Consulta y Acceso | Eclesia Digital</title></Helmet>
+      <Helmet><title>Acceso Seguro | Eclesia Digital</title></Helmet>
 
       {/* PANEL LATERAL (LOGIN) */}
       <aside className="w-full lg:w-[450px] bg-white lg:border-r border-b lg:border-b-0 border-gray-100 flex flex-col p-8 lg:p-10 shadow-2xl relative z-20 shrink-0 lg:overflow-y-auto">
@@ -450,128 +265,26 @@ const PublicSearchPage = () => {
         </div>
       </aside>
 
-      {/* PANEL PRINCIPAL (BÚSQUEDA PÚBLICA) */}
-      <main className="flex-1 w-full h-full overflow-y-auto bg-[#4B7BA7]/5 p-6 lg:p-16 custom-scrollbar scroll-smooth">
-        <div className="max-w-5xl mx-auto">
-            <header className="mb-8 lg:mb-12">
-                <div className="flex items-center gap-3 mb-2 text-[#4B7BA7]">
-                    <Globe className="w-5 h-5" />
-                    <span className="text-[10px] font-black uppercase tracking-[0.3em]">Portal de Verificación Pública</span>
-                </div>
-                <h1 className="text-3xl lg:text-4xl font-black text-gray-900 tracking-tight">Consulta Unificada de Sacramentos</h1>
-                <p className="text-gray-500 font-medium mt-2 text-sm lg:text-base">Localice actas en archivos digitales de todas las Diócesis afiliadas.</p>
-            </header>
+      {/* PANEL PRINCIPAL (PORTADA INSTITUCIONAL) */}
+      <main className="flex-1 w-full h-full relative bg-gradient-to-br from-[#2C3E50] to-[#1A252F] flex items-center justify-center p-12 overflow-hidden">
+          {/* Decoración de fondo */}
+          <Church className="absolute -bottom-20 -right-20 w-[600px] h-[600px] text-white opacity-5 rotate-12" />
+          <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#D4AF37] via-[#4B7BA7] to-[#D4AF37]"></div>
 
-            <section className="bg-white rounded-[2rem] lg:rounded-[2.5rem] shadow-xl shadow-blue-900/5 p-6 lg:p-8 border border-gray-100 mb-12">
-                <form onSubmit={handleSearch} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Diócesis <span className="text-red-500">*</span></label>
-                        <select required value={searchParams.dioceseId} onChange={e => setSearchParams({...searchParams, dioceseId: e.target.value, parishId: ''})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#D4AF37]">
-                            <option value="">SELECCIONE...</option>
-                            {dioceseOptions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                        </select>
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Parroquia</label>
-                        <select disabled={!searchParams.dioceseId} value={searchParams.parishId} onChange={e => setSearchParams({...searchParams, parishId: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none disabled:opacity-30 focus:ring-2 focus:ring-[#D4AF37]">
-                            <option value="all">TODAS LAS PARROQUIAS</option>
-                            {filteredParishes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Tipo de Acta</label>
-                        <select value={searchParams.sacramentType} onChange={e => setSearchParams({...searchParams, sacramentType: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#D4AF37]">
-                            <option value="">TODOS</option>
-                            {sacramentOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nombres</label>
-                        <input type="text" value={searchParams.firstName} onChange={e => setSearchParams({...searchParams, firstName: e.target.value})} placeholder="EJ: PEDRO" className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none uppercase focus:ring-2 focus:ring-[#D4AF37]" />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Apellidos</label>
-                        <input type="text" value={searchParams.lastName} onChange={e => setSearchParams({...searchParams, lastName: e.target.value})} placeholder="EJ: ROJAS" className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-sm outline-none uppercase focus:ring-2 focus:ring-[#D4AF37]" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Desde</label>
-                          <input type="date" value={searchParams.dateStart} onChange={e => setSearchParams({...searchParams, dateStart: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-[10px] outline-none focus:ring-2 focus:ring-[#D4AF37]" />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Hasta</label>
-                          <input type="date" value={searchParams.dateEnd} onChange={e => setSearchParams({...searchParams, dateEnd: e.target.value})} className="w-full h-12 lg:h-14 px-4 bg-gray-50 border-none rounded-2xl font-bold text-[10px] outline-none focus:ring-2 focus:ring-[#D4AF37]" />
-                        </div>
-                    </div>
-                    <div className="lg:col-span-3 flex justify-end pt-2 lg:pt-4">
-                        <Button disabled={searchLoading} className="w-full lg:w-auto px-12 py-6 lg:py-7 rounded-2xl bg-[#4B7BA7] hover:bg-[#3A6286] text-white font-black uppercase tracking-widest text-[10px] shadow-lg active:scale-95 transition-all">
-                            {searchLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <><Search className="w-4 h-4 mr-2" /> Buscar Actas</>}
-                        </Button>
-                    </div>
-                </form>
-            </section>
-
-            <AnimatePresence>
-                {results && (
-                    <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 pb-20">
-                        <div className="flex items-center justify-between px-2 lg:px-4">
-                            <h3 className="text-[10px] lg:text-xs font-black text-gray-400 uppercase tracking-[0.3em]">Coincidencias ({results.length})</h3>
-                            <div className="h-px flex-1 bg-gray-200 mx-4 lg:mx-6"></div>
-                        </div>
-
-                        {results.length === 0 ? (
-                            <div className="bg-white p-12 lg:p-20 rounded-[2rem] lg:rounded-[2.5rem] border border-dashed border-gray-200 text-center">
-                                <Search className="w-12 h-12 lg:w-16 lg:h-16 text-gray-200 mx-auto mb-4" />
-                                <p className="font-bold text-gray-400 uppercase tracking-widest text-[10px] lg:text-xs">No se localizaron registros</p>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
-                                {results.map(r => {
-                                  const name = r.type === 'MATRIMONIO' ? `${r.groomName} & ${r.brideName}` : `${(r.firstName || r.nombres)} ${(r.lastName || r.apellidos)}`;
-                                  const date = r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio;
-
-                                  return (
-                                    <motion.div whileHover={{ y: -5 }} key={`${r.type}-${r.id}`} className="bg-white p-6 lg:p-8 rounded-[2rem] shadow-xl shadow-blue-900/5 border-l-8 border-[#D4AF37] relative group overflow-hidden flex flex-col justify-between">
-                                        <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><BookOpen className="w-20 h-20 lg:w-24 lg:h-24" /></div>
-                                        
-                                        <div>
-                                            <span className="bg-blue-50 text-[#4B7BA7] px-3 py-1 rounded-full text-[8px] lg:text-[9px] font-black uppercase tracking-widest">{r.type}</span>
-                                            <h4 className="text-lg lg:text-xl font-black text-gray-900 uppercase mt-3 tracking-tighter leading-tight pr-10">{name}</h4>
-                                        </div>
-
-                                        <div className="space-y-2 pt-4 lg:pt-6 mt-4 lg:mt-6 border-t border-gray-50">
-                                            <div className="flex items-center gap-3 text-gray-500">
-                                                <Calendar className="w-4 h-4 text-[#D4AF37] shrink-0" />
-                                                <span className="text-[10px] lg:text-xs font-bold uppercase">{date || '---'}</span>
-                                            </div>
-                                            <div className="flex items-center gap-3 text-gray-500">
-                                                <Church className="w-4 h-4 text-[#4B7BA7] shrink-0" />
-                                                <span className="text-[10px] lg:text-xs font-bold uppercase truncate">{r.parishName}</span>
-                                            </div>
-                                            <div className="flex items-start gap-3 text-gray-400 mt-2">
-                                                <MapPin className="w-4 h-4 text-gray-300 shrink-0 mt-0.5" />
-                                                <div className="flex flex-col">
-                                                    <span className="text-[9px] lg:text-[10px] font-black uppercase tracking-widest">
-                                                        {publicDioceses.find(d => d.id === r.dioceseId)?.name || 'DIÓCESIS'}
-                                                    </span>
-                                                    <span className="text-[8px] lg:text-[9px] font-bold uppercase tracking-tight mt-0.5 text-gray-400 truncate max-w-[200px] lg:max-w-[220px]" title={r.parishAddress}>
-                                                        {r.parishAddress}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </motion.div>
-                                  );
-                                })}
-                            </div>
-                        )}
-                    </motion.section>
-                )}
-            </AnimatePresence>
-        </div>
+          <div className="relative z-10 text-center max-w-3xl">
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
+                  <h1 className="text-4xl lg:text-6xl font-black text-white tracking-tight leading-tight mb-6">
+                      Plataforma Eclesial <br/><span className="text-[#D4AF37]">Unificada</span>
+                  </h1>
+                  <p className="text-lg text-slate-300 font-medium leading-relaxed mb-10 max-w-2xl mx-auto">
+                      Sistema integral y seguro para la gestión de archivos parroquiales, emisión de actas sacramentales y control diocesano.
+                  </p>
+              </motion.div>
+          </div>
       </main>
     </div>
   );
 };
 
+// Puedes cambiarle el nombre interno o dejarlo así si en tu App.jsx está importado como PublicSearchPage
 export default PublicSearchPage;

@@ -248,10 +248,14 @@ const ParishDashboard = () => {
                         <Zap className="w-4 h-4 text-amber-500" /> Accesos Inmediatos
                     </h2>
                     <div className="flex flex-col gap-4">
-                        <QuickActionButton color="bg-[#D4AF37]" label="Inscribir Bautismo" onClick={() => navigate('/parroquia/bautismo/nuevo')} />
-                        <QuickActionButton color="bg-purple-600" label="Nueva Confirmación" onClick={() => navigate('/parroquia/confirmacion/nuevo')} />
-                        <QuickActionButton color="bg-pink-600" label="Registro Matrimonial" onClick={() => navigate('/parroquia/matrimonio/nuevo')} />
-                    </div>
+    {/* AÑADE ESTE BOTÓN NUEVO */}
+    <QuickActionButton color="bg-emerald-600" label="Buscador Unificado" onClick={() => navigate('/buscar')} />
+    
+    {/* TUS BOTONES ACTUALES */}
+    <QuickActionButton color="bg-[#D4AF37]" label="Inscribir Bautismo" onClick={() => navigate('/parroquia/bautismo/nuevo')} />
+    <QuickActionButton color="bg-purple-600" label="Nueva Confirmación" onClick={() => navigate('/parroquia/confirmacion/nuevo')} />
+    <QuickActionButton color="bg-pink-600" label="Registro Matrimonial" onClick={() => navigate('/parroquia/matrimonio/nuevo')} />
+</div>
                 </div>
 
                 <div className="bg-[#4B7BA7] rounded-[2.5rem] p-8 text-white shadow-xl shadow-blue-900/20 relative overflow-hidden group">

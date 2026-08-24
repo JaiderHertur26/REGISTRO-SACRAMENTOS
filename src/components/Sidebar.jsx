@@ -4,7 +4,7 @@ import {
     Church, LogOut, Settings as SettingsIcon, LayoutDashboard, 
     Users, Network, ChevronRight, Database, Sliders, 
     HeartHandshake as Handshake, ScrollText, Heart, List, 
-    FileText, Bell, AlertCircle, Mail, Landmark
+    FileText, Bell, AlertCircle, Mail, Landmark, Search
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppData } from '@/context/AppDataContext';
@@ -152,7 +152,6 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
   const [notificationCount, setNotificationCount] = useState(0);
   const [avisosCount, setAvisosCount] = useState(0);
 
-  // 🚀 Normalización de rol
   const rawRole = profile?.role || user?.role || (typeof role === 'object' && role !== null ? (role.role || role.name) : role) || 'parish';
   const safeRole = String(rawRole).toLowerCase().trim();
 
@@ -170,6 +169,7 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
     if (safeRole === 'superadmin' || safeRole === 'admin' || safeRole === 'admin_general') {
         return [
             { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
+            { label: 'Buscador Unificado', path: '/buscar', icon: Search },
             { label: 'Diócesis/Arquidiócesis', path: '/admin/dioceses', icon: Church },
             { label: 'Ajustes', path: '/admin/settings', icon: SettingsIcon }
         ];
@@ -178,6 +178,7 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
     if (safeRole === 'diocese' || safeRole === 'diocesis') {
         return [
             { label: 'Dashboard', path: '/diocese/dashboard', icon: LayoutDashboard },
+            { label: 'Buscador Unificado', path: '/buscar', icon: Search },
             { label: 'Organización Eclesiástica', path: '/diocese/ecclesiastical', icon: Network },
             { label: 'Comunicaciones', path: '/communications', icon: Users },
             { label: 'Ajustes', path: '/diocese/settings', icon: SettingsIcon }
@@ -187,6 +188,7 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
     if (safeRole === 'parish' || safeRole === 'parroquia') {
         return [
             { label: 'Dashboard', path: '/parish/dashboard', icon: LayoutDashboard },
+            { label: 'Buscador Unificado', path: '/buscar', icon: Search },
             { label: 'Notificaciones Cancillería', path: '/parish/notifications', icon: Bell, badgeCount: notificationCount },
             {
                 label: 'Bautismo',
@@ -250,6 +252,7 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
     if (safeRole === 'chancery' || safeRole === 'cancilleria') {
         return [
             { label: 'Dashboard', path: '/chancery/dashboard', icon: LayoutDashboard },
+            { label: 'Buscador Unificado', path: '/buscar', icon: Search },
             {
                 label: 'Decretos',
                 icon: FileText,
@@ -294,7 +297,6 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
       )}>
         <div className="flex flex-col h-full">
           
-          {/* HEADER DEL LOGO */}
           <div className="h-24 flex items-center px-8 border-b border-slate-50 bg-white shrink-0">
             <div className="w-10 h-10 bg-[#4B7BA7] rounded-2xl flex items-center justify-center mr-4 shadow-lg shadow-blue-900/20 rotate-3 transition-transform hover:rotate-0">
               <Landmark className="w-6 h-6 text-white -rotate-3 transition-transform hover:rotate-0" />
@@ -308,7 +310,6 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
             </button>
           </div>
 
-          {/* LISTA DE NAVEGACIÓN */}
           <div className="flex-1 overflow-y-auto py-8 px-5 custom-scrollbar bg-white">
             <p className="text-[9px] font-black text-gray-300 uppercase tracking-[0.3em] mb-6 px-4">Centro de Operaciones</p>
             {finalMenuItems.map((item, idx) => {
@@ -327,7 +328,6 @@ const Sidebar = ({ isOpen, onClose, onLogout, role, menuItems: externalMenuItems
             })}
           </div>
 
-          {/* FOOTER: USUARIO Y CIERRE */}
           <div className="p-6 bg-slate-50/50 border-t border-gray-100 shrink-0">
             <div className="bg-white p-4 rounded-[1.5rem] border border-gray-100 shadow-sm mb-4">
                 <div className="flex items-center gap-3">

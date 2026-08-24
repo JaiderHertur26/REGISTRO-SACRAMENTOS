@@ -225,10 +225,14 @@ const ChanceryDashboard = () => {
                             <h2 className="text-sm font-black text-gray-900 uppercase tracking-widest">Protocolos de Actuación</h2>
                         </div>
                         <div className="grid grid-cols-1 gap-4">
-                            <ChanceryActionButton label="Revisar Sacramentos Pendientes" icon={AlertCircle} color="bg-orange-500" onClick={() => navigate('/chancery/pending')} />
-                            <ChanceryActionButton label="Emitir Certificación Oficial" icon={FileCheck} color="bg-[#4B7BA7]" onClick={() => navigate('/chancery/certifications')} />
-                            <ChanceryActionButton label="Bandeja de Comunicaciones" icon={Mail} color="bg-slate-700" onClick={() => navigate('/communications')} />
-                        </div>
+    {/* AÑADE ESTE BOTÓN NUEVO */}
+    <ChanceryActionButton label="Buscador Unificado" icon={Search} color="bg-[#D4AF37]" onClick={() => navigate('/buscar')} />
+    
+    {/* TUS BOTONES ACTUALES */}
+    <ChanceryActionButton label="Revisar Sacramentos Pendientes" icon={AlertCircle} color="bg-orange-500" onClick={() => navigate('/chancery/pending')} />
+    <ChanceryActionButton label="Emitir Certificación Oficial" icon={FileCheck} color="bg-[#4B7BA7]" onClick={() => navigate('/chancery/certifications')} />
+    <ChanceryActionButton label="Bandeja de Comunicaciones" icon={Mail} color="bg-slate-700" onClick={() => navigate('/communications')} />
+</div>
                     </div>
 
                     <div className="bg-white rounded-[2.5rem] p-10 border border-gray-100 shadow-sm">
