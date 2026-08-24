@@ -4,7 +4,7 @@ import { useAppData } from '@/context/AppDataContext';
 import { useAuth } from '@/context/AuthContext';
 import Table from '@/components/ui/Table';
 import { Button } from '@/components/ui/button';
-import { Church, Users, FileText, LayoutDashboard, Database, Plus, Download, Edit, Trash2, Key, ShieldCheck, CheckCircle2, Copy, Loader2, MapPin } from 'lucide-react';
+import { Church, Users, FileText, LayoutDashboard, Database, Plus, Download, Edit, Trash2, Key, ShieldCheck, CheckCircle2, Copy, Loader2, MapPin, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { generateBackup } from '@/lib/backupHelpers';
 import Modal from '@/components/ui/Modal';
