@@ -77,6 +77,7 @@ import ConfirmationSentarRegistrosPage from '@/pages/parish/ConfirmationSentarRe
 import ConfirmationIndexPage from '@/pages/parish/ConfirmationIndexPage';
 import ConfirmationParametersPage from '@/pages/parish/ConfirmationParametersPage';
 import ConfirmationPartidasPage from '@/pages/parish/ConfirmationPartidasPage';
+import ConfirmationCorrectionNewPage from '@/pages/parish/ConfirmationCorrectionNewPage'; // 🚀 AÑADIDO: Nuevo Decreto de Corrección Confirmación
 
 /* --- MATRIMONIO --- */
 import MatrimonioNewPage from '@/pages/parish/MatrimonioNewPage';
@@ -198,6 +199,10 @@ const AppContent = () => {
 
                 <Route path="/parish/decree-correction/new" element={<ProtectedRoute requiredRole="parish"><BaptismCorrectionNewPage /></ProtectedRoute>} />
                 <Route path="/parroquia/decretos/nuevo-correccion" element={<ProtectedRoute requiredRole="parish"><BaptismCorrectionNewPage /></ProtectedRoute>} />
+                
+                {/* 🚀 AÑADIDO: Rutas para el Nuevo Decreto de Corrección de Confirmación */}
+                <Route path="/parroquia/decretos/nuevo-correccion-confirmacion" element={<ProtectedRoute requiredRole="parish"><ConfirmationCorrectionNewPage /></ProtectedRoute>} />
+
                 <Route path="/parish/decree-correction/view" element={<ProtectedRoute requiredRole="parish"><BaptismCorrectionListPage /></ProtectedRoute>} />
                 <Route path="/parroquia/decretos/ver-correcciones" element={<ProtectedRoute requiredRole="parish"><BaptismCorrectionListPage /></ProtectedRoute>} />
                 <Route path="/parish/decree-correction/edit" element={<ProtectedRoute requiredRole="parish"><EditDecreeCorrectionSheet /></ProtectedRoute>} />
