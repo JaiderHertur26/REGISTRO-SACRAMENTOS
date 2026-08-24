@@ -80,7 +80,7 @@ const UnifiedSearchPage = () => {
         { value: 'marriage', label: 'MATRIMONIO' },
     ];
 
-    // 🚀 3. EL BUSCADOR (IDÉNTICO A LA LÓGICA QUE TE FUNCIONA EN CANCILLERÍA)
+    // 🚀 3. EL BUSCADOR OPTIMIZADO Y BLINDADO
     const handleSearch = async (e) => {
         e.preventDefault();
         
@@ -117,17 +117,20 @@ const UnifiedSearchPage = () => {
 
             const type = searchParams.sacramentType;
             const fetchPromises = [];
+            
+            // ELIMINADA la tabla 'matrimonios' en español para evitar el Error 404
             const tablesToSearch = [];
-
             if (!type || type === 'baptism') tablesToSearch.push('baptisms');
             if (!type || type === 'confirmation') tablesToSearch.push('confirmations');
             if (!type || type === 'marriage') tablesToSearch.push('marriages');
 
-            // EXACTAMENTE COMO LO HACES EN TU OTRO CÓDIGO: .ilike() directo y .eq()
+            // 🛡️ FORMATEADOR SEGURO: Evita el Error 400 Bad Request cuando el nombre tiene espacios
+            const getSafeTerm = (term) => `"%${term.replace(/"/g, '')}%"`;
+
             tablesToSearch.forEach(table => {
-                let q = supabase.from(table).select('*').limit(10000); // Límite generoso
+                let q = supabase.from(table).select('*').limit(10000); 
                 
-                // 1. Filtrar por Parroquia (Idéntico a tu ejemplo)
+                // Filtro por Parroquia
                 if (!isGlobal && queryParishIds.length > 0) {
                     if (queryParishIds.length === 1) {
                         q = q.eq('parish_id', queryParishIds[0]);
@@ -136,43 +139,24 @@ const UnifiedSearchPage = () => {
                     }
                 }
 
-                // 2. Filtrar por Nombre (Idéntico a tu ejemplo, usando ilike)
                 const fName = searchParams.firstName.trim();
                 const lName = searchParams.lastName.trim();
 
                 if (table === 'baptisms' || table === 'confirmations') {
+                    // El método nativo .ilike() maneja los espacios automáticamente (Cero errores)
                     if (fName) q = q.ilike('nombres', `%${fName}%`);
                     if (lName) q = q.ilike('apellidos', `%${lName}%`);
                 } else if (table === 'marriages') {
-                    // Matrimonios no tiene columnas "nombres" y "apellidos" por fuera.
-                    // Si es global, filtramos por JSON para no descargar todo el país.
-                    // Si es una parroquia, dejamos que JavaScript lo filtre abajo.
-                    if (isGlobal && (fName || lName)) {
-                        const term = fName || lName;
-                        q = q.or(`raw_data->>ESPOSO.ilike.%${term}%,raw_data->>ESPOSA.ilike.%${term}%,raw_data->>groomName.ilike.%${term}%,raw_data->>brideName.ilike.%${term}%`);
+                    // Para buscar dentro del JSONB con OR, formateamos con doble comilla para evitar Error 400
+                    if (fName || lName) {
+                        const termToSearch = fName.length > lName.length ? fName : lName; 
+                        const safeTerm = getSafeTerm(termToSearch);
+                        q = q.or(`raw_data->>ESPOSO.ilike.${safeTerm},raw_data->>ESPOSA.ilike.${safeTerm},raw_data->>groomName.ilike.${safeTerm},raw_data->>brideName.ilike.${safeTerm},raw_data->>groomSurname.ilike.${safeTerm},raw_data->>brideSurname.ilike.${safeTerm}`);
                     }
                 }
                 
-                // LAS FECHAS NO SE FILTRAN EN SQL PARA EVITAR ERRORES CON COLUMNAS VACÍAS.
-
                 fetchPromises.push(q.then(res => ({ type: table, data: res.data || [] })));
             });
-
-            // Respaldo para Matrimonios (por si usan la tabla en español)
-            if (tablesToSearch.includes('marriages')) {
-                let qMat = supabase.from('matrimonios').select('*').limit(10000);
-                if (!isGlobal && queryParishIds.length > 0) {
-                    if (queryParishIds.length === 1) qMat = qMat.eq('parish_id', queryParishIds[0]);
-                    else qMat = qMat.in('parish_id', queryParishIds);
-                }
-                const fName = searchParams.firstName.trim();
-                const lName = searchParams.lastName.trim();
-                if (isGlobal && (fName || lName)) {
-                    const term = fName || lName;
-                    qMat = qMat.or(`raw_data->>ESPOSO.ilike.%${term}%,raw_data->>ESPOSA.ilike.%${term}%,raw_data->>groomName.ilike.%${term}%,raw_data->>brideName.ilike.%${term}%`);
-                }
-                fetchPromises.push(qMat.then(res => ({ type: 'marriage', data: res.data || [] })).catch(() => ({ type: 'marriage', data: []})));
-            }
 
             const fetchedResults = await Promise.all(fetchPromises);
 
@@ -250,13 +234,13 @@ const UnifiedSearchPage = () => {
         return String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, ' ').trim();
     };
 
-    // 🚀 FILTRO JAVASCRIPT: No se le escapa nada (Fechas y Nombres)
+    // 🚀 FILTRO JAVASCRIPT EXTREMO: Cruza datos crudos para evitar pérdidas
     const matchesSearch = (r, p, type) => {
         
-        // 1. FILTRO DE FECHAS SEGURO (Maneja datos nulos y distintos formatos sin romper la app)
+        // 1. FILTRO DE FECHAS SEGURO
         if (p.dateStart || p.dateEnd) {
             const recordDate = r.dbDate || r.sacramentDate || r.fechaSacramento || r.fechaBautismo || r.fechaConfirmacion || r.fechaMatrimonio || r["FECHA DE BAUTIZO"] || r["FECHA DE CONFIRMACIÓN"];
-            if (!recordDate) return false; // Si buscan por fecha y el registro no tiene, se descarta.
+            if (!recordDate) return false; 
             
             let rTime;
             const rStr = String(recordDate).trim();
@@ -279,12 +263,18 @@ const UnifiedSearchPage = () => {
             }
         }
 
-        // 2. REVISIÓN EXACTA DE NOMBRES
-        const recordName = type === 'marriage' || type === 'MATRIMONIO' ? `${r.groomName || r.ESPOSO || ''} ${r.brideName || r.ESPOSA || ''}` : `${r.dbNombres || r.firstName || r.nombres || r.NOMBRES || ''}`;
-        const recordLastName = type === 'marriage' || type === 'MATRIMONIO' ? `${r.groomSurname || ''} ${r.brideSurname || ''}` : `${r.dbApellidos || r.lastName || r.apellidos || r.APELLIDOS || ''}`;
-        
-        if (p.firstName && !normalizeText(recordName).includes(normalizeText(p.firstName))) return false;
-        if (p.lastName && !normalizeText(recordLastName).includes(normalizeText(p.lastName))) return false;
+        // 2. FILTRO TEXTUAL INFALIBLE (Une todos los campos posibles en una cadena y busca ahí)
+        let fullRecordText = '';
+        if (type === 'marriage' || type === 'MATRIMONIO') {
+            fullRecordText = `${r.groomName || ''} ${r.ESPOSO || ''} ${r.brideName || ''} ${r.ESPOSA || ''} ${r.groomSurname || ''} ${r.brideSurname || ''}`;
+        } else {
+            fullRecordText = `${r.dbNombres || ''} ${r.firstName || ''} ${r.nombres || ''} ${r.NOMBRES || ''} ${r.dbApellidos || ''} ${r.lastName || ''} ${r.apellidos || ''} ${r.APELLIDOS || ''}`;
+        }
+
+        fullRecordText = normalizeText(fullRecordText);
+
+        if (p.firstName && !fullRecordText.includes(normalizeText(p.firstName))) return false;
+        if (p.lastName && !fullRecordText.includes(normalizeText(p.lastName))) return false;
 
         return true;
     };
