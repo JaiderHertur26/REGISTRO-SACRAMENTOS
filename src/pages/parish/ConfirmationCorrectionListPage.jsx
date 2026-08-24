@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import Table from '@/components/ui/Table';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { Plus, Search, Eye, Edit, Trash2, FileText, ShieldAlert, BookOpen, ArrowRight, Loader2, Cloud } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import ViewCorrectionDecreeModal from '@/components/modals/ViewCorrectionDecreeModal';
@@ -12,7 +13,7 @@ import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import { supabase } from '@/lib/supabaseClient';
 import { calculatePreviousConsecutive } from '@/services/sacramentParametersService';
 
-const BaptismCorrectionListPage = () => {
+const ConfirmationCorrectionListPage = () => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
@@ -31,6 +32,8 @@ const BaptismCorrectionListPage = () => {
     const loadParishCorrectionsFromCloud = async () => {
         setLoading(true);
         try {
+            // 🚀 Filtrar decretos de corrección. Nota: Si manejas varios sacramentos, 
+            // asegúrate de que el payload diferencie entre bautismos y confirmaciones.
             const { data, error } = await supabase.from('decretos').select('*').eq('tipo', 'correccion')
                 .eq('parish_id', user.parishId).order('created_at', { ascending: false });
 
@@ -39,12 +42,13 @@ const BaptismCorrectionListPage = () => {
                 id: item.id, parish_id: item.parish_id, created_at: item.created_at,
                 ...(typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload)
             }));
+            
             setCorrections(formattedData);
         } catch (error) { toast({ title: "Error", description: "No se descargaron los decretos.", variant: "destructive" }); } 
         finally { setLoading(false); }
     };
 
-    // 🚀 LÓGICA DE RESTAURACIÓN COMPLETA (ROLLBACK TOTAL)
+    // 🚀 LÓGICA DE RESTAURACIÓN COMPLETA (ROLLBACK TOTAL PARA CONFIRMACIONES)
     const confirmDelete = async () => {
         setIsDeleting(true);
         try {
@@ -55,13 +59,13 @@ const BaptismCorrectionListPage = () => {
             const origSum = decreeToUndo.originalPartidaSummary;
             const newSum = decreeToUndo.newPartidaSummary;
 
-            // 1. Restaurar la Partida Original
+            // 1. Restaurar la Partida Original en Confirmaciones
             if (origSum) {
                 const origBook = pad(origSum.book || origSum.Libro);
                 const origPage = pad(origSum.page || origSum.folio);
                 const origEntry = pad(origSum.entry || origSum.numero);
 
-                const { data: origData } = await supabase.from('baptisms')
+                const { data: origData } = await supabase.from('confirmations')
                     .select('id, raw_data').eq('parish_id', user.parishId)
                     .eq('book_number', origBook).eq('folio', origPage).eq('number', origEntry).maybeSingle();
 
@@ -71,7 +75,7 @@ const BaptismCorrectionListPage = () => {
                     cleanedRaw.anulado = false;
                     cleanedRaw.status = 'seated';
                     
-                    await supabase.from('baptisms').update({ 
+                    await supabase.from('confirmations').update({ 
                         status: 'seated', nota_marginal: null, raw_data: cleanedRaw 
                     }).eq('id', origData.id);
                 }
@@ -83,16 +87,16 @@ const BaptismCorrectionListPage = () => {
                 const newPage = pad(newSum.page || newSum.folio);
                 const newEntry = pad(newSum.entry || newSum.numero);
 
-                await supabase.from('baptisms').delete()
+                await supabase.from('confirmations').delete()
                     .eq('parish_id', user.parishId).eq('book_number', newBook).eq('folio', newPage).eq('number', newEntry);
 
-                // --- REVERSA MATEMÁTICA PERFECTA ---
+                // --- REVERSA MATEMÁTICA PERFECTA (CONFIRMACIONES) ---
                 try {
                     const { data: pData } = await supabase.from('parish_parameters')
-                        .select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
+                        .select('confirmaciones_params').eq('parish_id', user.parishId).maybeSingle();
 
-                    if (pData && pData.bautizos_params) {
-                        const cloudParams = pData.bautizos_params;
+                    if (pData && pData.confirmaciones_params) {
+                        const cloudParams = pData.confirmaciones_params;
                         
                         const previosSupletorios = calculatePreviousConsecutive(
                             cloudParams.suplementarioNumero,
@@ -102,7 +106,6 @@ const BaptismCorrectionListPage = () => {
                             cloudParams.suplementarioReiniciar || false
                         );
 
-                        // FIX: Comparamos como enteros. Si es seguro, inyectamos los folios exactos con ceros.
                         if (parseInt(newEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
                             const newParamsObj = { 
                                 ...cloudParams, 
@@ -111,7 +114,7 @@ const BaptismCorrectionListPage = () => {
                                 suplementarioLibro: previosSupletorios.libro
                             };
                             
-                            await supabase.from('parish_parameters').update({ bautizos_params: newParamsObj }).eq('parish_id', user.parishId);
+                            await supabase.from('parish_parameters').update({ confirmaciones_params: newParamsObj }).eq('parish_id', user.parishId);
                         }
                     }
                 } catch (err) { console.error("Error revirtiendo consecutivos:", err); }
@@ -120,11 +123,11 @@ const BaptismCorrectionListPage = () => {
             // 3. Eliminar el Decreto
             await supabase.from('decretos').delete().eq('id', deleteConfig.id);
 
-            toast({ title: "Restauración Completada", description: "Decreto borrado, partida restaurada y consecutivos actualizados.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Restauración Completada", description: "Decreto borrado, partida de confirmación restaurada y consecutivos actualizados.", className: "bg-green-50 text-green-900 border-green-200" });
             loadParishCorrectionsFromCloud();
         } catch (error) { 
             console.error("Error al restaurar:", error);
-            toast({ title: "Error", description: "No se pudo restaurar la partida.", variant: "destructive" }); 
+            toast({ title: "Error", description: "No se pudo restaurar la confirmación.", variant: "destructive" }); 
         } finally { 
             setIsDeleting(false); setDeleteConfig({ isOpen: false, id: null, name: '' }); 
         }
@@ -151,7 +154,7 @@ const BaptismCorrectionListPage = () => {
             header: 'No. Decreto', 
             render: (row) => (
                 <div className="flex items-center gap-3">
-                    <div className="bg-blue-50 p-2 rounded-lg text-blue-600"><FileText className="w-4 h-4" /></div>
+                    <div className="bg-red-50 p-2 rounded-lg text-red-600"><FileText className="w-4 h-4" /></div>
                     <span className="font-black text-gray-900 font-mono tracking-tighter">{row.decreeNumber || 'SIN-NÚMERO'}</span>
                 </div>
             )
@@ -180,8 +183,8 @@ const BaptismCorrectionListPage = () => {
             header: 'Acciones', className: "text-right",
             render: (row) => (
                 <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-9 w-9 text-blue-600 hover:bg-blue-50 rounded-xl" onClick={() => { setSelectedDecree(row); setViewModalOpen(true); }}><Eye className="w-4 h-4" /></Button>
-                    <Button variant="ghost" size="icon" className="h-9 w-9 text-amber-600 hover:bg-amber-50 rounded-xl" onClick={() => navigate(`/parroquia/decretos/editar-correccion?id=${row.id}`)}><Edit className="w-4 h-4" /></Button>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-red-600 hover:bg-red-50 rounded-xl" onClick={() => { setSelectedDecree(row); setViewModalOpen(true); }}><Eye className="w-4 h-4" /></Button>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-amber-600 hover:bg-amber-50 rounded-xl" onClick={() => navigate(`/parroquia/decretos/editar-correccion-confirmacion?id=${row.id}`)}><Edit className="w-4 h-4" /></Button>
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-red-600 hover:bg-red-50 rounded-xl" onClick={() => setDeleteConfig({ isOpen: true, id: row.id, name: row.decreeNumber })}><Trash2 className="w-4 h-4" /></Button>
                 </div>
             )
@@ -190,21 +193,30 @@ const BaptismCorrectionListPage = () => {
 
     return (
         <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                 <div className="flex items-center gap-4">
-                    <div className="bg-amber-100 p-3 rounded-2xl text-amber-600 relative"><ShieldAlert className="w-7 h-7" /><div className="absolute -top-1 -right-1 bg-blue-500 rounded-full p-0.5"><Cloud className="w-3 h-3 text-white" /></div></div>
-                    <div><h1 className="text-3xl font-black text-gray-900 font-serif">Archivo de Decretos</h1><p className="text-gray-500 text-sm font-medium uppercase text-[10px] tracking-widest">Correcciones Sincronizadas (Nube)</p></div>
+                    <div className="bg-amber-100 p-3 rounded-2xl text-amber-600 relative"><ShieldAlert className="w-7 h-7" /><div className="absolute -top-1 -right-1 bg-red-600 rounded-full p-0.5"><Cloud className="w-3 h-3 text-white" /></div></div>
+                    <div><h1 className="text-3xl font-black text-gray-900 font-serif">Archivo de Decretos</h1><p className="text-gray-500 text-sm font-medium uppercase text-[10px] tracking-widest">Correcciones de Confirmación</p></div>
                 </div>
-                <Button className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-8 py-6 rounded-2xl font-black uppercase text-xs shadow-xl shadow-blue-900/20 active:scale-95 transition-all" onClick={() => navigate('/parroquia/decretos/nuevo-correccion')}><Plus className="w-4 h-4 mr-2" /> Nuevo Decreto</Button>
+                <Button className="bg-red-600 hover:bg-red-800 text-white px-8 py-6 rounded-2xl font-black uppercase text-xs shadow-xl shadow-red-900/20 active:scale-95 transition-all" onClick={() => navigate('/parroquia/decretos/nuevo-correccion-confirmacion')}><Plus className="w-4 h-4 mr-2" /> Nuevo Decreto</Button>
             </div>
+
+            {/* 🚀 PESTAÑAS TIPO CAPARAZÓN PARA NAVEGAR ENTRE SACRAMENTOS */}
+            <Tabs defaultValue="confirmaciones" className="w-full mb-8">
+                <TabsList className="grid w-full grid-cols-3 bg-gray-100 p-1 rounded-2xl h-14">
+                    <TabsTrigger value="bautizos" onClick={() => navigate('/parroquia/decretos/ver-correcciones')} className="rounded-xl font-bold uppercase text-[10px] tracking-widest text-gray-500">Bautizos</TabsTrigger>
+                    <TabsTrigger value="confirmaciones" className="rounded-xl font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-red-600 data-[state=active]:shadow-sm">Confirmaciones</TabsTrigger>
+                    <TabsTrigger value="matrimonios" disabled className="opacity-30 rounded-xl font-bold uppercase text-[10px] tracking-widest">Matrimonios</TabsTrigger>
+                </TabsList>
+            </Tabs>
 
             <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-8 bg-gray-50/50 border-b border-gray-100">
-                    <div className="relative max-w-md group"><Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-300 group-focus-within:text-[#4B7BA7] transition-colors" /><Input placeholder="Buscar por acta, decreto o nombre..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-12 py-7 text-sm rounded-2xl border-gray-200 bg-white shadow-sm focus:ring-4 focus:ring-blue-500/5 transition-all" /></div>
+                    <div className="relative max-w-md group"><Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-300 group-focus-within:text-red-600 transition-colors" /><Input placeholder="Buscar por acta, decreto o nombre..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-12 py-7 text-sm rounded-2xl border-gray-200 bg-white shadow-sm focus:ring-4 focus:ring-red-500/5 transition-all" /></div>
                 </div>
 
                 {loading ? (
-                    <div className="py-24 text-center"><Loader2 className="w-10 h-10 animate-spin text-[#4B7BA7] mx-auto mb-4" /><p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest">Descargando...</p></div>
+                    <div className="py-24 text-center"><Loader2 className="w-10 h-10 animate-spin text-red-600 mx-auto mb-4" /><p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest">Descargando...</p></div>
                 ) : filteredCorrections.length > 0 ? (
                     <Table columns={columns} data={filteredCorrections} className="border-none" />
                 ) : (
@@ -214,11 +226,10 @@ const BaptismCorrectionListPage = () => {
 
             {viewModalOpen && <ViewCorrectionDecreeModal isOpen={viewModalOpen} onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }} decreeData={selectedDecree} />}
             
-            {/* Modal de Eliminación con advertencia de Rollback */}
             <ConfirmationDialog 
                 isOpen={deleteConfig.isOpen} 
                 title="Restaurar Partida y Eliminar Decreto" 
-                message="Al confirmar, el decreto será eliminado de la Nube. La partida supletoria será destruida y la partida original recuperará su validez legal (se borrará la nota marginal de anulación)." 
+                message="Al confirmar, el decreto será eliminado de la Nube. La partida supletoria será destruida y la confirmación original recuperará su validez legal." 
                 onConfirm={confirmDelete} 
                 onClose={() => setDeleteConfig({ isOpen: false, id: null, name: '' })} 
                 variant="destructive"
@@ -228,4 +239,4 @@ const BaptismCorrectionListPage = () => {
     );
 };
 
-export default BaptismCorrectionListPage;
+export default ConfirmationCorrectionListPage;

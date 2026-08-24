@@ -77,7 +77,8 @@ import ConfirmationSentarRegistrosPage from '@/pages/parish/ConfirmationSentarRe
 import ConfirmationIndexPage from '@/pages/parish/ConfirmationIndexPage';
 import ConfirmationParametersPage from '@/pages/parish/ConfirmationParametersPage';
 import ConfirmationPartidasPage from '@/pages/parish/ConfirmationPartidasPage';
-import ConfirmationCorrectionNewPage from '@/pages/parish/ConfirmationCorrectionNewPage'; // 🚀 AÑADIDO: Nuevo Decreto de Corrección Confirmación
+import ConfirmationCorrectionNewPage from '@/pages/parish/ConfirmationCorrectionNewPage'; // 🚀 AÑADIDO: Nuevo Decreto de Corrección 
+import ConfirmationCorrectionNewPage from '@/pages/parish/ConfirmationCorrectionListPage'; 
 
 /* --- MATRIMONIO --- */
 import MatrimonioNewPage from '@/pages/parish/MatrimonioNewPage';
@@ -202,6 +203,8 @@ const AppContent = () => {
                 
                 {/* 🚀 AÑADIDO: Rutas para el Nuevo Decreto de Corrección de Confirmación */}
                 <Route path="/parroquia/decretos/nuevo-correccion-confirmacion" element={<ProtectedRoute requiredRole="parish"><ConfirmationCorrectionNewPage /></ProtectedRoute>} />
+
+<Route path="/parroquia/decretos/ver-correcciones-confirmacion" element={<ProtectedRoute requiredRole="parish"><ConfirmationCorrectionListPage /></ProtectedRoute>} />
 
                 <Route path="/parish/decree-correction/view" element={<ProtectedRoute requiredRole="parish"><BaptismCorrectionListPage /></ProtectedRoute>} />
                 <Route path="/parroquia/decretos/ver-correcciones" element={<ProtectedRoute requiredRole="parish"><BaptismCorrectionListPage /></ProtectedRoute>} />
