@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { 
     Save, Calendar, User, Users, 
     BookOpen, PenTool, Loader2, Fingerprint,
-    ShieldCheck, ArrowLeft, Search, Droplet
+    ShieldCheck, ArrowLeft, Search, Droplet, FileText, Lock 
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
