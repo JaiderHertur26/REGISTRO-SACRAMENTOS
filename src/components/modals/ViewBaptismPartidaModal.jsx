@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { 
     X, Printer, BookOpen, Fingerprint, 
     ShieldCheck, CheckCircle2, AlertCircle, Info,
-    User, Users, MapPin, PenTool, AlertOctagon, FileText
+    User, Users, MapPin, PenTool, AlertOctagon, FileText, Link
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import BaptismPrintTemplate from '@/components/BaptismPrintTemplate';
@@ -54,6 +54,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
             const fetchAllNotes = async () => {
                 let allNotes = [];
 
+                // A. Buscar Notas Manuales (Decretos, Anulaciones)
                 if (partida.id) {
                     const { data: mnData, error: mnError } = await supabase
                         .from('marginal_notes')
@@ -66,6 +67,7 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                     }
                 }
 
+                // B. BÚSQUEDA AUTOMÁTICA DE CONFIRMACIÓN (Cruce de Sacramentos)
                 if (partida.nombres && partida.apellidos) {
                     const cleanNombres = partida.nombres.trim();
                     const cleanApellidos = partida.apellidos.trim();
@@ -105,6 +107,39 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                     }
                 }
 
+                // 🚀 C. BÚSQUEDA AUTOMÁTICA DE REGISTRO CIVIL (VÍNCULO CIVIL)
+                const raw = partida.raw_data || partida || {};
+                const nuip = raw.nuip || raw.NUIP || partida.nuip;
+                
+                if (nuip && String(nuip).trim() !== '' && String(nuip).trim() !== '---') {
+                    const storedTemplates = localStorage.getItem(`marginalNotesTemplates_${parishId}`);
+                    const tempObj = storedTemplates ? JSON.parse(storedTemplates) : {};
+                    const templateRC = tempObj.vinculo_civil || "REGISTRO CIVIL: NUIP/NIP [NUIP]. EXPEDIDO EN [OFICINA_REGISTRO] EL DÍA [FECHA_EXPEDICION_RC].";
+
+                    const oficina = raw.oficinaRegistro || raw.oficina_registro || partida.oficina_registro || raw.NOTARIA || '---';
+                    const fechaExp = raw.fechaExpedicionRegistro || raw.fecha_expedicion_registro || partida.fecha_expedicion_registro || raw["FECHA DE REGISTRO"] || '---';
+                    
+                    let dateStrRC = fechaExp;
+                    if (fechaExp !== '---') {
+                        const dRC = new Date(fechaExp.includes('T') ? fechaExp : `${fechaExp}T12:00:00`);
+                        dateStrRC = !isNaN(dRC.getTime()) ? `${dRC.getDate()} DE ${dRC.toLocaleString('es-CO', { month: 'long' }).toUpperCase()} DE ${dRC.getFullYear()}` : fechaExp;
+                    }
+
+                    const contentRC = templateRC
+                        .replace('[NUIP]', String(nuip).toUpperCase())
+                        .replace('[OFICINA_REGISTRO]', String(oficina).toUpperCase())
+                        .replace('[FECHA_EXPEDICION_RC]', String(dateStrRC).toUpperCase());
+
+                    allNotes.push({
+                        id: `auto-rc-${partida.id || 'rc'}`,
+                        note_type: 'VÍNCULO DE REGISTRO CIVIL',
+                        note_date: partida.created_at || new Date().toISOString().split('T')[0],
+                        content: contentRC,
+                        isAuto: true,
+                        iconType: 'link'
+                    });
+                }
+
                 setMarginalNotes(allNotes);
                 setSelectedNotes(allNotes.map(n => n.id));
             };
@@ -118,12 +153,12 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
     // 🚀 2. CONSTRUCCIÓN DE LA NOTA MARGINAL "A LA CARTA"
     let baseNotaOriginal = partida.notaMarginal && partida.notaMarginal !== "---" ? String(partida.notaMarginal).toUpperCase() : "";
     
-    // 🧹 Limpieza de basura histórica del Excel para que no contamine las notas nuevas
+    // Limpieza de basura histórica del Excel
     baseNotaOriginal = baseNotaOriginal.replace(/LA INFORMACI[OÓ]N SUMINISTRADA ES FIEL.*/ig, '').trim();
     baseNotaOriginal = baseNotaOriginal.replace(/ESTA INFORMACI[OÓ]N SUMINISTRADA ES FIEL.*/ig, '').trim();
     baseNotaOriginal = baseNotaOriginal.replace(/SE EXPIDE EN.*/ig, '').trim();
     baseNotaOriginal = baseNotaOriginal.replace(/ES COPIA FIEL.*/ig, '').trim();
-    baseNotaOriginal = baseNotaOriginal.replace(/\.+$/, '').trim(); // Elimina puntos suspensivos
+    baseNotaOriginal = baseNotaOriginal.replace(/\.+$/, '').trim(); 
 
     const mandatoryNote = templates.certificacion_estandar || "LA INFORMACIÓN SUMINISTRADA ES FIEL A LA CONTENIDA EN EL LIBRO.";
     
@@ -174,7 +209,6 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
         }
     }
     
-    // Inyectamos todo en el objeto que recibe el PDF con el flag "fromModal"
     const partidaParaImprimir = { 
         ...partida, 
         daFe: rawDaFe, 
@@ -222,7 +256,6 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                         exit={{ opacity: 0, scale: 0.9, y: 30 }}
                         className="bg-white rounded-[3rem] shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden border border-white/20"
                     >
-                        {/* CABECERA DE CONTROL */}
                         <div className="flex items-center justify-between px-8 py-6 bg-white border-b border-gray-100 shrink-0">
                             <div className="flex items-center gap-5">
                                 <div className={cn(
@@ -248,26 +281,21 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                             </button>
                         </div>
 
-                        {/* VISUALIZADOR Y CONFIGURADOR */}
                         <div className="flex-1 overflow-y-auto bg-slate-200/50 p-6 md:p-12 flex flex-col items-center gap-6 custom-scrollbar">
                             
-                            {/* Panel de Ubicación Física */}
                             <div className="w-full max-w-[8.5in] grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <InfoCard 
                                     label="Ubicación en Archivo" 
                                     val={`Libro ${partida.Libro} • Folio ${partida.folio} • Acta ${partida.numero}`} 
                                     icon={BookOpen}
                                 />
-                                <div className="md:col-span-2 bg-white/80 backdrop-blur-sm p-5 rounded-[2rem] border border-white shadow-sm flex items-start gap-4">
-                                    <div className="bg-amber-100 p-2 rounded-xl text-amber-600"><AlertCircle className="w-4 h-4"/></div>
-                                    <div className="flex-1">
-                                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-1">Nota Marginal Proyectada</span>
-                                        <p className="text-[11px] font-bold text-gray-600 leading-relaxed italic line-clamp-2 uppercase">"{finalNotaMarginal}"</p>
-                                    </div>
-                                </div>
+                                <InfoCard 
+                                    label="Bautizado" 
+                                    val={`${partida.apellidos} ${partida.nombres}`} 
+                                    icon={User}
+                                />
                             </div>
 
-                            {/* 🚀 SELECTOR INTELIGENTE DE NOTAS MARGINALES A LA CARTA */}
                             <div className="w-full max-w-[8.5in] bg-white/80 backdrop-blur-sm p-6 rounded-[2rem] border border-gray-200 shadow-sm mt-2 mb-4">
                                 <div className="flex items-center gap-3 mb-5 border-b border-gray-100 pb-3">
                                     <div className="bg-amber-100 p-2 rounded-xl text-amber-600"><FileText className="w-4 h-4"/></div>
@@ -299,7 +327,8 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                                 />
                                                 <div className="flex-1">
                                                     <span className="text-[10px] font-black uppercase text-[#4B7BA7] block mb-0.5 border-b border-blue-100/50 pb-1 flex items-center gap-1.5">
-                                                        {note.isAuto && <ShieldCheck className="w-3 h-3" />} {note.note_type}
+                                                        {note.iconType === 'link' ? <Link className="w-3 h-3" /> : (note.isAuto && <ShieldCheck className="w-3 h-3" />)} 
+                                                        {note.note_type}
                                                     </span>
                                                     <p className="text-xs font-bold text-gray-800 uppercase italic leading-relaxed mt-1">"{note.content}"</p>
                                                 </div>
@@ -321,7 +350,6 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                 </div>
                             </div>
 
-                            {/* EL DOCUMENTO (VISTA PREVIA DE IMPRESIÓN) */}
                             <div className="relative group">
                                 <div className="absolute -inset-4 bg-gradient-to-tr from-[#D4AF37]/10 to-transparent blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
                                 <div className="relative shadow-[0_30px_100px_rgba(0,0,0,0.18)] bg-white w-full max-w-[8.5in] min-h-[11in] transform transition-transform duration-700">
@@ -334,10 +362,9 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                                         </div>
                                     )}
 
-                                    {/* Componente de Impresión Final */}
                                     <div ref={componenteImpresionRef} className="print-root">
                                         <BaptismPrintTemplate 
-                                            data={partidaParaImprimir} // 🚀 El PDF recibe la súper Nota Marginal Concatenada
+                                            data={partidaParaImprimir} 
                                             parroquiaInfo={auxiliaryData} 
                                         />
                                     </div>
@@ -345,7 +372,6 @@ const ViewBaptismPartidaModal = ({ isOpen, onClose, partida, auxiliaryData }) =>
                             </div>
                         </div>
 
-                        {/* ACCIONES FINALES */}
                         <div className="px-10 py-8 bg-white border-t border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-6 shrink-0">
                             <div className="flex items-center gap-6 text-left">
                                 <div className="flex flex-col">
