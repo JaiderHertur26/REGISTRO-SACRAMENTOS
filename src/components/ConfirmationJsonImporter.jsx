@@ -36,41 +36,6 @@ const purificarRegistroConfirmacion = (obj) => {
     return cleaned;
 };
 
-// 🚀 ESTANDARIZADOR DE FECHAS (Convierte formatos raros a YYYY-MM-DD para el PDF)
-const formatToISODate = (val) => {
-    if (!val) return '';
-    const dateString = String(val).trim();
-    
-    // Si ya viene como YYYY-MM-DD
-    if (/^\d{4}-\d{2}-\d{2}/.test(dateString)) return dateString.substring(0, 10);
-    
-    // Si viene como DD/MM/YYYY o DD-MM-YYYY
-    const separator = dateString.includes('/') ? '/' : (dateString.includes('-') ? '-' : null);
-    if (separator) {
-        const parts = dateString.split(separator);
-        if (parts.length === 3) {
-            if (parts[2].length === 4) { // DD/MM/YYYY
-                const day = parts[0].padStart(2, '0');
-                const month = parts[1].padStart(2, '0');
-                return `${parts[2]}-${month}-${day}`;
-            } else if (parts[0].length === 4) { // YYYY/MM/DD
-                const month = parts[1].padStart(2, '0');
-                const day = parts[2].padStart(2, '0');
-                return `${parts[0]}-${month}-${day}`;
-            }
-        }
-    }
-    
-    // Si viene como número de serie de Excel (Ej: 44234)
-    if (!isNaN(dateString) && Number(dateString) > 20000) {
-        const excelEpoch = new Date(1899, 11, 30);
-        const dateObj = new Date(excelEpoch.getTime() + Number(dateString) * 86400000);
-        return dateObj.toISOString().split('T')[0];
-    }
-
-    return dateString;
-};
-
 // Utilidad para asegurar el mismo formato de Libro/Folio/Numero al comparar con la DB
 const padDbValue = (val) => {
     if (val === null || val === undefined) return '---';
@@ -81,7 +46,7 @@ const padDbValue = (val) => {
 const ConfirmationJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth();
-    const { getParrocos } = useAppData();
+    const { getParrocos, getMisDatosList } = useAppData(); // 🚀 IMPORTAMOS getMisDatosList para las Notas
     const fileInputRef = useRef(null);
     
     const [isProcessing, setIsProcessing] = useState(false);
@@ -94,6 +59,7 @@ const ConfirmationJsonImporter = () => {
 
     const parishId = user?.parish_id || user?.parishId;
 
+    // --- 1. CARGAR HISTORIAL DE PÁRROCOS ---
     useEffect(() => {
         if (parishId) {
             const parrocos = getParrocos(parishId) || [];
@@ -108,6 +74,7 @@ const ConfirmationJsonImporter = () => {
         }
     }, [parishId, getParrocos]);
 
+    // --- 2. MÁQUINA DEL TIEMPO: BUSCADOR HISTÓRICO EXACTO ---
     const getHistoricalPriest = (dateString) => {
         if (!dateString || listaSacerdotes.length === 0) return null;
         
@@ -127,13 +94,16 @@ const ConfirmationJsonImporter = () => {
         return null;
     };
 
+    // --- 3. PROCESAMIENTO Y LECTURA INTELIGENTE DEL ARCHIVO ---
     const handleFileChange = async (event) => {
         const selectedFile = event.target.files[0];
         if (!selectedFile) return;
 
+        // 🚀 1. IDENTIFICADOR DEL ARCHIVO EXACTO
         const fileName = selectedFile.name.toUpperCase();
         let detectedType = null;
         
+        // Bloqueo Inteligente de nombres de archivo
         if (fileName === 'CONFIRMA.JSON') {
             detectedType = 'CONFIRMA';
         } else if (fileName === 'INSCONFI.JSON') {
@@ -165,6 +135,7 @@ const ConfirmationJsonImporter = () => {
                 let existingKeys = new Set();
                 let existingInsconfiKeys = new Set();
                 
+                // 🚀 BUSCAMOS DUPLICADOS EN LA BASE DE DATOS SEGÚN EL TIPO DE ARCHIVO
                 if (detectedType === 'CONFIRMA') {
                     const { data: existingData, error: dbError } = await supabase
                         .from('confirmations')
@@ -173,10 +144,12 @@ const ConfirmationJsonImporter = () => {
 
                     if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
                     
+                    // Aseguramos formato estricto idéntico al de subida
                     existingKeys = new Set((existingData || []).map(b => 
                         `${padDbValue(b.book_number)}-${padDbValue(b.folio)}-${padDbValue(b.number)}`
                     ));
                 } else if (detectedType === 'INSCONFI') {
+                    // Ahora validamos con la tabla de espera para no subir INSCONFI duplicados
                     const { data: existingData, error: dbError } = await supabase
                         .from('pending_confirmations')
                         .select('raw_data')
@@ -199,42 +172,37 @@ const ConfirmationJsonImporter = () => {
                 rawData.forEach((item, index) => {
                     const rowNum = index + 1;
                     
+                    // 🚀 Analiza REPORTADO (O SENTADO como fallback por compatibilidad)
                     const isReportado = item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE' || item["SENTADO"] === true || String(item["SENTADO"]).toUpperCase() === 'TRUE';
                     const destinoStr = detectedType === 'CONFIRMA' ? 'oficial' : (isReportado ? 'boleta' : 'cola');
                     
-                    // 🚀 MAPEO EXPANDIDO Y FORMATEO DE FECHAS ESTRICTO
+                    // Mapeo exhaustivo para Confirmaciones
                     const mappedItem = {
-                        numeroRegistro: item["Nº REGISTRO PREVIO"] || item["REGISTRO PREVIO"] || item.numeroRegistro || '',
-                        fechaInscripcion: formatToISODate(item["FECHA DE INSCRIPCIÓN"] || item["FECHA INSCRIPCION"] || item.fechaInscripcion || ''),
+                        numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
+                        fechaInscripcion: item["FECHA DE INSCRIPCIÓN"] || item.fechaInscripcion || '',
                         Libro: item["LIBRO"] || item.Libro || item.libro || '---',
                         folio: item["FOLIO"] || item.folio || '---',
-                        numero: item["NÚMERO"] || item["NUMERO"] || item.numero || item.numeroActa || '---',
-                        
-                        // Captura de fechas reparada para PDFs
-                        fechaSacramento: formatToISODate(item["FECHA DE CONFIRMACIÓN"] || item["FECHA DE CONFIRMACION"] || item["FECHA CONFIRMACION"] || item.fechaSacramento || ''),
-                        fechaNacimiento: formatToISODate(item["FECHA DE NACIMIENTO"] || item["FECHA NACIMIENTO"] || item["NACIMIENTO"] || item.fechaNacimiento || ''),
-                        
-                        lugarSacramento: item["LUGAR DE CONFIRMACION"] || item["LUGAR CONFIRMACION"] || item["LUGAR"] || item.lugarSacramento || '',
+                        numero: item["NÚMERO"] || item.numero || item.numeroActa || '---',
+                        fechaSacramento: item["FECHA DE CONFIRMACIÓN"] || item.fechaSacramento || '',
+                        lugarSacramento: item["LUGAR DE CONFIRMACION"] || item["LUGAR"] || item.lugarSacramento || '',
                         apellidos: item["APELLIDOS"] || item.apellidos || '',
                         nombres: item["NOMBRES"] || item.nombres || '',
+                        fechaNacimiento: item["FECHA DE NACIMIENTO"] || item.fechaNacimiento || '',
                         edad: item["EDAD"] || item.edad || '',
                         sexo: item["SEXO"] || item.sexo || '',
                         codigoBautizo: item["CODIGO DE BAUTIZO"] || item.codigoBautizo || '',
-                        
-                        // Captura agresiva del Lugar de Bautismo
-                        lugarBautismo: item["LUGAR DE BAUTISMO"] || item["LUGAR BAUTISMO"] || item["PARROQUIA DE BAUTISMO"] || item["PARROQUIA BAUTIZO"] || item["PARROQUIA BAUTISMO"] || item["BAUTIZADO EN"] || item.lugarBautismo || '',
-                        
-                        libroBautismo: item["LIBRO DE BAUTIZO"] || item["LIBRO BAUTIZO"] || item.libroBautismo || '',
-                        folioBautismo: item["FOLIO DE BAUTIZO"] || item["FOLIO BAUTIZO"] || item.folioBautismo || '',
-                        numeroBautismo: item["NÚMERO DE BAUTIZO"] || item["NUMERO BAUTIZO"] || item.numeroBautismo || '',
-                        nombrePadre: item["NOMBRE DEL PADRE"] || item["NOMBRE PADRE"] || item["PADRE"] || item.nombrePadre || '',
-                        nombreMadre: item["NOMBRE DE LA MADRE"] || item["NOMBRE MADRE"] || item["MADRE"] || item.nombreMadre || '',
-                        padrinos: item["PADRINO / MADRINA"] || item["PADRINOS"] || item["PADRINO"] || item["MADRINA"] || item.padrinos || '',
+                        lugarBautismo: item["LUGAR DE BAUTISMO"] || item.lugarBautismo || '',
+                        libroBautismo: item["LIBRO DE BAUTIZO"] || item.libroBautismo || '',
+                        folioBautismo: item["FOLIO DE BAUTIZO"] || item.folioBautismo || '',
+                        numeroBautismo: item["NÚMERO DE BAUTIZO"] || item.numeroBautismo || '',
+                        nombrePadre: item["NOMBRE DEL PADRE"] || item.nombrePadre || '',
+                        nombreMadre: item["NOMBRE DE LA MADRE"] || item.nombreMadre || '',
+                        padrinos: item["PADRINO / MADRINA"] || item.padrinos || '',
                         direccion: item["DIRECCION"] || item.direccion || '',
                         responsable: item["RESPONSABLE"] || item.responsable || '',
                         ministro: item["MINISTRO"] || item.ministro || '',
-                        daFe: item["DA FE"] || item["DAFE"] || item.daFe || '',
-                        notaMarginal: item["NOTAS MARGINALES"] || item["NOTA MARGINAL"] || item.notaMarginal || '',
+                        daFe: item["DA FE"] || item.daFe || '',
+                        notaMarginal: item["NOTAS MARGINALES"] || item.notaMarginal || '',
                         reportado: isReportado
                     };
 
@@ -274,6 +242,7 @@ const ConfirmationJsonImporter = () => {
                     if (!cleanItem.nombres || !cleanItem.apellidos) {
                         errors.push(`Fila ${rowNum}: Faltan Nombres o Apellidos críticos.`);
                     } else if (detectedType === 'CONFIRMA') {
+                        // REGLAS CONFIRMA.JSON (Libro Oficial)
                         if (cleanItem.Libro === '0000' || !cleanItem.Libro || cleanItem.Libro === '---') {
                             errors.push(`Fila ${rowNum}: Faltan datos críticos (Libro/Folio).`);
                         } else if (existingKeys.has(keyConfirmaciones) || internalKeys.has(keyConfirmaciones)) {
@@ -284,6 +253,7 @@ const ConfirmationJsonImporter = () => {
                             validCount++;
                         }
                     } else if (detectedType === 'INSCONFI') {
+                        // REGLAS INSCONFI.JSON (Inscripciones de Despacho)
                         if (internalKeys.has(keyInsconfi) || existingInsconfiKeys.has(keyInsconfi)) {
                             warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (La inscripción ya existe en la base de datos o está duplicada en este archivo).`);
                         } else {
@@ -307,6 +277,7 @@ const ConfirmationJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
+    // --- 4. INYECCIÓN BIFURCADA CON AUTO-ENLACE A BAUTISMOS ---
     const handleImport = async () => {
         if (!validationResult || validationResult.dataToImport.length === 0) return;
         setIsProcessing(true);
@@ -317,6 +288,7 @@ const ConfirmationJsonImporter = () => {
             const batchSize = 200;
 
             if (fileType === 'CONFIRMA') {
+                // 🚀 ARCHIVO: CONFIRMA.json -> VA A LA TABLA OFICIAL PERMANENTE
                 const dbRecords = validationResult.dataToImport.map(item => {
                     const { rawOriginal, destino, reportado, ...cleanMappedData } = item;
                     
@@ -340,25 +312,83 @@ const ConfirmationJsonImporter = () => {
                         ministro: item.ministro || null,
                         da_fe: item.daFe || null,
                         nota_marginal: item.notaMarginal || null,
-                        // El merge ahora incluye las fechas formateadas correctamente
                         raw_data: { ...rawOriginal, ...cleanMappedData }, 
                         created_at: new Date().toISOString()
                     };
                 });
 
+                // Insertamos Confirmaciones en Lote
                 for (let i = 0; i < dbRecords.length; i += batchSize) {
                     const batch = dbRecords.slice(i, i + batchSize);
                     const { error } = await supabase.from('confirmations').insert(batch);
                     if (error) throw error;
                 }
 
+                // 🚀 NUEVA LÓGICA: AUTO-ENLACE A BAUTISMOS MASIVO
+                const notesToInsert = [];
+                const storedTemplates = localStorage.getItem(`marginalNotesTemplates_${parishId}`);
+                const templates = storedTemplates ? JSON.parse(storedTemplates) : {};
+                const templateNota = templates.bautismo_confirmado || "EL [FECHA_CONFIRMACION] FUE CONFIRMADO(A) EN LA PARROQUIA [PARROQUIA_CONFIRMACION]. DIÓCESIS DE [DIOCESIS_CONFIRMACION]. L-[LIBRO_CONF], F-[FOLIO_CONF], N-[NUMERO_CONF].";
+                
+                const misDatos = getMisDatosList(parishId);
+                const nombreInstitucion = misDatos && misDatos.length > 0 ? misDatos[0].nombre : 'ESTA PARROQUIA';
+                const nombreDiocesis = misDatos && misDatos.length > 0 ? misDatos[0].diocesis : 'ARQUIDIÓCESIS DE BARRANQUILLA';
+
+                for (const item of dbRecords) {
+                    const raw = item.raw_data || {};
+                    const bLibro = String(raw.libroBautismo || raw["LIBRO DE BAUTIZO"] || '').padStart(4, '0');
+                    const bFolio = String(raw.folioBautismo || raw["FOLIO DE BAUTIZO"] || '').padStart(4, '0');
+                    const bNumero = String(raw.numeroBautismo || raw["NÚMERO DE BAUTIZO"] || '').padStart(4, '0');
+
+                    if (bLibro && bLibro !== '0000' && bLibro !== '---') {
+                        let query = supabase.from('baptisms').select('id').eq('parish_id', parishId).eq('book_number', bLibro);
+                        if (bFolio && bFolio !== '0000' && bFolio !== '---') query = query.eq('folio', bFolio);
+                        if (bNumero && bNumero !== '0000' && bNumero !== '---') query = query.eq('number', bNumero);
+
+                        const { data: bData } = await query.single();
+
+                        if (bData && bData.id) {
+                            const fechaSac = item.celebration_date || '';
+                            const d = fechaSac ? new Date(fechaSac.includes('T') ? fechaSac : `${fechaSac}T12:00:00`) : new Date();
+                            const dateStr = !isNaN(d.getTime()) ? `${d.getDate()} DE ${d.toLocaleString('es-CO', { month: 'long' }).toUpperCase()} DE ${d.getFullYear()}` : fechaSac;
+
+                            const notaRedactada = templateNota
+                                .replace('[FECHA_CONFIRMACION]', dateStr)
+                                .replace('[PARROQUIA_CONFIRMACION]', (nombreInstitucion || '').toUpperCase())
+                                .replace('[DIOCESIS_CONFIRMACION]', (nombreDiocesis || '').toUpperCase())
+                                .replace('[LIBRO_CONF]', String(item.book_number).padStart(4, '0'))
+                                .replace('[FOLIO_CONF]', String(item.folio).padStart(4, '0'))
+                                .replace('[NUMERO_CONF]', String(item.number).padStart(4, '0'));
+
+                            notesToInsert.push({
+                                id: generateUUID(),
+                                sacrament_id: bData.id,
+                                sacrament_type: 'bautismo',
+                                note_type: 'confirmacion',
+                                note_date: new Date().toISOString().split('T')[0],
+                                content: notaRedactada,
+                                parish_id: parishId
+                            });
+                        }
+                    }
+                }
+
+                if (notesToInsert.length > 0) {
+                    for (let i = 0; i < notesToInsert.length; i += batchSize) {
+                        const batchNotes = notesToInsert.slice(i, i + batchSize);
+                        const { error: notesError } = await supabase.from('marginal_notes').insert(batchNotes);
+                        if (notesError) console.error("Error inyectando notas en lote:", notesError);
+                    }
+                }
+
                 toast({ 
                     title: "¡Importación de Libros Exitosa!", 
-                    description: `${dbRecords.length} Actas Viejas inyectadas directamente en la Base Permanente.`, 
+                    description: `${dbRecords.length} Actas inyectadas y ${notesToInsert.length} notas cruzadas en Bautismos.`, 
                     className: "bg-green-50 border-green-200 text-green-900" 
                 });
 
             } else if (fileType === 'INSCONFI') {
+                // 🚀 ARCHIVO: INSCONFI.json -> VA A LA TABLA DE ESPERA (Boletas o Cola)
                 const pendingRecords = validationResult.dataToImport.map(item => {
                     const { rawOriginal, destino, reportado, ...cleanMappedData } = item;
                     
@@ -488,6 +518,7 @@ const ConfirmationJsonImporter = () => {
                     {validationResult && (
                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             
+                            {/* ESTADÍSTICAS DINÁMICAS SEGÚN EL ARCHIVO */}
                             {fileType === 'CONFIRMA' ? (
                                 <div className="grid grid-cols-3 gap-4">
                                     <StatCard label="Libro Oficial" val={totalOficial} color="emerald" />
@@ -533,7 +564,7 @@ const ConfirmationJsonImporter = () => {
                 <div className="mt-10 pt-8 border-t border-gray-100 animate-in fade-in duration-700">
                     <div className="bg-gray-50/50 px-6 py-4 rounded-t-3xl border border-b-0 border-gray-100 flex items-center justify-between">
                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
-                            <Info className="w-4 h-4 text-red-600" /> Vista Previa de Asignación (Top 5)
+                            <Info className="w-4 h-4 text-red-600" /> Vista Previa de Asignación Automática (Top 5)
                         </span>
                     </div>
                     <div className="border border-gray-100 rounded-b-3xl overflow-hidden bg-white shadow-sm">
@@ -549,7 +580,8 @@ const StatCard = ({ label, val, color }) => {
     const colors = {
         emerald: "bg-emerald-50 border-emerald-100 text-emerald-700",
         red: "bg-red-50 border-red-100 text-red-700",
-        amber: "bg-amber-50 border-amber-100 text-amber-700"
+        amber: "bg-amber-50 border-amber-100 text-amber-700",
+        blue: "bg-blue-50 border-blue-100 text-blue-700"
     };
     return (
         <div className={cn("p-5 rounded-3xl border text-center shadow-sm", colors[color])}>
