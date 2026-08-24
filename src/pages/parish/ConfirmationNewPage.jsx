@@ -5,12 +5,9 @@ import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { cn } from '@/lib/utils';
 import { 
-    ChevronLeft, ChevronRight, Save, 
-    CheckCircle2, AlertCircle, Loader2, Printer,
-    LayoutList, BookOpenCheck,
-    Layers, CheckSquare, Square, Lock, FileText, Search, Droplet, Hash, Calendar, User, Users, PenTool
+    Save, X, Calendar, User, Users, BookOpen, PenTool, 
+    CheckCircle2, Loader2, Hash, AlertCircle, Search, Droplet 
 } from 'lucide-react';
 import ConfirmationTicket from '@/components/ConfirmationTicket';
 import ChurchLocationAutocomplete from '@/components/ChurchLocationAutocomplete';
@@ -31,13 +28,6 @@ const ConfirmationNewPage = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
     
-    // 🚀 ESTADOS DE PESTAÑAS Y BUSCADOR REPARADOS
-    const [activeTab, setActiveTab] = useState('new'); 
-    const [reportedConfirmations, setReportedConfirmations] = useState([]);
-    const [isLoadingReported, setIsLoadingReported] = useState(false);
-    const [printingRecord, setPrintingRecord] = useState(null);
-    const [searchTerm, setSearchTerm] = useState('');
-
     const [ticketData, setTicketData] = useState(null);
     const [parishInfo, setParishInfo] = useState(null); 
     const [parrocosSugeridos, setParrocosSugeridos] = useState([]);
@@ -90,36 +80,6 @@ const ConfirmationNewPage = () => {
         };
         loadInitialData();
     }, [parishId, nombreParroquia, getMisDatosList, getParrocos, getConfirmationParameters]);
-
-    // 🚀 EFECTO PARA CARGAR LAS BOLETAS EMITIDAS (REPORTADOS)
-    useEffect(() => {
-        if (activeTab === 'reported' && parishId) {
-            const fetchReported = async () => {
-                setIsLoadingReported(true);
-                try {
-                    const { data, error } = await supabase
-                        .from('pending_confirmations')
-                        .select('*')
-                        .eq('parish_id', parishId)
-                        .eq('reportado', true)
-                        .order('created_at', { ascending: false });
-                    
-                    if (data) {
-                        const mapped = data.map(pb => {
-                            const raw = typeof pb.raw_data === 'string' ? JSON.parse(pb.raw_data) : (pb.raw_data || {});
-                            return { ...raw, id: pb.id, reportado: pb.reportado };
-                        });
-                        setReportedConfirmations(mapped);
-                    }
-                } catch(err) {
-                    console.error(err);
-                } finally {
-                    setIsLoadingReported(false);
-                }
-            };
-            fetchReported();
-        }
-    }, [activeTab, parishId]);
 
     useEffect(() => {
         if (!formData.fechaSacramento || listaSacerdotes.length === 0) return;
@@ -217,11 +177,6 @@ const ConfirmationNewPage = () => {
         setIsSearchModalOpen(false);
     };
 
-    const handlePrintReported = (record) => {
-        setPrintingRecord(record);
-        setTimeout(() => window.print(), 300);
-    };
-
     const handleSubmit = async (e) => {
         e.preventDefault();
         setIsSubmitting(true);
@@ -231,15 +186,17 @@ const ConfirmationNewPage = () => {
             const nextReg = calculateNextRegistro(currentRegistro);
             const dataToSave = { ...formData, numeroRegistro: nextReg };
 
+            // 🚀 INYECCIÓN DIRECTA A LA TABLA DE PENDIENTES
             const { error: insertError } = await supabase.from('pending_confirmations').insert([{
                 parish_id: parishId,
                 raw_data: dataToSave,
                 status: 'pending',
-                hora: formData.hora || null 
+                hora: formData.hora || null // 🚀 AÑADIDO: Inyección directa a la nueva columna
             }]);
 
             if (insertError) throw insertError;
 
+            // 🚀 ACTUALIZAR LA NUBE: Guardar el nuevo Número de Registro
             if (fullParamsCache) {
                 const updatedParams = { ...fullParamsCache, numeroRegistroActual: nextReg };
                 await supabase.from('parish_parameters').upsert({
@@ -258,12 +215,6 @@ const ConfirmationNewPage = () => {
             setIsSubmitting(false);
         }
     };
-
-    // 🚀 LÓGICA DE FILTRADO PARA BOLETAS
-    const filteredReported = reportedConfirmations.filter(c => {
-        const fullName = `${c.nombres || ''} ${c.apellidos || ''}`.toLowerCase();
-        return fullName.includes(searchTerm.toLowerCase());
-    });
 
     if (isSuccess) {
         return (
@@ -295,9 +246,9 @@ const ConfirmationNewPage = () => {
     );
 
     return (
-        <div className="bg-gray-50 min-h-screen">
+        <div className="print:hidden bg-gray-50 min-h-screen">
             <DashboardLayout entityName={nombreParroquia}>
-                <div className="print:hidden max-w-5xl mx-auto pb-20 pt-6">
+                <div className="max-w-5xl mx-auto pb-20 pt-6">
                     <datalist id="lista-parrocos">
                         {parrocosSugeridos.map((nombre, index) => <option key={index} value={nombre} />)}
                     </datalist>
@@ -306,231 +257,147 @@ const ConfirmationNewPage = () => {
                         <div className="flex items-center gap-4">
                             <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-full w-12 h-12 p-0 bg-white border border-gray-200 text-gray-400 hover:text-gray-900 hover:bg-gray-100 shadow-sm transition-all"><X className="w-5 h-5"/></Button>
                             <div>
-                                <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif uppercase">Inscripción Previa</h1>
-                                <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest">Confirmación • Borrador con Sincronización</p>
+                                <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif uppercase">Inscripción Previa (Confirmación)</h1>
+                                <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest">Borrador Seguro con Auto-Sincronización</p>
                             </div>
-                        </div>
-
-                        {/* 🚀 CONTROLES DE PESTAÑAS */}
-                        <div className="bg-gray-200/50 p-1.5 rounded-[1.5rem] border flex items-center gap-1 w-max">
-                            <button onClick={() => setActiveTab('new')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all", activeTab === 'new' ? "bg-white text-red-600 shadow-lg border border-red-100" : "text-gray-500 hover:bg-gray-200")}>
-                                <PenTool className="w-4 h-4 inline mr-2" /> Nuevo Borrador
-                            </button>
-                            <button onClick={() => setActiveTab('reported')} className={cn("px-6 py-3 text-[10px] font-black uppercase rounded-xl transition-all", activeTab === 'reported' ? "bg-red-600 text-white shadow-lg shadow-red-900/20" : "text-gray-500 hover:bg-gray-200")}>
-                                <FileText className="w-4 h-4 inline mr-2" /> Boletas Emitidas
-                            </button>
                         </div>
                     </div>
 
-                    {/* 🚀 VISTA 1: FORMULARIO NUEVO */}
-                    {activeTab === 'new' && (
-                        <form onSubmit={handleSubmit} className="animate-in fade-in duration-500 bg-white rounded-[2.5rem] shadow-2xl shadow-red-900/5 border border-gray-100 overflow-hidden relative">
-                            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#D4AF37] to-red-600"></div>
-                            <div className="p-12 space-y-10">
-                                
-                                <section>
-                                    <SectionHeader number="01" title="Archivo y Control (Automático)" icon={Hash} />
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-slate-50 p-8 rounded-[2rem] border border-slate-100">
-                                        <div><label className={labelClass}>Nº Registro Previo</label><input type="text" name="numeroRegistro" value={formData.numeroRegistro} disabled className={`${inputClass} text-center cursor-not-allowed opacity-80 text-red-600`} /></div>
-                                        <div><label className={labelClass}>Fecha Inscripción</label><input type="date" name="fechaInscripcion" value={formData.fechaInscripcion} onChange={handleChange} className={inputClass} /></div>
-                                        <div className="md:col-span-2 flex items-center px-4">
-                                            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest leading-relaxed"><AlertCircle className="w-4 h-4 inline-block mr-2 mb-0.5 text-amber-500" /> Libro, Folio y Acta se asignarán al asentar oficialmente.</p>
-                                        </div>
+                    <form onSubmit={handleSubmit} className="bg-white rounded-[2.5rem] shadow-2xl shadow-red-900/5 border border-gray-100 overflow-hidden relative">
+                        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#D4AF37] to-red-600"></div>
+                        <div className="p-12 space-y-10">
+                            
+                            <section>
+                                <SectionHeader number="01" title="Archivo y Control (Automático)" icon={Hash} />
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 bg-slate-50 p-8 rounded-[2rem] border border-slate-100">
+                                    <div><label className={labelClass}>Nº Registro Previo</label><input type="text" name="numeroRegistro" value={formData.numeroRegistro} disabled className={`${inputClass} text-center cursor-not-allowed opacity-80 text-red-600`} /></div>
+                                    <div><label className={labelClass}>Fecha Inscripción</label><input type="date" name="fechaInscripcion" value={formData.fechaInscripcion} onChange={handleChange} className={inputClass} /></div>
+                                    <div className="md:col-span-2 flex items-center px-4">
+                                        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest leading-relaxed"><AlertCircle className="w-4 h-4 inline-block mr-2 mb-0.5 text-amber-500" /> Libro, Folio y Acta se asignarán al asentar oficialmente.</p>
                                     </div>
-                                </section>
+                                </div>
+                            </section>
 
-                                <section>
-                                    <SectionHeader number="02" title="Datos de la Celebración" icon={Calendar} />
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-                                        <div><label className={labelClass}>Fecha Confirmación</label><input type="date" name="fechaSacramento" required value={formData.fechaSacramento} onChange={handleChange} className={inputClass} /></div>
-                                        <div><label className={labelClass}>Hora Confirmación</label><input type="time" name="hora" value={formData.hora} onChange={handleChange} className={inputClass} /></div>
-                                        <div><label className={labelClass}>Parroquia / Lugar</label><input type="text" name="lugarSacramento" required value={formData.lugarSacramento} onChange={handleChange} className={inputClass} /></div>
-                                    </div>
-                                </section>
+                            <section>
+                                <SectionHeader number="02" title="Datos de la Celebración" icon={Calendar} />
+                                {/* 🚀 CAMBIO A 3 COLUMNAS PARA INCLUIR LA HORA */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+                                    <div><label className={labelClass}>Fecha Confirmación</label><input type="date" name="fechaSacramento" required value={formData.fechaSacramento} onChange={handleChange} className={inputClass} /></div>
+                                    <div><label className={labelClass}>Hora Confirmación</label><input type="time" name="hora" value={formData.hora} onChange={handleChange} className={inputClass} /></div>
+                                    <div><label className={labelClass}>Parroquia / Lugar</label><input type="text" name="lugarSacramento" required value={formData.lugarSacramento} onChange={handleChange} className={inputClass} /></div>
+                                </div>
+                            </section>
 
-                                <section>
-                                    <div className="flex justify-between items-center mb-8 border-b border-gray-100 pb-3 mt-10 first:mt-2">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-2xl bg-red-600 text-white flex items-center justify-center text-xs font-black shadow-lg shadow-red-900/20">03</div>
-                                            <h3 className="text-sm font-black text-gray-800 uppercase tracking-[0.2em] flex items-center gap-2"><User className="w-4 h-4 text-[#D4AF37]" /> Identidad del Confirmado</h3>
-                                        </div>
-                                        <Button type="button" variant="outline" onClick={() => setIsSearchModalOpen(true)} className="border-[#D4AF37] text-[#D4AF37] hover:bg-yellow-50 h-8 text-xs font-bold uppercase tracking-widest px-4 rounded-xl shadow-sm">
-                                            <Search className="w-3.5 h-3.5 mr-2" /> Buscar Partida Origen
-                                        </Button>
+                            <section>
+                                <div className="flex justify-between items-center mb-8 border-b border-gray-100 pb-3 mt-10 first:mt-2">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-2xl bg-red-600 text-white flex items-center justify-center text-xs font-black shadow-lg shadow-red-900/20">03</div>
+                                        <h3 className="text-sm font-black text-gray-800 uppercase tracking-[0.2em] flex items-center gap-2"><User className="w-4 h-4 text-[#D4AF37]" /> Identidad del Confirmado</h3>
                                     </div>
-                                    
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
-                                        <div><label className={labelClass}>Apellidos</label><input type="text" name="apellidos" required value={formData.apellidos} onChange={handleChange} className={`${inputClass} text-lg`} /></div>
-                                        <div><label className={labelClass}>Nombres</label><input type="text" name="nombres" required value={formData.nombres} onChange={handleChange} className={`${inputClass} text-lg`} /></div>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-                                        <div>
-                                            <label className={labelClass}>Sexo</label>
-                                            <select name="sexo" required value={formData.sexo} onChange={handleChange} className={inputClass}>
-                                                <option value="">SELECCIONE...</option>
-                                                <option value="MASCULINO">MASCULINO</option>
-                                                <option value="FEMENINO">FEMENINO</option>
-                                            </select>
-                                        </div>
-                                        <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="fechaNacimiento" required value={formData.fechaNacimiento} onChange={handleChange} className={inputClass} /></div>
-                                        <div>
-                                            <label className={labelClass}>Edad Conf.</label>
-                                            <div className="relative">
-                                                <input type="number" name="edad" value={formData.edad} onChange={handleChange} className={`${inputClass} pr-12`} />
-                                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">AÑOS</span>
-                                            </div>
-                                        </div>
-                                        <div><label className={labelClass}>Dirección</label><input type="text" name="direccion" value={formData.direccion} onChange={handleChange} className={inputClass} /></div>
-                                    </div>
-                                </section>
-
-                                <section>
-                                    <SectionHeader number="04" title="Filiación e Identidad" icon={Users} />
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                        <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-5">
-                                            <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Padre</p>
-                                            <div><label className={labelClass}>Nombre del Padre</label><input type="text" name="nombrePadre" value={formData.nombrePadre} onChange={handleChange} className={inputClass} /></div>
-                                        </div>
-                                        <div className="bg-pink-50/30 p-8 rounded-[2rem] border border-pink-100/50 space-y-5">
-                                            <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Madre</p>
-                                            <div><label className={labelClass}>Nombre de la Madre</label><input type="text" name="nombreMadre" value={formData.nombreMadre} onChange={handleChange} className={inputClass} /></div>
-                                        </div>
-                                    </div>
-                                </section>
-
-                                <section>
-                                    <SectionHeader number="05" title="Registro de Bautismo Origen" icon={Droplet} />
-                                    <div className="space-y-6">
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                            <div>
-                                                <label className={labelClass}>Lugar y Parroquia de Bautismo</label>
-                                                <ChurchLocationAutocomplete 
-                                                    value={formData.lugarBautismo} 
-                                                    onChange={(val) => {
-                                                        if (typeof val === 'object' && val !== null) {
-                                                            setFormData(prev => ({
-                                                                ...prev, 
-                                                                lugarBautismo: (val.nombre || val.name || '').toUpperCase(),
-                                                                codigoBautizo: (val.codigo || val.code || prev.codigoBautizo)
-                                                            }));
-                                                        } else {
-                                                            setFormData(prev => ({...prev, lugarBautismo: String(val).toUpperCase()}));
-                                                        }
-                                                    }}
-                                                    placeholder="Buscar iglesia y ciudad..."
-                                                />
-                                            </div>
-                                            <div><label className={labelClass}>Código de Bautizo</label><input type="text" name="codigoBautizo" value={formData.codigoBautizo} onChange={handleChange} className={inputClass} placeholder="Ej. 000000" /></div>
-                                        </div>
-                                        <div className="grid grid-cols-3 gap-6 bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                                            <div><label className={labelClass}>Libro Baut.</label><input name="libroBautismo" value={formData.libroBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
-                                            <div><label className={labelClass}>Folio Baut.</label><input name="folioBautismo" value={formData.folioBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
-                                            <div><label className={labelClass}>Acta Baut.</label><input name="numeroBautismo" value={formData.numeroBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
-                                        </div>
-                                    </div>
-                                </section>
-
-                                <section>
-                                    <SectionHeader number="06" title="Ministros y Testigos" icon={PenTool} />
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-6">
-                                        <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input type="text" name="ministro" required value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} placeholder="EXCMO. MONS..." /></div>
-                                        <div><label className={labelClass}>Párroco que Da Fe</label><input type="text" name="daFe" required value={formData.daFe} onChange={handleChange} className={inputClass} list="lista-parrocos" /></div>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                        <div><label className={labelClass}>Padrino / Madrina</label><input type="text" name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
-                                        <div><label className={labelClass}>Responsable</label><input type="text" name="responsable" value={formData.responsable} onChange={handleChange} className={`${inputClass} py-5`} placeholder="QUIEN SOLICITA / ACUDIENTE" /></div>
-                                    </div>
-                                </section>
-
-                                <section>
-                                    <SectionHeader number="07" title="Observaciones" icon={BookOpen} />
-                                    <div>
-                                        <label className={labelClass}>Nota Marginal / Observaciones</label>
-                                        <textarea name="notaMarginal" value={formData.notaMarginal} onChange={handleChange} className={`${inputClass} h-24 resize-none font-mono text-xs`} />
-                                    </div>
-                                </section>
-
-                                <div className="flex justify-end gap-4 pt-8 border-t border-gray-100">
-                                    <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] tracking-widest hover:bg-gray-50 transition-all">Cancelar</Button>
-                                    <Button type="submit" disabled={isSubmitting} className="bg-gradient-to-r from-red-600 to-[#8b0000] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl transition-all transform active:scale-95">
-                                        {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Save className="w-5 h-5 mr-2" />} Generar Borrador
+                                    <Button type="button" variant="outline" onClick={() => setIsSearchModalOpen(true)} className="border-[#D4AF37] text-[#D4AF37] hover:bg-yellow-50 h-8 text-xs font-bold uppercase tracking-widest px-4 rounded-xl shadow-sm">
+                                        <Search className="w-3.5 h-3.5 mr-2" /> Buscar Partida Origen
                                     </Button>
                                 </div>
-                            </div>
-                        </form>
-                    )}
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
+                                    <div><label className={labelClass}>Apellidos</label><input type="text" name="apellidos" required value={formData.apellidos} onChange={handleChange} className={`${inputClass} text-lg`} /></div>
+                                    <div><label className={labelClass}>Nombres</label><input type="text" name="nombres" required value={formData.nombres} onChange={handleChange} className={`${inputClass} text-lg`} /></div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+                                    <div>
+                                        <label className={labelClass}>Sexo</label>
+                                        <select name="sexo" required value={formData.sexo} onChange={handleChange} className={inputClass}>
+                                            <option value="">SELECCIONE...</option>
+                                            <option value="MASCULINO">MASCULINO</option>
+                                            <option value="FEMENINO">FEMENINO</option>
+                                        </select>
+                                    </div>
+                                    <div><label className={labelClass}>Fecha de Nacimiento</label><input type="date" name="fechaNacimiento" required value={formData.fechaNacimiento} onChange={handleChange} className={inputClass} /></div>
+                                    <div>
+                                        <label className={labelClass}>Edad Conf.</label>
+                                        <div className="relative">
+                                            <input type="number" name="edad" value={formData.edad} onChange={handleChange} className={`${inputClass} pr-12`} />
+                                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">AÑOS</span>
+                                        </div>
+                                    </div>
+                                    <div><label className={labelClass}>Dirección</label><input type="text" name="direccion" value={formData.direccion} onChange={handleChange} className={inputClass} /></div>
+                                </div>
+                            </section>
 
-                    {/* 🚀 VISTA 2: LISTA DE BOLETAS EMITIDAS */}
-                    {activeTab === 'reported' && (
-                        <div className="animate-in fade-in duration-500 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden min-h-[400px]">
-                            <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-50/50">
+                            <section>
+                                <SectionHeader number="04" title="Filiación e Identidad" icon={Users} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                    <div className="bg-blue-50/30 p-8 rounded-[2rem] border border-blue-100/50 space-y-5">
+                                        <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest">Padre</p>
+                                        <div><label className={labelClass}>Nombre del Padre</label><input type="text" name="nombrePadre" value={formData.nombrePadre} onChange={handleChange} className={inputClass} /></div>
+                                    </div>
+                                    <div className="bg-pink-50/30 p-8 rounded-[2rem] border border-pink-100/50 space-y-5">
+                                        <p className="text-[10px] font-black text-pink-800 uppercase tracking-widest">Madre</p>
+                                        <div><label className={labelClass}>Nombre de la Madre</label><input type="text" name="nombreMadre" value={formData.nombreMadre} onChange={handleChange} className={inputClass} /></div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section>
+                                <SectionHeader number="05" title="Registro de Bautismo Origen" icon={Droplet} />
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <label className={labelClass}>Lugar y Parroquia de Bautismo</label>
+                                            <ChurchLocationAutocomplete 
+                                                value={formData.lugarBautismo} 
+                                                onChange={(val) => {
+                                                    if (typeof val === 'object' && val !== null) {
+                                                        setFormData(prev => ({
+                                                            ...prev, 
+                                                            lugarBautismo: (val.nombre || val.name || '').toUpperCase(),
+                                                            codigoBautizo: (val.codigo || val.code || prev.codigoBautizo)
+                                                        }));
+                                                    } else {
+                                                        setFormData(prev => ({...prev, lugarBautismo: String(val).toUpperCase()}));
+                                                    }
+                                                }}
+                                                placeholder="Buscar iglesia y ciudad..."
+                                            />
+                                        </div>
+                                        <div><label className={labelClass}>Código de Bautizo</label><input type="text" name="codigoBautizo" value={formData.codigoBautizo} onChange={handleChange} className={inputClass} placeholder="Ej. 000000" /></div>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-6 bg-slate-50 p-6 rounded-3xl border border-slate-100">
+                                        <div><label className={labelClass}>Libro Baut.</label><input name="libroBautismo" value={formData.libroBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
+                                        <div><label className={labelClass}>Folio Baut.</label><input name="folioBautismo" value={formData.folioBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
+                                        <div><label className={labelClass}>Acta Baut.</label><input name="numeroBautismo" value={formData.numeroBautismo} onChange={handleChange} className={`${inputClass} text-center font-mono`} /></div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section>
+                                <SectionHeader number="06" title="Ministros y Testigos" icon={PenTool} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-6">
+                                    <div><label className={labelClass}>Ministro (Obispo / Delegado)</label><input type="text" name="ministro" required value={formData.ministro} onChange={handleChange} className={`${inputClass} border-l-8 border-l-red-600`} placeholder="EXCMO. MONS..." /></div>
+                                    <div><label className={labelClass}>Párroco que Da Fe</label><input type="text" name="daFe" required value={formData.daFe} onChange={handleChange} className={inputClass} list="lista-parrocos" /></div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                    <div><label className={labelClass}>Padrino / Madrina</label><input type="text" name="padrinos" value={formData.padrinos} onChange={handleChange} className={`${inputClass} py-5`} placeholder="NOMBRES SEPARADOS POR COMAS" /></div>
+                                    <div><label className={labelClass}>Responsable</label><input type="text" name="responsable" value={formData.responsable} onChange={handleChange} className={`${inputClass} py-5`} placeholder="QUIEN SOLICITA / ACUDIENTE" /></div>
+                                </div>
+                            </section>
+
+                            <section>
+                                <SectionHeader number="07" title="Observaciones" icon={BookOpen} />
                                 <div>
-                                    <h3 className="text-sm font-black text-gray-800 uppercase tracking-widest flex items-center gap-2">
-                                        <FileText className="w-4 h-4 text-red-600" /> Boletas Pre-Impresas
-                                    </h3>
+                                    <label className={labelClass}>Nota Marginal / Observaciones</label>
+                                    <textarea name="notaMarginal" value={formData.notaMarginal} onChange={handleChange} className={`${inputClass} h-24 resize-none font-mono text-xs`} />
                                 </div>
-                                <div className="relative w-full md:w-96">
-                                    <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                                    <input 
-                                        type="text" 
-                                        placeholder="BUSCAR CONFIRMADO POR NOMBRE O APELLIDO..." 
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full h-11 pl-11 pr-4 text-xs font-bold text-gray-700 uppercase border border-gray-200 rounded-xl focus:ring-4 focus:ring-red-600/10 focus:border-red-600 outline-none transition-all shadow-sm"
-                                    />
-                                </div>
-                            </div>
+                            </section>
 
-                            {isLoadingReported ? (
-                                <div className="flex justify-center py-20"><Loader2 className="animate-spin text-red-600 w-8 h-8" /></div>
-                            ) : filteredReported.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center min-h-[300px] text-center p-12 border-t border-dashed border-gray-100">
-                                    <Search className="w-16 h-16 text-gray-200 mb-4" />
-                                    <h3 className="text-xl font-bold uppercase text-gray-400">Sin Resultados</h3>
-                                    <p className="text-xs text-gray-400 mt-1">No se encontraron boletas de confirmación con ese criterio.</p>
-                                </div>
-                            ) : (
-                                <table className="w-full text-left">
-                                    <thead className="bg-gray-50 border-b font-black text-[10px] text-gray-400 uppercase">
-                                        <tr>
-                                            <th className="px-8 py-6 w-24">Estado</th>
-                                            <th className="px-6 py-6">Confirmado</th>
-                                            <th className="px-6 py-6">Fecha Confirmación</th>
-                                            <th className="px-6 py-6 text-right">Acción</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        {filteredReported.map(b => (
-                                            <tr key={b.id} className="hover:bg-red-50/30 transition-colors">
-                                                <td className="px-8 py-4">
-                                                    <span className="text-[8px] font-black bg-red-50 text-red-600 border border-red-200 px-3 py-1.5 rounded-full uppercase flex items-center w-max gap-1">
-                                                        <CheckCircle2 className="w-3 h-3" /> Reportado
-                                                    </span>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <p className="font-black uppercase text-xs text-gray-800">{b.apellidos}, {b.nombres}</p>
-                                                    <p className="text-[9px] font-bold text-gray-400 uppercase">#{b.numeroRegistro || '---'}</p>
-                                                </td>
-                                                <td className="px-6 py-4 text-[11px] font-black uppercase text-gray-600">
-                                                    {b.fechaSacramento}
-                                                </td>
-                                                <td className="px-6 py-4 text-right">
-                                                    <Button 
-                                                        variant="outline" 
-                                                        size="sm" 
-                                                        onClick={() => handlePrintReported(b)} 
-                                                        className="text-red-600 border-red-200 hover:bg-red-50 rounded-xl uppercase text-[10px] font-bold tracking-widest"
-                                                    >
-                                                        <Printer className="w-3 h-3 mr-2" /> Boleta
-                                                    </Button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            )}
+                            <div className="flex justify-end gap-4 pt-8 border-t border-gray-100">
+                                <Button type="button" variant="ghost" onClick={() => navigate(-1)} className="px-10 py-8 rounded-2xl text-gray-400 font-black uppercase text-[10px] tracking-widest hover:bg-gray-50 transition-all">Cancelar</Button>
+                                <Button type="submit" disabled={isSubmitting} className="bg-gradient-to-r from-red-600 to-[#8b0000] text-white px-12 py-8 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl transition-all transform active:scale-95">
+                                    {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Save className="w-5 h-5 mr-2" />} Generar Borrador
+                                </Button>
+                            </div>
                         </div>
-                    )}
+                    </form>
                 </div>
             </DashboardLayout>
             
@@ -539,10 +406,6 @@ const ConfirmationNewPage = () => {
                 onClose={() => setIsSearchModalOpen(false)}
                 onSelectPartida={handleSelectBaptismPartida}
             />
-
-            <div className="hidden print:block bg-white">
-                 {(printingRecord) && <ConfirmationTicket confirmationData={printingRecord} parishInfo={parishInfo} />}
-            </div>
         </div>
     );
 };
