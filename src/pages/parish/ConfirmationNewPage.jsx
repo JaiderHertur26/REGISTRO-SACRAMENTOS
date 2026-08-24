@@ -5,17 +5,18 @@ import { useAuth } from '@/context/AuthContext';
 import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import { cn } from '@/lib/utils';
 import { 
-    Save, X, Calendar, User, Users, BookOpen, PenTool, 
-    CheckCircle2, Loader2, Hash, AlertCircle, Search, Droplet,
-    FileText, Printer
+    ChevronLeft, ChevronRight, Save, 
+    CheckCircle2, AlertCircle, Loader2, Printer,
+    LayoutList, BookOpenCheck,
+    Layers, CheckSquare, Square, Lock, FileText, Search, Droplet, Hash, Calendar, User, Users, PenTool
 } from 'lucide-react';
 import ConfirmationTicket from '@/components/ConfirmationTicket';
 import ChurchLocationAutocomplete from '@/components/ChurchLocationAutocomplete';
 import SearchBaptismPartidaModal from '@/components/modals/SearchBaptismPartidaModal';
 import { calculateNextRegistro } from '@/services/sacramentParametersService';
 import { supabase } from '@/lib/supabaseClient'; 
-import { cn } from '@/lib/utils';
 
 const ConfirmationNewPage = () => {
     const { user } = useAuth(); 
@@ -30,11 +31,12 @@ const ConfirmationNewPage = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
     
-    // 🚀 LÓGICA DE PESTAÑAS
-    const [activeTab, setActiveTab] = useState('new'); // 'new' o 'reported'
+    // 🚀 ESTADOS DE PESTAÑAS Y BUSCADOR REPARADOS
+    const [activeTab, setActiveTab] = useState('new'); 
     const [reportedConfirmations, setReportedConfirmations] = useState([]);
     const [isLoadingReported, setIsLoadingReported] = useState(false);
     const [printingRecord, setPrintingRecord] = useState(null);
+    const [searchTerm, setSearchTerm] = useState('');
 
     const [ticketData, setTicketData] = useState(null);
     const [parishInfo, setParishInfo] = useState(null); 
@@ -229,7 +231,6 @@ const ConfirmationNewPage = () => {
             const nextReg = calculateNextRegistro(currentRegistro);
             const dataToSave = { ...formData, numeroRegistro: nextReg };
 
-            // 🚀 INYECCIÓN DIRECTA A LA TABLA DE PENDIENTES
             const { error: insertError } = await supabase.from('pending_confirmations').insert([{
                 parish_id: parishId,
                 raw_data: dataToSave,
@@ -239,7 +240,6 @@ const ConfirmationNewPage = () => {
 
             if (insertError) throw insertError;
 
-            // 🚀 ACTUALIZAR LA NUBE: Guardar el nuevo Número de Registro
             if (fullParamsCache) {
                 const updatedParams = { ...fullParamsCache, numeroRegistroActual: nextReg };
                 await supabase.from('parish_parameters').upsert({
@@ -258,6 +258,12 @@ const ConfirmationNewPage = () => {
             setIsSubmitting(false);
         }
     };
+
+    // 🚀 LÓGICA DE FILTRADO PARA BOLETAS
+    const filteredReported = reportedConfirmations.filter(c => {
+        const fullName = `${c.nombres || ''} ${c.apellidos || ''}`.toLowerCase();
+        return fullName.includes(searchTerm.toLowerCase());
+    });
 
     if (isSuccess) {
         return (
@@ -300,8 +306,8 @@ const ConfirmationNewPage = () => {
                         <div className="flex items-center gap-4">
                             <Button variant="ghost" onClick={() => navigate(-1)} className="rounded-full w-12 h-12 p-0 bg-white border border-gray-200 text-gray-400 hover:text-gray-900 hover:bg-gray-100 shadow-sm transition-all"><X className="w-5 h-5"/></Button>
                             <div>
-                                <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif uppercase">Inscripción Previa (Confirmación)</h1>
-                                <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest">Borrador Seguro con Auto-Sincronización</p>
+                                <h1 className="text-4xl font-black text-gray-900 tracking-tight font-serif uppercase">Inscripción Previa</h1>
+                                <p className="text-gray-500 font-medium mt-2 uppercase text-[11px] tracking-widest">Confirmación • Borrador con Sincronización</p>
                             </div>
                         </div>
 
@@ -457,13 +463,31 @@ const ConfirmationNewPage = () => {
                     {/* 🚀 VISTA 2: LISTA DE BOLETAS EMITIDAS */}
                     {activeTab === 'reported' && (
                         <div className="animate-in fade-in duration-500 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden min-h-[400px]">
+                            <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-50/50">
+                                <div>
+                                    <h3 className="text-sm font-black text-gray-800 uppercase tracking-widest flex items-center gap-2">
+                                        <FileText className="w-4 h-4 text-red-600" /> Boletas Pre-Impresas
+                                    </h3>
+                                </div>
+                                <div className="relative w-full md:w-96">
+                                    <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="BUSCAR CONFIRMADO POR NOMBRE O APELLIDO..." 
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="w-full h-11 pl-11 pr-4 text-xs font-bold text-gray-700 uppercase border border-gray-200 rounded-xl focus:ring-4 focus:ring-red-600/10 focus:border-red-600 outline-none transition-all shadow-sm"
+                                    />
+                                </div>
+                            </div>
+
                             {isLoadingReported ? (
                                 <div className="flex justify-center py-20"><Loader2 className="animate-spin text-red-600 w-8 h-8" /></div>
-                            ) : reportedConfirmations.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center min-h-[400px] text-center p-12">
-                                    <CheckCircle2 className="w-16 h-16 text-green-200 mb-4" />
-                                    <h3 className="text-xl font-bold uppercase text-gray-400">Sin Boletas</h3>
-                                    <p className="text-xs text-gray-400 mt-1">Aún no hay registros reportados para emitir boletas.</p>
+                            ) : filteredReported.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center min-h-[300px] text-center p-12 border-t border-dashed border-gray-100">
+                                    <Search className="w-16 h-16 text-gray-200 mb-4" />
+                                    <h3 className="text-xl font-bold uppercase text-gray-400">Sin Resultados</h3>
+                                    <p className="text-xs text-gray-400 mt-1">No se encontraron boletas de confirmación con ese criterio.</p>
                                 </div>
                             ) : (
                                 <table className="w-full text-left">
@@ -476,7 +500,7 @@ const ConfirmationNewPage = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
-                                        {reportedConfirmations.map(b => (
+                                        {filteredReported.map(b => (
                                             <tr key={b.id} className="hover:bg-red-50/30 transition-colors">
                                                 <td className="px-8 py-4">
                                                     <span className="text-[8px] font-black bg-red-50 text-red-600 border border-red-200 px-3 py-1.5 rounded-full uppercase flex items-center w-max gap-1">
@@ -510,14 +534,12 @@ const ConfirmationNewPage = () => {
                 </div>
             </DashboardLayout>
             
-            {/* Modal Buscador de Partidas */}
             <SearchBaptismPartidaModal 
                 isOpen={isSearchModalOpen}
                 onClose={() => setIsSearchModalOpen(false)}
                 onSelectPartida={handleSelectBaptismPartida}
             />
 
-            {/* Impresión oculta de boletas desde la tabla */}
             <div className="hidden print:block bg-white">
                  {(printingRecord) && <ConfirmationTicket confirmationData={printingRecord} parishInfo={parishInfo} />}
             </div>

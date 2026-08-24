@@ -38,7 +38,7 @@ const ConfirmationSentarRegistrosPage = () => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedIds, setSelectedIds] = useState([]);
     const [printingRecord, setPrintingRecord] = useState(null); 
-    const [searchTerm, setSearchTerm] = useState('');
+    const [searchTerm, setSearchTerm] = useState(''); 
     
     const [nextNumbers, setNextNumbers] = useState({ book: '0001', page: '0001', entry: '0001' });
     const [fullParamsCache, setFullParamsCache] = useState(null); 
@@ -81,7 +81,7 @@ const ConfirmationSentarRegistrosPage = () => {
             if (!tempError && tempData && tempData.length > 0) {
                 const cloudPending = tempData.map(pb => {
                     const raw = typeof pb.raw_data === 'string' ? JSON.parse(pb.raw_data) : (pb.raw_data || {});
-                    return { ...raw, id: pb.id, status: 'pending', reportado: pb.reportado };
+                    return { ...raw, id: pb.id, status: 'pending', reportado: pb.reportado }; 
                 });
                 
                 recordsMapped = cloudPending.map(r => {
@@ -149,24 +149,23 @@ const ConfirmationSentarRegistrosPage = () => {
     };
 
     useEffect(() => { 
-        if (resolvedParishId) loadData(); 
+        if (resolvedParishId) {
+            loadData(); 
+        }
     }, [resolvedParishId]);
 
-    const currentConfirmation = pendingConfirmations[currentIndex];
-    const currentIsFuture = currentConfirmation ? isDateInFuture(currentConfirmation.fechaSacramento) : false;
-
-    // 🚀 FUNCIÓN AUTO-ENLACE: Busca el Bautismo y le inyecta la nota marginal
-    const inyectarNotaMarginal = async (confData, targetBook, targetFolio, targetNumero) => {
+    // 🚀 FUNCIÓN AUTO-ENLACE: MÁQUINA CREADORA DE NOTAS MARGINALES CRUZADAS
+    const prepararNotaMarginal = async (confData, targetBook, targetFolio, targetNumero) => {
         try {
-            const raw = confData.raw_data || {};
-            // Buscamos si el JSON trajo datos de Bautismo
+            const raw = confData.raw_data || confData || {};
+            // Extrae los datos del bautismo apuntado por el confirmado
             const bLibro = String(raw.libroBautismo || raw["LIBRO DE BAUTIZO"] || '').padStart(4, '0');
             const bFolio = String(raw.folioBautismo || raw["FOLIO DE BAUTIZO"] || '').padStart(4, '0');
             const bNumero = String(raw.numeroBautismo || raw["NÚMERO DE BAUTIZO"] || '').padStart(4, '0');
 
-            if (!bLibro || bLibro === '0000' || bLibro === '---') return;
+            if (!bLibro || bLibro === '0000' || bLibro === '---') return null;
 
-            // Buscamos la partida de bautismo en la BD
+            // Buscamos si existe ese bautismo en la BD
             let query = supabase.from('baptisms').select('id').eq('parish_id', resolvedParishId).eq('book_number', bLibro);
             if (bFolio && bFolio !== '0000' && bFolio !== '---') query = query.eq('folio', bFolio);
             if (bNumero && bNumero !== '0000' && bNumero !== '---') query = query.eq('number', bNumero);
@@ -174,13 +173,14 @@ const ConfirmationSentarRegistrosPage = () => {
             const { data: bData } = await query.single();
 
             if (bData && bData.id) {
-                // Si la encontró, redactamos e inyectamos la nota
+                // Redactamos la nota según la plantilla
                 const storedTemplates = localStorage.getItem(`marginalNotesTemplates_${resolvedParishId}`);
                 const templates = storedTemplates ? JSON.parse(storedTemplates) : {};
                 const templateNota = templates.bautismo_confirmado || "EL [FECHA_CONFIRMACION] FUE CONFIRMADO(A) EN LA PARROQUIA [PARROQUIA_CONFIRMACION]. DIÓCESIS DE [DIOCESIS_CONFIRMACION]. L-[LIBRO_CONF], F-[FOLIO_CONF], N-[NUMERO_CONF].";
 
-                const d = new Date((confData.fechaSacramento || confData.celebration_date).includes('T') ? (confData.fechaSacramento || confData.celebration_date) : `${confData.fechaSacramento || confData.celebration_date}T12:00:00`);
-                const dateStr = !isNaN(d.getTime()) ? `${d.getDate()} DE ${d.toLocaleString('es-CO', { month: 'long' }).toUpperCase()} DE ${d.getFullYear()}` : confData.fechaSacramento;
+                const fechaSac = confData.fechaSacramento || confData.celebration_date || '';
+                const d = fechaSac ? new Date(fechaSac.includes('T') ? fechaSac : `${fechaSac}T12:00:00`) : new Date();
+                const dateStr = !isNaN(d.getTime()) ? `${d.getDate()} DE ${d.toLocaleString('es-CO', { month: 'long' }).toUpperCase()} DE ${d.getFullYear()}` : fechaSac;
 
                 const notaRedactada = templateNota
                     .replace('[FECHA_CONFIRMACION]', dateStr)
@@ -190,7 +190,7 @@ const ConfirmationSentarRegistrosPage = () => {
                     .replace('[FOLIO_CONF]', String(targetFolio).padStart(4, '0'))
                     .replace('[NUMERO_CONF]', String(targetNumero).padStart(4, '0'));
 
-                await supabase.from('marginal_notes').insert({
+                return {
                     id: generateUUID(),
                     sacrament_id: bData.id,
                     sacrament_type: 'bautismo',
@@ -198,13 +198,25 @@ const ConfirmationSentarRegistrosPage = () => {
                     note_date: new Date().toISOString().split('T')[0],
                     content: notaRedactada,
                     parish_id: resolvedParishId
-                });
+                };
             }
         } catch (err) {
-            console.error("Error inyectando nota marginal cruzada:", err);
+            console.error("Error preparando nota marginal cruzada:", err);
         }
+        return null;
     };
 
+
+    const currentConfirmation = pendingConfirmations[currentIndex];
+    const currentIsFuture = currentConfirmation ? isDateInFuture(currentConfirmation.fechaSacramento) : false;
+
+    const handleReprint = () => {
+        if (!currentConfirmation) return;
+        setPrintingRecord(null); 
+        setTimeout(() => window.print(), 300);
+    };
+
+    // 🚀 LÓGICA DE ASENTAMIENTO INDIVIDUAL CON AUTO-ENLACE
     const handleRegisterIndividual = async () => {
         if (!currentConfirmation || isSaving || currentIsFuture) return;
 
@@ -241,7 +253,10 @@ const ConfirmationSentarRegistrosPage = () => {
             if (insertError) throw insertError;
 
             // 🚀 EJECUTA EL AUTO-ENLACE MÁGICO DE BAUTISMO
-            await inyectarNotaMarginal(currentConfirmation, nextNumbers.book, nextNumbers.page, nextNumbers.entry);
+            const notaCruza = await prepararNotaMarginal(currentConfirmation, nextNumbers.book, nextNumbers.page, nextNumbers.entry);
+            if (notaCruza) {
+                await supabase.from('marginal_notes').insert([notaCruza]);
+            }
 
             const { error: updateError } = await supabase.from('pending_confirmations').update({ reportado: true }).eq('id', currentConfirmation.id);
             if (updateError) throw updateError;
@@ -255,10 +270,16 @@ const ConfirmationSentarRegistrosPage = () => {
                 p.ordinarioRestartNumber
             );
 
-            const updatedParams = { ...p, ordinarioFolio: parseInt(siguiente.folio, 10), ordinarioNumero: parseInt(siguiente.numero, 10), ordinarioLibro: parseInt(siguiente.libro, 10) };
+            const updatedParams = { 
+                ...p, 
+                ordinarioFolio: parseInt(siguiente.folio, 10), 
+                ordinarioNumero: parseInt(siguiente.numero, 10), 
+                ordinarioLibro: parseInt(siguiente.libro, 10) 
+            };
+
             await updateConfirmationParameters(resolvedParishId, updatedParams);
             
-            toast({ title: "Éxito", description: "Confirmación y Nota Marginal inyectadas.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Éxito", description: "Confirmación y Nota Marginal asentadas permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
             await loadData();
             if (currentIndex >= pendingConfirmations.length - 1) setCurrentIndex(Math.max(0, pendingConfirmations.length - 2));
 
@@ -271,7 +292,9 @@ const ConfirmationSentarRegistrosPage = () => {
 
     const handleSelectAll = (checked) => {
         if (checked) {
-            const validIds = pendingConfirmations.filter(b => !isDateInFuture(b.fechaSacramento)).map(b => b.id);
+            const validIds = pendingConfirmations
+                .filter(b => !isDateInFuture(b.fechaSacramento))
+                .map(b => b.id);
             setSelectedIds(validIds);
         } else {
             setSelectedIds([]);
@@ -284,6 +307,7 @@ const ConfirmationSentarRegistrosPage = () => {
         else setSelectedIds([...selectedIds, id]);
     };
 
+    // 🚀 LÓGICA DE ASENTAMIENTO POR LOTE CON AUTO-ENLACE MASIVO
     const handleBatchConfirm = async () => {
         if (selectedIds.length === 0 || isSaving) return;
         if (!window.confirm(`¿Asentar ${selectedIds.length} registros permanentemente?`)) return;
@@ -299,6 +323,7 @@ const ConfirmationSentarRegistrosPage = () => {
             let restart = p.ordinarioRestartNumber;
 
             const recordsToInsert = [];
+            const notesToInsert = []; // Contenedor para inyectar todas las notas de golpe
 
             for (const id of selectedIds) {
                 const conf = pendingConfirmations.find(c => c.id === id);
@@ -331,8 +356,9 @@ const ConfirmationSentarRegistrosPage = () => {
                     created_at: new Date().toISOString()
                 });
 
-                // 🚀 AUTO-ENLACE DE CADA CONFIRMACIÓN CON SU BAUTISMO
-                await inyectarNotaMarginal(conf, curBook, curFolio, curEntry);
+                // 🚀 AUTO-ENLACE: Preparamos la nota marginal si el bautismo existe
+                const notaCruza = await prepararNotaMarginal(conf, curBook, curFolio, curEntry);
+                if (notaCruza) notesToInsert.push(notaCruza);
 
                 const siguiente = calculateNextConsecutive(cNumero, cFolio, cLibro, pPorFolio, restart);
                 cNumero = parseInt(siguiente.numero, 10);
@@ -340,12 +366,21 @@ const ConfirmationSentarRegistrosPage = () => {
                 cLibro = parseInt(siguiente.libro, 10);
             }
 
+            // 1. Insertar Lote en Confirmaciones
             const { error: insertError } = await supabase.from('confirmations').insert(recordsToInsert);
             if (insertError) throw insertError;
 
+            // 2. 🚀 Insertar Lote en Notas Marginales (Afecta bautismos)
+            if (notesToInsert.length > 0) {
+                const { error: notesError } = await supabase.from('marginal_notes').insert(notesToInsert);
+                if (notesError) console.error("Error inyectando notas en lote:", notesError);
+            }
+
+            // 3. Marcar Lote como Reportado (No borrar)
             const { error: updateError } = await supabase.from('pending_confirmations').update({ reportado: true }).in('id', selectedIds);
             if (updateError) throw updateError;
 
+            // 4. Actualizar Parámetros
             const updatedParams = { ...p, ordinarioFolio: cFolio, ordinarioNumero: cNumero, ordinarioLibro: cLibro };
             await updateConfirmationParameters(resolvedParishId, updatedParams);
 
