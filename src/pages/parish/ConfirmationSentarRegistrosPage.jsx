@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import ConfirmationTicket from '@/components/ConfirmationTicket';
 import { supabase } from '@/lib/supabaseClient'; 
+import { generateUUID } from '@/utils/supabaseHelpers';
 import { calculateNextConsecutive } from '@/services/sacramentParametersService';
 
 const ConfirmationSentarRegistrosPage = () => {
@@ -31,14 +32,13 @@ const ConfirmationSentarRegistrosPage = () => {
     const [resolvedParishId, setResolvedParishId] = useState(null);
     const [nombreParroquia, setNombreParroquia] = useState('PARROQUIA PADRE MISERICORDIOSO');
     
-    // 🚀 ESTADOS DE PESTAÑAS Y BUSCADOR
     const [mode, setMode] = useState('individual'); 
     const [pendingConfirmations, setPendingConfirmations] = useState([]);
-    const [reportedConfirmations, setReportedConfirmations] = useState([]); // Historial
+    const [reportedConfirmations, setReportedConfirmations] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedIds, setSelectedIds] = useState([]);
-    const [printingRecord, setPrintingRecord] = useState(null); // Para imprimir desde el historial
-    const [searchTerm, setSearchTerm] = useState(''); // 🚀 BUSCADOR
+    const [printingRecord, setPrintingRecord] = useState(null); 
+    const [searchTerm, setSearchTerm] = useState('');
     
     const [nextNumbers, setNextNumbers] = useState({ book: '0001', page: '0001', entry: '0001' });
     const [fullParamsCache, setFullParamsCache] = useState(null); 
@@ -81,7 +81,7 @@ const ConfirmationSentarRegistrosPage = () => {
             if (!tempError && tempData && tempData.length > 0) {
                 const cloudPending = tempData.map(pb => {
                     const raw = typeof pb.raw_data === 'string' ? JSON.parse(pb.raw_data) : (pb.raw_data || {});
-                    return { ...raw, id: pb.id, status: 'pending', reportado: pb.reportado }; // 🚀 Traemos la columna
+                    return { ...raw, id: pb.id, status: 'pending', reportado: pb.reportado };
                 });
                 
                 recordsMapped = cloudPending.map(r => {
@@ -107,7 +107,7 @@ const ConfirmationSentarRegistrosPage = () => {
                     return {
                         ...r,
                         id: r.id,
-                        reportado: r.reportado, // 🚀 Conservamos el estatus
+                        reportado: r.reportado,
                         numeroRegistro: r.numeroRegistro || r.inscripcionNumero || '---',
                         lugarSacramento: r.lugarSacramento || r.place || r.sacramentPlace || '---',
                         fechaSacramento: fechaSac,
@@ -117,7 +117,6 @@ const ConfirmationSentarRegistrosPage = () => {
                 });
             }
             
-            // 🚀 SEPARAMOS PENDIENTES Y REPORTADOS
             const pendientes = recordsMapped.filter(r => !r.reportado);
             const reportados = recordsMapped.filter(r => r.reportado);
 
@@ -150,21 +149,62 @@ const ConfirmationSentarRegistrosPage = () => {
     };
 
     useEffect(() => { 
-        if (resolvedParishId) {
-            loadData(); 
-        }
+        if (resolvedParishId) loadData(); 
     }, [resolvedParishId]);
 
     const currentConfirmation = pendingConfirmations[currentIndex];
     const currentIsFuture = currentConfirmation ? isDateInFuture(currentConfirmation.fechaSacramento) : false;
 
-    const handleReprint = () => {
-        if (!currentConfirmation) return;
-        setPrintingRecord(null); // Aseguramos que imprima el actual pendiente
-        setTimeout(() => window.print(), 300);
+    // 🚀 FUNCIÓN AUTO-ENLACE: Busca el Bautismo y le inyecta la nota marginal
+    const inyectarNotaMarginal = async (confData, targetBook, targetFolio, targetNumero) => {
+        try {
+            const raw = confData.raw_data || {};
+            // Buscamos si el JSON trajo datos de Bautismo
+            const bLibro = String(raw.libroBautismo || raw["LIBRO DE BAUTIZO"] || '').padStart(4, '0');
+            const bFolio = String(raw.folioBautismo || raw["FOLIO DE BAUTIZO"] || '').padStart(4, '0');
+            const bNumero = String(raw.numeroBautismo || raw["NÚMERO DE BAUTIZO"] || '').padStart(4, '0');
+
+            if (!bLibro || bLibro === '0000' || bLibro === '---') return;
+
+            // Buscamos la partida de bautismo en la BD
+            let query = supabase.from('baptisms').select('id').eq('parish_id', resolvedParishId).eq('book_number', bLibro);
+            if (bFolio && bFolio !== '0000' && bFolio !== '---') query = query.eq('folio', bFolio);
+            if (bNumero && bNumero !== '0000' && bNumero !== '---') query = query.eq('number', bNumero);
+
+            const { data: bData } = await query.single();
+
+            if (bData && bData.id) {
+                // Si la encontró, redactamos e inyectamos la nota
+                const storedTemplates = localStorage.getItem(`marginalNotesTemplates_${resolvedParishId}`);
+                const templates = storedTemplates ? JSON.parse(storedTemplates) : {};
+                const templateNota = templates.bautismo_confirmado || "EL [FECHA_CONFIRMACION] FUE CONFIRMADO(A) EN LA PARROQUIA [PARROQUIA_CONFIRMACION]. DIÓCESIS DE [DIOCESIS_CONFIRMACION]. L-[LIBRO_CONF], F-[FOLIO_CONF], N-[NUMERO_CONF].";
+
+                const d = new Date((confData.fechaSacramento || confData.celebration_date).includes('T') ? (confData.fechaSacramento || confData.celebration_date) : `${confData.fechaSacramento || confData.celebration_date}T12:00:00`);
+                const dateStr = !isNaN(d.getTime()) ? `${d.getDate()} DE ${d.toLocaleString('es-CO', { month: 'long' }).toUpperCase()} DE ${d.getFullYear()}` : confData.fechaSacramento;
+
+                const notaRedactada = templateNota
+                    .replace('[FECHA_CONFIRMACION]', dateStr)
+                    .replace('[PARROQUIA_CONFIRMACION]', (parishInfo?.nombre || nombreParroquia).toUpperCase())
+                    .replace('[DIOCESIS_CONFIRMACION]', (parishInfo?.diocesis || 'ARQUIDIÓCESIS DE BARRANQUILLA').toUpperCase())
+                    .replace('[LIBRO_CONF]', String(targetBook).padStart(4, '0'))
+                    .replace('[FOLIO_CONF]', String(targetFolio).padStart(4, '0'))
+                    .replace('[NUMERO_CONF]', String(targetNumero).padStart(4, '0'));
+
+                await supabase.from('marginal_notes').insert({
+                    id: generateUUID(),
+                    sacrament_id: bData.id,
+                    sacrament_type: 'bautismo',
+                    note_type: 'confirmacion',
+                    note_date: new Date().toISOString().split('T')[0],
+                    content: notaRedactada,
+                    parish_id: resolvedParishId
+                });
+            }
+        } catch (err) {
+            console.error("Error inyectando nota marginal cruzada:", err);
+        }
     };
 
-    // 🚀 LÓGICA DIRECTA A BASE DE DATOS: Inserta y marca como Reportado
     const handleRegisterIndividual = async () => {
         if (!currentConfirmation || isSaving || currentIsFuture) return;
 
@@ -172,7 +212,6 @@ const ConfirmationSentarRegistrosPage = () => {
         try {
             const cleanDate = (d) => (d && String(d).trim() !== '' && String(d).trim() !== '---') ? d : null;
 
-            // 1. Preparar el objeto perfecto para "confirmations"
             const finalData = {
                 parish_id: resolvedParishId,
                 book_number: nextNumbers.book,
@@ -198,15 +237,15 @@ const ConfirmationSentarRegistrosPage = () => {
                 created_at: new Date().toISOString()
             };
 
-            // 2. Insertar en la tabla oficial
             const { error: insertError } = await supabase.from('confirmations').insert([finalData]);
             if (insertError) throw insertError;
 
-            // 3. Marcar como reportado en lugar de borrar
+            // 🚀 EJECUTA EL AUTO-ENLACE MÁGICO DE BAUTISMO
+            await inyectarNotaMarginal(currentConfirmation, nextNumbers.book, nextNumbers.page, nextNumbers.entry);
+
             const { error: updateError } = await supabase.from('pending_confirmations').update({ reportado: true }).eq('id', currentConfirmation.id);
             if (updateError) throw updateError;
 
-            // 4. Actualizar Consecutivos
             const p = fullParamsCache || await getConfirmationParameters(resolvedParishId);
             const siguiente = calculateNextConsecutive(
                 parseInt(nextNumbers.entry, 10), 
@@ -216,16 +255,10 @@ const ConfirmationSentarRegistrosPage = () => {
                 p.ordinarioRestartNumber
             );
 
-            const updatedParams = { 
-                ...p, 
-                ordinarioFolio: parseInt(siguiente.folio, 10), 
-                ordinarioNumero: parseInt(siguiente.numero, 10), 
-                ordinarioLibro: parseInt(siguiente.libro, 10) 
-            };
-
+            const updatedParams = { ...p, ordinarioFolio: parseInt(siguiente.folio, 10), ordinarioNumero: parseInt(siguiente.numero, 10), ordinarioLibro: parseInt(siguiente.libro, 10) };
             await updateConfirmationParameters(resolvedParishId, updatedParams);
             
-            toast({ title: "Éxito", description: "Confirmación asentada y reportada permanentemente.", className: "bg-green-50 text-green-900 border-green-200" });
+            toast({ title: "Éxito", description: "Confirmación y Nota Marginal inyectadas.", className: "bg-green-50 text-green-900 border-green-200" });
             await loadData();
             if (currentIndex >= pendingConfirmations.length - 1) setCurrentIndex(Math.max(0, pendingConfirmations.length - 2));
 
@@ -238,9 +271,7 @@ const ConfirmationSentarRegistrosPage = () => {
 
     const handleSelectAll = (checked) => {
         if (checked) {
-            const validIds = pendingConfirmations
-                .filter(b => !isDateInFuture(b.fechaSacramento))
-                .map(b => b.id);
+            const validIds = pendingConfirmations.filter(b => !isDateInFuture(b.fechaSacramento)).map(b => b.id);
             setSelectedIds(validIds);
         } else {
             setSelectedIds([]);
@@ -253,7 +284,6 @@ const ConfirmationSentarRegistrosPage = () => {
         else setSelectedIds([...selectedIds, id]);
     };
 
-    // 🚀 LÓGICA DIRECTA SUPABASE PARA LOTE
     const handleBatchConfirm = async () => {
         if (selectedIds.length === 0 || isSaving) return;
         if (!window.confirm(`¿Asentar ${selectedIds.length} registros permanentemente?`)) return;
@@ -301,21 +331,21 @@ const ConfirmationSentarRegistrosPage = () => {
                     created_at: new Date().toISOString()
                 });
 
+                // 🚀 AUTO-ENLACE DE CADA CONFIRMACIÓN CON SU BAUTISMO
+                await inyectarNotaMarginal(conf, curBook, curFolio, curEntry);
+
                 const siguiente = calculateNextConsecutive(cNumero, cFolio, cLibro, pPorFolio, restart);
                 cNumero = parseInt(siguiente.numero, 10);
                 cFolio = parseInt(siguiente.folio, 10);
                 cLibro = parseInt(siguiente.libro, 10);
             }
 
-            // 1. Insertar Lote en Confirmaciones
             const { error: insertError } = await supabase.from('confirmations').insert(recordsToInsert);
             if (insertError) throw insertError;
 
-            // 2. Marcar Lote como Reportado (No borrar)
             const { error: updateError } = await supabase.from('pending_confirmations').update({ reportado: true }).in('id', selectedIds);
             if (updateError) throw updateError;
 
-            // 3. Actualizar Parámetros
             const updatedParams = { ...p, ordinarioFolio: cFolio, ordinarioNumero: cNumero, ordinarioLibro: cLibro };
             await updateConfirmationParameters(resolvedParishId, updatedParams);
 
@@ -330,13 +360,11 @@ const ConfirmationSentarRegistrosPage = () => {
         }
     };
 
-    // 🚀 FUNCIÓN PARA IMPRIMIR DESDE EL HISTORIAL
     const handlePrintReported = (record) => {
         setPrintingRecord(record);
         setTimeout(() => window.print(), 300);
     };
 
-    // 🚀 LÓGICA DE FILTRADO PARA EL BUSCADOR
     const filteredReported = reportedConfirmations.filter(c => {
         const fullName = `${c.nombres || ''} ${c.apellidos || ''}`.toLowerCase();
         return fullName.includes(searchTerm.toLowerCase());
@@ -363,7 +391,7 @@ const ConfirmationSentarRegistrosPage = () => {
                 {(printingRecord || currentConfirmation) && <ConfirmationTicket confirmationData={printingRecord || currentConfirmation} parishInfo={parishInfo} />}
             </div>
 
-            <div className="print:hidden max-w-7xl mx-auto px-4 pb-20">
+            <div className="print:hidden max-w-7xl mx-auto px-4 pb-20 pt-6">
                 <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-6">
                     <div className="flex items-center gap-5">
                         <Button variant="ghost" onClick={() => navigate('/parroquia/confirmacion/partidas')} className="rounded-2xl bg-white shadow-sm h-12 w-12 border"><ChevronLeft className="text-gray-500"/></Button>

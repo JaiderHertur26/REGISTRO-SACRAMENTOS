@@ -57,13 +57,11 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   const abuelosMaternos = formatData(raw.abuelosMaternos || raw.abuemat || data.abuelos_maternos);
   const padrinos = formatData(raw.padrinos || data.padrinos);
   
-  // 🧠 Limpieza de Títulos Redundantes
   const cleanTitle = (nameStr) => nameStr.replace(/^(PBRO\.?|PADRE|FRAY|MONS\.?|SACERDOTE)\s+/i, '').trim();
 
   const pId = raw.parishId || raw.parish_id || header.entity_id || header.id || data.parish_id;
   const listaSacerdotes = (pId && getParrocos) ? (getParrocos(pId) || []) : [];
 
-  // Párroco Actual (Para la firma de expedición al final de la página)
   const getPárrocoActual = () => {
     const sacerdoteActual = listaSacerdotes.find(p => String(p.estado) === '1' || String(p.estado).toUpperCase() === 'ACTIVO');
     if (sacerdoteActual) return `${sacerdoteActual.nombre} ${sacerdoteActual.apellido || ''}`.trim();
@@ -77,18 +75,14 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   let ministro = ministroRaw;
   if (ministro) ministro = `PBRO. ${cleanTitle(ministro)}`;
 
-  // 🚀 INTELIGENCIA "DOY FE" (Clonación desde el Ministro)
   let daFeRaw = formatData(raw.daFe || raw.dafe || data.da_fe);
-  
-  // Si Da Fe es numérico (0006), está vacío o dice encargado, usamos al Ministro histórico
   if (!daFeRaw || !isNaN(Number(daFeRaw)) || daFeRaw.includes("ENCARGADO") || daFeRaw === "---") {
       daFeRaw = ministroRaw || parrocoFirma;
   }
-
   let daFe = `PBRO. ${cleanTitle(daFeRaw)}`;
 
-  // 🧠 Limpieza Inteligente de Notas Marginales Antiguas
-  const noteTextRaw = raw.notaMarginal || raw.nota_marginal || data.nota_marginal || '';
+  // 🚀 INTELIGENCIA DE NOTAS: Prioriza la nota generada por el Modal a la Carta
+  const noteTextRaw = data.notaMarginal || data.nota_marginal || raw.notaMarginal || raw.nota_marginal || '';
   let finalNote = formatData(noteTextRaw);
   
   finalNote = finalNote.replace(/LA INFORMACIÓN SUMINISTRADA ES FIEL.*/i, '').trim();
@@ -97,7 +91,7 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
   finalNote = finalNote.replace(/ES COPIA FIEL.*/i, '').trim();
   
   if (!finalNote || finalNote === '---' || finalNote === 'NULL') {
-      finalNote = "SIN NOTA MARGINAL DE MATRIMONIO HASTA LA FECHA.";
+      finalNote = "SIN NOTAS MARGINALES ADICIONALES HASTA LA FECHA.";
   }
 
   const getFechaExpedicion = () => {
@@ -206,10 +200,8 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
             Es copia fiel del original. Se expide en <strong>{ciudad.toUpperCase()}</strong> el día <strong>{getFechaExpedicion()}</strong>.
         </div>
 
-        {/* 5. ZONA DE FIRMAS (Centrada y empujada siempre al final) */}
+        {/* 5. ZONA DE FIRMAS */}
         <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', fontFamily: 'Arial, sans-serif', paddingBottom: '10px', paddingTop: '80px' }}>
-            
-            {/* Firma del Párroco ACTUAL expidiendo el documento */}
             <div style={{ textAlign: 'center', width: '320px' }}>
                 <div style={{ borderTop: '1.5px solid black', width: '100%', marginBottom: '8px' }}></div>
                 <div style={{ fontWeight: 'bold', fontSize: '14px', textTransform: 'uppercase' }}>PBRO. {parrocoFirma}</div>
@@ -217,7 +209,7 @@ const BaptismPrintTemplate = forwardRef(({ data, parroquiaInfo }, ref) => {
             </div>
         </div>
 
-        {/* 6. PIE DE PÁGINA INSTITUCIONAL (Footer) */}
+        {/* 6. PIE DE PÁGINA INSTITUCIONAL */}
         <div style={{ paddingTop: '12px', textAlign: 'center', fontSize: '10px', color: '#555', borderTop: '1.5px solid #eee', fontFamily: 'Arial, sans-serif' }}>
             {header.direccion && header.direccion !== '---' && <span>{header.direccion.toUpperCase()}</span>}
             {telefono && telefono !== '---' && <span> • TEL: {telefono}</span>}
