@@ -46,7 +46,7 @@ const padDbValue = (val) => {
 const ConfirmationJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth();
-    const { getParrocos } = useAppData();
+    const { getParrocos, getMisDatosList } = useAppData(); 
     const fileInputRef = useRef(null);
     
     const [isProcessing, setIsProcessing] = useState(false);
@@ -103,6 +103,7 @@ const ConfirmationJsonImporter = () => {
         const fileName = selectedFile.name.toUpperCase();
         let detectedType = null;
         
+        // Bloqueo Inteligente de nombres de archivo
         if (fileName === 'CONFIRMA.JSON') {
             detectedType = 'CONFIRMA';
         } else if (fileName === 'INSCONFI.JSON') {
@@ -139,7 +140,8 @@ const ConfirmationJsonImporter = () => {
                     const { data: existingData, error: dbError } = await supabase
                         .from('confirmations')
                         .select('book_number, folio, number')
-                        .eq('parish_id', parishId);
+                        .eq('parish_id', parishId)
+                        .limit(10000);
 
                     if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
                     
@@ -152,7 +154,8 @@ const ConfirmationJsonImporter = () => {
                     const { data: existingData, error: dbError } = await supabase
                         .from('pending_confirmations')
                         .select('raw_data')
-                        .eq('parish_id', parishId);
+                        .eq('parish_id', parishId)
+                        .limit(10000);
 
                     if (dbError) throw new Error("Fallo de conexión con la Base de Datos de Espera.");
 
@@ -171,6 +174,7 @@ const ConfirmationJsonImporter = () => {
                 rawData.forEach((item, index) => {
                     const rowNum = index + 1;
                     
+                    // 🚀 Analiza REPORTADO (O SENTADO como fallback por compatibilidad)
                     const isReportado = item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE' || item["SENTADO"] === true || String(item["SENTADO"]).toUpperCase() === 'TRUE';
                     const destinoStr = detectedType === 'CONFIRMA' ? 'oficial' : (isReportado ? 'boleta' : 'cola');
                     
@@ -251,7 +255,7 @@ const ConfirmationJsonImporter = () => {
                             validCount++;
                         }
                     } else if (detectedType === 'INSCONFI') {
-                        // REGLAS INSCONFI.JSON (Inscripciones de Despacho) - ¡AHORA VALIDA CON BD TAMBIÉN!
+                        // REGLAS INSCONFI.JSON (Inscripciones de Despacho)
                         if (internalKeys.has(keyInsconfi) || existingInsconfiKeys.has(keyInsconfi)) {
                             warnings.push(`Fila ${rowNum}: Omitido "${nombreConfirmado}" (La inscripción ya existe en la base de datos o está duplicada en este archivo).`);
                         } else {
@@ -275,7 +279,7 @@ const ConfirmationJsonImporter = () => {
         reader.readAsText(selectedFile);
     };
 
-    // --- 4. INYECCIÓN BIFURCADA (MAGIA TRIFÁSICA) ---
+    // --- 4. INYECCIÓN BIFURCADA CON AUTO-ENLACE A BAUTISMOS ---
     const handleImport = async () => {
         if (!validationResult || validationResult.dataToImport.length === 0) return;
         setIsProcessing(true);
@@ -286,6 +290,7 @@ const ConfirmationJsonImporter = () => {
             const batchSize = 200;
 
             if (fileType === 'CONFIRMA') {
+                // 🚀 ARCHIVO: CONFIRMA.json -> VA A LA TABLA OFICIAL PERMANENTE
                 const dbRecords = validationResult.dataToImport.map(item => {
                     const { rawOriginal, destino, reportado, ...cleanMappedData } = item;
                     
@@ -314,19 +319,78 @@ const ConfirmationJsonImporter = () => {
                     };
                 });
 
+                // Insertamos Confirmaciones en Lote
                 for (let i = 0; i < dbRecords.length; i += batchSize) {
                     const batch = dbRecords.slice(i, i + batchSize);
                     const { error } = await supabase.from('confirmations').insert(batch);
                     if (error) throw error;
                 }
 
+                // 🚀 NUEVA LÓGICA: AUTO-ENLACE A BAUTISMOS MASIVO
+                const notesToInsert = [];
+                const storedTemplates = localStorage.getItem(`marginalNotesTemplates_${parishId}`);
+                const templates = storedTemplates ? JSON.parse(storedTemplates) : {};
+                const templateNota = templates.bautismo_confirmado || "EL [FECHA_CONFIRMACION] FUE CONFIRMADO(A) EN LA PARROQUIA [PARROQUIA_CONFIRMACION]. DIÓCESIS DE [DIOCESIS_CONFIRMACION]. L-[LIBRO_CONF], F-[FOLIO_CONF], N-[NUMERO_CONF].";
+                
+                const misDatos = getMisDatosList(parishId);
+                const nombreInstitucion = misDatos && misDatos.length > 0 ? misDatos[0].nombre : 'ESTA PARROQUIA';
+                const nombreDiocesis = misDatos && misDatos.length > 0 ? misDatos[0].diocesis : 'ARQUIDIÓCESIS DE BARRANQUILLA';
+
+                for (const item of dbRecords) {
+                    const raw = item.raw_data || {};
+                    const bLibro = String(raw.libroBautismo || raw["LIBRO DE BAUTIZO"] || '').padStart(4, '0');
+                    const bFolio = String(raw.folioBautismo || raw["FOLIO DE BAUTIZO"] || '').padStart(4, '0');
+                    const bNumero = String(raw.numeroBautismo || raw["NÚMERO DE BAUTIZO"] || '').padStart(4, '0');
+
+                    if (bLibro && bLibro !== '0000' && bLibro !== '---') {
+                        let query = supabase.from('baptisms').select('id').eq('parish_id', parishId).eq('book_number', bLibro);
+                        if (bFolio && bFolio !== '0000' && bFolio !== '---') query = query.eq('folio', bFolio);
+                        if (bNumero && bNumero !== '0000' && bNumero !== '---') query = query.eq('number', bNumero);
+
+                        const { data: bData } = await query.single();
+
+                        if (bData && bData.id) {
+                            const fechaSac = item.celebration_date || '';
+                            const d = fechaSac ? new Date(fechaSac.includes('T') ? fechaSac : `${fechaSac}T12:00:00`) : new Date();
+                            const dateStr = !isNaN(d.getTime()) ? `${d.getDate()} DE ${d.toLocaleString('es-CO', { month: 'long' }).toUpperCase()} DE ${d.getFullYear()}` : fechaSac;
+
+                            const notaRedactada = templateNota
+                                .replace('[FECHA_CONFIRMACION]', dateStr)
+                                .replace('[PARROQUIA_CONFIRMACION]', (nombreInstitucion || '').toUpperCase())
+                                .replace('[DIOCESIS_CONFIRMACION]', (nombreDiocesis || '').toUpperCase())
+                                .replace('[LIBRO_CONF]', String(item.book_number).padStart(4, '0'))
+                                .replace('[FOLIO_CONF]', String(item.folio).padStart(4, '0'))
+                                .replace('[NUMERO_CONF]', String(item.number).padStart(4, '0'));
+
+                            notesToInsert.push({
+                                id: generateUUID(),
+                                sacrament_id: bData.id,
+                                sacrament_type: 'bautismo',
+                                note_type: 'confirmacion',
+                                note_date: new Date().toISOString().split('T')[0],
+                                content: notaRedactada,
+                                parish_id: parishId
+                            });
+                        }
+                    }
+                }
+
+                if (notesToInsert.length > 0) {
+                    for (let i = 0; i < notesToInsert.length; i += batchSize) {
+                        const batchNotes = notesToInsert.slice(i, i + batchSize);
+                        const { error: notesError } = await supabase.from('marginal_notes').insert(batchNotes);
+                        if (notesError) console.error("Error inyectando notas en lote:", notesError);
+                    }
+                }
+
                 toast({ 
                     title: "¡Importación de Libros Exitosa!", 
-                    description: `${dbRecords.length} Actas Viejas inyectadas directamente en la Base Permanente.`, 
+                    description: `${dbRecords.length} Actas inyectadas y ${notesToInsert.length} notas cruzadas en Bautismos.`, 
                     className: "bg-green-50 border-green-200 text-green-900" 
                 });
 
             } else if (fileType === 'INSCONFI') {
+                // 🚀 ARCHIVO: INSCONFI.json -> VA A LA TABLA DE ESPERA (Boletas o Cola)
                 const pendingRecords = validationResult.dataToImport.map(item => {
                     const { rawOriginal, destino, reportado, ...cleanMappedData } = item;
                     
@@ -502,7 +566,7 @@ const ConfirmationJsonImporter = () => {
                 <div className="mt-10 pt-8 border-t border-gray-100 animate-in fade-in duration-700">
                     <div className="bg-gray-50/50 px-6 py-4 rounded-t-3xl border border-b-0 border-gray-100 flex items-center justify-between">
                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] flex items-center gap-2">
-                            <Info className="w-4 h-4 text-red-600" /> Vista Previa de Asignación (Top 5)
+                            <Info className="w-4 h-4 text-red-600" /> Vista Previa de Asignación Automática (Top 5)
                         </span>
                     </div>
                     <div className="border border-gray-100 rounded-b-3xl overflow-hidden bg-white shadow-sm">
@@ -518,7 +582,8 @@ const StatCard = ({ label, val, color }) => {
     const colors = {
         emerald: "bg-emerald-50 border-emerald-100 text-emerald-700",
         red: "bg-red-50 border-red-100 text-red-700",
-        amber: "bg-amber-50 border-amber-100 text-amber-700"
+        amber: "bg-amber-50 border-amber-100 text-amber-700",
+        blue: "bg-blue-50 border-blue-100 text-blue-700"
     };
     return (
         <div className={cn("p-5 rounded-3xl border text-center shadow-sm", colors[color])}>
