@@ -46,7 +46,7 @@ const padDbValue = (val) => {
 const ConfirmationJsonImporter = () => {
     const { toast } = useToast();
     const { user } = useAuth();
-    const { getParrocos, getMisDatosList } = useAppData(); 
+    const { getParrocos, getMisDatosList } = useAppData(); // 🚀 IMPORTAMOS getMisDatosList para las Notas
     const fileInputRef = useRef(null);
     
     const [isProcessing, setIsProcessing] = useState(false);
@@ -140,8 +140,7 @@ const ConfirmationJsonImporter = () => {
                     const { data: existingData, error: dbError } = await supabase
                         .from('confirmations')
                         .select('book_number, folio, number')
-                        .eq('parish_id', parishId)
-                        .limit(10000);
+                        .eq('parish_id', parishId);
 
                     if (dbError) throw new Error("Fallo de conexión con la Base de Datos Central.");
                     
@@ -154,8 +153,7 @@ const ConfirmationJsonImporter = () => {
                     const { data: existingData, error: dbError } = await supabase
                         .from('pending_confirmations')
                         .select('raw_data')
-                        .eq('parish_id', parishId)
-                        .limit(10000);
+                        .eq('parish_id', parishId);
 
                     if (dbError) throw new Error("Fallo de conexión con la Base de Datos de Espera.");
 
@@ -178,15 +176,30 @@ const ConfirmationJsonImporter = () => {
                     const isReportado = item["REPORTADO"] === true || String(item["REPORTADO"]).toUpperCase() === 'TRUE' || item["SENTADO"] === true || String(item["SENTADO"]).toUpperCase() === 'TRUE';
                     const destinoStr = detectedType === 'CONFIRMA' ? 'oficial' : (isReportado ? 'boleta' : 'cola');
                     
-                    // Mapeo exhaustivo para Confirmaciones
+// 🚀 FUNCIÓN EXTRACTORA SEGURA
+const extractKey = (obj, validKeys) => {
+    for (let k of validKeys) {
+        if (obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== '') {
+            return obj[k];
+        }
+    }
+    return '---';
+};                    
+
+// Mapeo exhaustivo para Confirmaciones
                     const mappedItem = {
-                        numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
-                        fechaInscripcion: item["FECHA DE INSCRIPCIÓN"] || item.fechaInscripcion || '',
-                        Libro: item["LIBRO"] || item.Libro || item.libro || '---',
-                        folio: item["FOLIO"] || item.folio || '---',
-                        numero: item["NÚMERO"] || item.numero || item.numeroActa || '---',
-                        fechaSacramento: item["FECHA DE CONFIRMACIÓN"] || item.fechaSacramento || '',
-                        lugarSacramento: item["LUGAR DE CONFIRMACION"] || item["LUGAR"] || item.lugarSacramento || '',
+    numeroRegistro: item["Nº REGISTRO PREVIO"] || item.numeroRegistro || '',
+    fechaInscripcion: item["FECHA DE INSCRIPCIÓN"] || item.fechaInscripcion || '',
+    
+    // 👇 APLICAMOS LA EXTRACCIÓN SEGURA AQUÍ 👇
+    Libro: extractKey(item, ["LIBRO", "Libro", "libro"]),
+    folio: extractKey(item, ["FOLIO", "Folio", "folio"]),
+    numero: extractKey(item, ["NÚMERO", "NUMERO", "Numero", "numero", "numeroActa"]),
+    // 👆 --------------------------------- 👆
+
+    fechaSacramento: item["FECHA DE CONFIRMACIÓN"] || item.fechaSacramento || '',
+    lugarSacramento: item["LUGAR DE CONFIRMACION"] || item["LUGAR"] || item.lugarSacramento || '',
+    // ... el resto de tu mappedItem queda exactamente igual
                         apellidos: item["APELLIDOS"] || item.apellidos || '',
                         nombres: item["NOMBRES"] || item.nombres || '',
                         fechaNacimiento: item["FECHA DE NACIMIENTO"] || item.fechaNacimiento || '',
