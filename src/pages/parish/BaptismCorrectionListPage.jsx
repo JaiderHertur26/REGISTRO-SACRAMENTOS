@@ -13,8 +13,6 @@ import ViewCorrectionDecreeModal from '@/components/modals/ViewCorrectionDecreeM
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import { supabase } from '@/lib/supabaseClient';
 import { calculatePreviousConsecutive } from '@/services/sacramentParametersService';
-
-// Librería y Plantilla para Impresión Directa
 import { useReactToPrint } from 'react-to-print';
 import BaptismCorrectionPrintTemplate from '@/components/BaptismCorrectionPrintTemplate'; 
 
@@ -33,7 +31,6 @@ const BaptismCorrectionListPage = () => {
     const [selectedDecree, setSelectedDecree] = useState(null);
     const [deleteConfig, setDeleteConfig] = useState({ isOpen: false, id: null, name: '' });
 
-    // 🚀 LÓGICA DE IMPRESIÓN DIRECTA 1-CLIC
     const printRef = useRef(null);
     
     const handlePrint = useReactToPrint({
@@ -70,18 +67,17 @@ const BaptismCorrectionListPage = () => {
 
             if (error) throw error;
             
-            // 🚀 FILTRO APLICADO: Solo los que tengan abuelos (Bautizos)
+            // 🚀 FILTRO BLINDADO: Extrae solo los que tengan la propiedad abuelosPaternos (exclusiva de Bautizo)
             const formattedData = data.map(item => ({
                 id: item.id, parish_id: item.parish_id, created_at: item.created_at,
                 ...(typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload)
-            })).filter(item => item.abuelosPaternos !== undefined || item.sacramento === 'bautismo');
+            })).filter(item => 'abuelosPaternos' in item || item.sacramento === 'bautismo');
             
             setCorrections(formattedData);
         } catch (error) { toast({ title: "Error", description: "No se descargaron los decretos.", variant: "destructive" }); } 
         finally { setLoading(false); }
     };
 
-    // 🚀 LÓGICA DE RESTAURACIÓN COMPLETA (ROLLBACK TOTAL)
     const confirmDelete = async () => {
         setIsDeleting(true);
         try {
@@ -92,7 +88,6 @@ const BaptismCorrectionListPage = () => {
             const origSum = decreeToUndo.originalPartidaSummary;
             const newSum = decreeToUndo.newPartidaSummary;
 
-            // 1. Restaurar la Partida Original
             if (origSum) {
                 const origBook = pad(origSum.book || origSum.Libro);
                 const origPage = pad(origSum.page || origSum.folio);
@@ -114,7 +109,6 @@ const BaptismCorrectionListPage = () => {
                 }
             }
 
-            // 2. Eliminar la Partida Supletoria y Revertir el Parámetro
             if (newSum) {
                 const newBook = pad(newSum.book || newSum.Libro);
                 const newPage = pad(newSum.page || newSum.folio);
@@ -123,7 +117,6 @@ const BaptismCorrectionListPage = () => {
                 await supabase.from('baptisms').delete()
                     .eq('parish_id', user.parishId).eq('book_number', newBook).eq('folio', newPage).eq('number', newEntry);
 
-                // --- REVERSA MATEMÁTICA PERFECTA ---
                 try {
                     const { data: pData } = await supabase.from('parish_parameters')
                         .select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
@@ -153,7 +146,6 @@ const BaptismCorrectionListPage = () => {
                 } catch (err) { console.error("Error revirtiendo consecutivos:", err); }
             }
 
-            // 3. Eliminar el Decreto
             await supabase.from('decretos').delete().eq('id', deleteConfig.id);
 
             toast({ title: "Restauración Completada", description: "Decreto borrado, partida restaurada y consecutivos actualizados.", className: "bg-green-50 text-green-900 border-green-200" });
@@ -217,10 +209,7 @@ const BaptismCorrectionListPage = () => {
             render: (row) => (
                 <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-blue-600 hover:bg-blue-50 rounded-xl" onClick={() => { setSelectedDecree(row); setViewModalOpen(true); }}><Eye className="w-4 h-4" /></Button>
-                    
-                    {/* 🚀 Botón: IMPRIMIR DIRECTO */}
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-purple-600 hover:bg-purple-50 rounded-xl" onClick={() => onPrintClick(row)}><Printer className="w-4 h-4" /></Button>
-                    
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-amber-600 hover:bg-amber-50 rounded-xl" onClick={() => navigate(`/parroquia/decretos/editar-correccion?id=${row.id}`)}><Edit className="w-4 h-4" /></Button>
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-red-600 hover:bg-red-50 rounded-xl" onClick={() => setDeleteConfig({ isOpen: true, id: row.id, name: row.decreeNumber })}><Trash2 className="w-4 h-4" /></Button>
                 </div>
@@ -238,11 +227,17 @@ const BaptismCorrectionListPage = () => {
                 <Button className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-8 py-6 rounded-2xl font-black uppercase text-xs shadow-xl shadow-blue-900/20 active:scale-95 transition-all" onClick={() => navigate('/parroquia/decretos/nuevo-correccion')}><Plus className="w-4 h-4 mr-2" /> Nuevo Decreto</Button>
             </div>
 
-            {/* 🚀 AÑADIDO: PESTAÑAS TIPO CAPARAZÓN PARA NAVEGAR ENTRE SACRAMENTOS */}
-            <Tabs defaultValue="bautizos" className="w-full mb-8">
+            {/* 🚀 SOLUCIÓN DE PESTAÑAS: El onValueChange fuerza el viaje a la otra página */}
+            <Tabs 
+                value="bautizos" 
+                onValueChange={(val) => {
+                    if (val === 'confirmaciones') navigate('/parroquia/decretos/ver-correcciones-confirmacion');
+                }} 
+                className="w-full mb-8"
+            >
                 <TabsList className="grid w-full grid-cols-3 bg-gray-100 p-1 rounded-2xl h-14">
                     <TabsTrigger value="bautizos" className="rounded-xl font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-[#4B7BA7] data-[state=active]:shadow-sm">Bautizos</TabsTrigger>
-                    <TabsTrigger value="confirmaciones" onClick={() => navigate('/parroquia/decretos/ver-correcciones-confirmacion')} className="rounded-xl font-bold uppercase text-[10px] tracking-widest cursor-pointer text-gray-500 hover:bg-gray-200/50 transition-all">Confirmaciones</TabsTrigger>
+                    <TabsTrigger value="confirmaciones" className="rounded-xl font-bold uppercase text-[10px] tracking-widest cursor-pointer text-gray-500 hover:bg-gray-200/50 transition-all">Confirmaciones</TabsTrigger>
                     <TabsTrigger value="matrimonios" disabled className="opacity-30 rounded-xl font-bold uppercase text-[10px] tracking-widest">Matrimonios</TabsTrigger>
                 </TabsList>
             </Tabs>
@@ -273,9 +268,6 @@ const BaptismCorrectionListPage = () => {
                 confirmText={isDeleting ? "Restaurando..." : "Confirmar Restauración"}
             />
 
-            {/* ========================================================= */}
-            {/* 🖨️ CONTENEDORES OCULTOS PARA IMPRESIÓN (BAUTISMO) */}
-            {/* ========================================================= */}
             <div style={{ display: 'none' }}>
                 <BaptismCorrectionPrintTemplate ref={printRef} data={printData} />
             </div>

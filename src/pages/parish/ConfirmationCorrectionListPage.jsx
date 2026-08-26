@@ -2,26 +2,23 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
-import { useAppData } from '@/context/AppDataContext'; // 🚀 AÑADIDO
+import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import Table from '@/components/ui/Table';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Plus, Search, Eye, Edit, Trash2, FileText, ShieldAlert, BookOpen, ArrowRight, Loader2, Cloud, Printer } from 'lucide-react'; // 🚀 AÑADIDO: Printer
+import { Plus, Search, Eye, Edit, Trash2, FileText, ShieldAlert, BookOpen, ArrowRight, Loader2, Cloud, Printer } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import ViewCorrectionDecreeModal from '@/components/modals/ViewCorrectionDecreeModal';
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import { supabase } from '@/lib/supabaseClient';
 import { calculatePreviousConsecutive } from '@/services/sacramentParametersService';
-
-// 🚀 AÑADIDO: Librería de Impresión y Plantillas de Confirmación
 import { useReactToPrint } from 'react-to-print';
 import ConfirmationCorrectionPrintTemplate from '@/components/ConfirmationCorrectionPrintTemplate';
-import PrintCorrectionDecreeConfirmations from '@/components/PrintCorrectionDecreeConfirmations';
 
 const ConfirmationCorrectionListPage = () => {
     const { user } = useAuth();
-    const { getMisDatosList, getParrocos } = useAppData(); // 🚀 AÑADIDO: Para extraer datos del Párroco
+    const { getMisDatosList, getParrocos } = useAppData(); 
     const navigate = useNavigate();
     const { toast } = useToast();
 
@@ -34,7 +31,6 @@ const ConfirmationCorrectionListPage = () => {
     const [selectedDecree, setSelectedDecree] = useState(null);
     const [deleteConfig, setDeleteConfig] = useState({ isOpen: false, id: null, name: '' });
 
-    // 🚀 LÓGICA DE IMPRESIÓN DIRECTA 1-CLIC
     const printRef = useRef(null);
     
     const handlePrint = useReactToPrint({
@@ -44,11 +40,9 @@ const ConfirmationCorrectionListPage = () => {
 
     const onPrintClick = (row) => {
         setSelectedDecree(row);
-        // Damos un pequeño respiro para que React actualice el state en el componente oculto
         setTimeout(() => handlePrint(), 300);
     };
 
-    // Preparamos los datos de la parroquia para inyectar en la plantilla de impresión
     const misDatosList = user?.parishId ? getMisDatosList(user.parishId) : [];
     const parrocos = user?.parishId ? getParrocos(user.parishId) : [];
     const parrocoActivo = parrocos?.find(p => String(p.estado || p.Estado) === '1');
@@ -73,18 +67,17 @@ const ConfirmationCorrectionListPage = () => {
 
             if (error) throw error;
             
-            // 🚀 FILTRO APLICADO: Solo los que NO tengan abuelos (Confirmaciones)
+            // 🚀 FILTRO BLINDADO: Extrae solo los que NO tengan abuelosPaternos (exclusivos Confirmación)
             const formattedData = data.map(item => ({
                 id: item.id, parish_id: item.parish_id, created_at: item.created_at,
                 ...(typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload)
-            })).filter(item => item.abuelosPaternos === undefined || item.sacramento === 'confirmacion');
+            })).filter(item => !('abuelosPaternos' in item) || item.sacramento === 'confirmacion');
             
             setCorrections(formattedData);
         } catch (error) { toast({ title: "Error", description: "No se descargaron los decretos.", variant: "destructive" }); } 
         finally { setLoading(false); }
     };
 
-    // 🚀 LÓGICA DE RESTAURACIÓN COMPLETA (ROLLBACK TOTAL PARA CONFIRMACIONES)
     const confirmDelete = async () => {
         setIsDeleting(true);
         try {
@@ -95,7 +88,6 @@ const ConfirmationCorrectionListPage = () => {
             const origSum = decreeToUndo.originalPartidaSummary;
             const newSum = decreeToUndo.newPartidaSummary;
 
-            // 1. Restaurar la Partida Original en Confirmaciones
             if (origSum) {
                 const origBook = pad(origSum.book || origSum.Libro);
                 const origPage = pad(origSum.page || origSum.folio);
@@ -117,7 +109,6 @@ const ConfirmationCorrectionListPage = () => {
                 }
             }
 
-            // 2. Eliminar la Partida Supletoria y Revertir el Parámetro
             if (newSum) {
                 const newBook = pad(newSum.book || newSum.Libro);
                 const newPage = pad(newSum.page || newSum.folio);
@@ -126,7 +117,6 @@ const ConfirmationCorrectionListPage = () => {
                 await supabase.from('confirmations').delete()
                     .eq('parish_id', user.parishId).eq('book_number', newBook).eq('folio', newPage).eq('number', newEntry);
 
-                // --- REVERSA MATEMÁTICA PERFECTA (CONFIRMACIONES) ---
                 try {
                     const { data: pData } = await supabase.from('parish_parameters')
                         .select('confirmaciones_params').eq('parish_id', user.parishId).maybeSingle();
@@ -156,7 +146,6 @@ const ConfirmationCorrectionListPage = () => {
                 } catch (err) { console.error("Error revirtiendo consecutivos:", err); }
             }
 
-            // 3. Eliminar el Decreto
             await supabase.from('decretos').delete().eq('id', deleteConfig.id);
 
             toast({ title: "Restauración Completada", description: "Decreto borrado, partida de confirmación restaurada y consecutivos actualizados.", className: "bg-green-50 text-green-900 border-green-200" });
@@ -219,16 +208,9 @@ const ConfirmationCorrectionListPage = () => {
             header: 'Acciones', className: "text-right",
             render: (row) => (
                 <div className="flex justify-end gap-1">
-                    {/* Botón 1: Ojo (Ver en Modal) */}
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-blue-600 hover:bg-blue-50 rounded-xl" onClick={() => { setSelectedDecree(row); setViewModalOpen(true); }}><Eye className="w-4 h-4" /></Button>
-                    
-                    {/* 🚀 Botón 2: IMPRIMIR DIRECTO (Nuevo) */}
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-purple-600 hover:bg-purple-50 rounded-xl" onClick={() => onPrintClick(row)}><Printer className="w-4 h-4" /></Button>
-                    
-                    {/* Botón 3: Editar */}
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-amber-600 hover:bg-amber-50 rounded-xl" onClick={() => navigate(`/parroquia/decretos/editar-correccion-confirmacion?id=${row.id}`)}><Edit className="w-4 h-4" /></Button>
-                    
-                    {/* Botón 4: Eliminar */}
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-red-600 hover:bg-red-50 rounded-xl" onClick={() => setDeleteConfig({ isOpen: true, id: row.id, name: row.decreeNumber })}><Trash2 className="w-4 h-4" /></Button>
                 </div>
             )
@@ -245,10 +227,16 @@ const ConfirmationCorrectionListPage = () => {
                 <Button className="bg-red-600 hover:bg-red-800 text-white px-8 py-6 rounded-2xl font-black uppercase text-xs shadow-xl shadow-red-900/20 active:scale-95 transition-all" onClick={() => navigate('/parroquia/decretos/nuevo-correccion-confirmacion')}><Plus className="w-4 h-4 mr-2" /> Nuevo Decreto</Button>
             </div>
 
-            {/* 🚀 PESTAÑAS TIPO CAPARAZÓN PARA NAVEGAR ENTRE SACRAMENTOS */}
-            <Tabs defaultValue="confirmaciones" className="w-full mb-8">
+            {/* 🚀 SOLUCIÓN DE PESTAÑAS: El onValueChange fuerza el viaje a la otra página */}
+            <Tabs 
+                value="confirmaciones" 
+                onValueChange={(val) => {
+                    if (val === 'bautizos') navigate('/parroquia/decretos/ver-correcciones');
+                }} 
+                className="w-full mb-8"
+            >
                 <TabsList className="grid w-full grid-cols-3 bg-gray-100 p-1 rounded-2xl h-14">
-                    <TabsTrigger value="bautizos" onClick={() => navigate('/parroquia/decretos/ver-correcciones')} className="rounded-xl font-bold uppercase text-[10px] tracking-widest text-gray-500">Bautizos</TabsTrigger>
+                    <TabsTrigger value="bautizos" className="rounded-xl font-bold uppercase text-[10px] tracking-widest cursor-pointer text-gray-500 hover:bg-gray-200/50 transition-all">Bautizos</TabsTrigger>
                     <TabsTrigger value="confirmaciones" className="rounded-xl font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-red-600 data-[state=active]:shadow-sm">Confirmaciones</TabsTrigger>
                     <TabsTrigger value="matrimonios" disabled className="opacity-30 rounded-xl font-bold uppercase text-[10px] tracking-widest">Matrimonios</TabsTrigger>
                 </TabsList>
@@ -268,7 +256,6 @@ const ConfirmationCorrectionListPage = () => {
                 )}
             </div>
 
-            {/* Inyectamos "sacrament" para que el modal sepa cómo comportarse si lo llegaras a editar luego */}
             {viewModalOpen && <ViewCorrectionDecreeModal isOpen={viewModalOpen} onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }} decreeData={selectedDecree} sacrament="confirmacion" />}
             
             <ConfirmationDialog 
@@ -281,15 +268,8 @@ const ConfirmationCorrectionListPage = () => {
                 confirmText={isDeleting ? "Restaurando..." : "Confirmar Restauración"}
             />
 
-            {/* ========================================================= */}
-            {/* 🖨️ CONTENEDORES OCULTOS PARA IMPRESIÓN (CONFIRMACIÓN) */}
-            {/* ========================================================= */}
             <div style={{ display: 'none' }}>
                 <ConfirmationCorrectionPrintTemplate ref={printRef} data={printData} />
-                
-                {/* Dejo la versión de Cancillería comentada por si alguna vez quieres 
-                    crear un segundo botón que imprima el formato del obispado */}
-                {/* <PrintCorrectionDecreeConfirmations ref={chanceryPrintRef} decreeData={selectedDecree} /> */}
             </div>
 
         </DashboardLayout>
