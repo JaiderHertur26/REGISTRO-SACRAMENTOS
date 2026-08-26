@@ -11,16 +11,17 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import { marginalNotesEngine } from '@/utils/marginalNotesEngine'; 
 import { calculateNextConsecutive } from '@/services/sacramentParametersService';
-import SearchBaptismPartidaModal from '@/components/modals/SearchBaptismPartidaModal'; // 🚀 AÑADIDO: Modal de Bautismo
+import SearchBaptismPartidaModal from '@/components/modals/SearchBaptismPartidaModal';
 
 const cleanTitle = (nameStr) => {
     if (!nameStr) return '';
     return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|EXCMO\.?\s*|SACERDOTE\s*)/i, '').trim();
 };
 
+// 🚀 FUNCIÓN CLAVE: Limpia la fecha para que el input type="date" no se quede en blanco
 const formatDateForInput = (dateStr) => {
     if (!dateStr) return '';
-    return String(dateStr).split('T')[0]; // Limpia la hora para que <input type="date"> no falle
+    return String(dateStr).split('T')[0];
 };
 
 const ConfirmationCorrectionNewPage = () => {
@@ -50,7 +51,7 @@ const ConfirmationCorrectionNewPage = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const wrapperRef = useRef(null);
 
-  // 🚀 CAMPOS ACTUALIZADOS (Mismos que ConfirmationCelebratedPage)
+  // 🚀 CAMPOS EXCLUSIVOS DE CONFIRMACIÓN (Exactos a la BD y al archivo base)
   const [newPartida, setNewPartida] = useState({
     fechaSacramento: '', lugarSacramento: '', apellidos: '', nombres: '', 
     sexo: '', fechaNacimiento: '', edad: '', nombrePadre: '', nombreMadre: '', 
@@ -152,6 +153,7 @@ const ConfirmationCorrectionNewPage = () => {
 
     if (['Libro', 'folio', 'numero'].includes(name)) { setFoundRecord(null); setSearchMessage(null); }
 
+    // Búsqueda en CONFIRMACIONES
     if (name === 'nombreConfirmado' && value.length > 2) {
         try {
           const { data } = await supabase.from('confirmations').select('*').eq('parish_id', user?.parishId).ilike('nombres', `%${value}%`).limit(5);
@@ -193,7 +195,7 @@ const ConfirmationCorrectionNewPage = () => {
           setSearchMessage({ type: 'success', text: "Partida de confirmación encontrada exitosamente." });
           if (!decreeData.nombreConfirmado) setDecreeData(prev => ({ ...prev, nombreConfirmado: `${dbRecord.nombres} ${dbRecord.apellidos}` }));
           
-          // 🚀 SOLUCIÓN A LA FECHA DE NACIMIENTO: Usar formatDateForInput
+          // 🚀 SE USA formatDateForInput PARA EVITAR QUE SE QUEDEN EN BLANCO
           setNewPartida(prev => ({
             ...prev,
             nombres: dbRecord.nombres || raw.nombres || '', 
@@ -215,7 +217,7 @@ const ConfirmationCorrectionNewPage = () => {
     finally { setIsLoading(false); }
   };
 
-  // 🚀 AUTORELLENO DESDE LA BÚSQUEDA DEL MODAL
+  // 🚀 AUTORELLENO DESDE LA BÚSQUEDA DEL MODAL DE BAUTISMOS
   const handleSelectBaptismPartida = (partida) => {
     let normalizedSex = '';
     if (partida.sex || partida.sexo) {
@@ -304,7 +306,7 @@ const ConfirmationCorrectionNewPage = () => {
           dafe: finalDaFe,
           da_fe: finalDaFe,
           ministerFaith: finalDaFe,
-          linkedBaptismId: selectedBaptismId, // Guardamos referencia por si se auto-completó
+          linkedBaptismId: selectedBaptismId,
 
           originalPartidaId: foundRecord.id,
           originalPartidaSummary: { 
@@ -345,15 +347,27 @@ const ConfirmationCorrectionNewPage = () => {
             confirmaciones_params: newParams 
         }, { onConflict: 'parish_id' });
 
-        // 5. Crear Nueva Partida Supletoria
+        // 5. Crear Nueva Partida Supletoria de Confirmación (Limpiando hora)
+        const cleanDate = (d) => (d && String(d).trim() !== '') ? d : null;
+
         const { data: newConf, error: errConf } = await supabase.from('confirmations').insert([{
             parish_id: user.parishId,
-            book_number: String(supletorioLibro).padStart(4, '0'), folio: String(supletorioFolio).padStart(4, '0'), number: String(supletorioNumero).padStart(4, '0'),
-            celebration_date: newPartida.fechaSacramento || null, nombres: newPartida.nombres, apellidos: newPartida.apellidos, sexo: newPartida.sexo,
-            fecha_nacimiento: newPartida.fechaNacimiento || null, lugar_bautismo: newPartida.lugarBautismo,
-            nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre,
+            book_number: String(supletorioLibro).padStart(4, '0'), 
+            folio: String(supletorioFolio).padStart(4, '0'), 
+            number: String(supletorioNumero).padStart(4, '0'),
+            celebration_date: cleanDate(newPartida.fechaSacramento), 
+            nombres: newPartida.nombres, 
+            apellidos: newPartida.apellidos, 
+            sexo: newPartida.sexo,
+            fecha_nacimiento: cleanDate(newPartida.fechaNacimiento), 
+            lugar_bautismo: newPartida.lugarBautismo,
+            nombre_padre: newPartida.nombrePadre, 
+            nombre_madre: newPartida.nombreMadre,
             padrinos: newPartida.padrinos,
-            ministro: newPartida.ministro, da_fe: finalDaFe, status: 'seated', nota_marginal: notaSupletoriaFinal,
+            ministro: newPartida.ministro, 
+            da_fe: finalDaFe, 
+            status: 'seated', 
+            nota_marginal: notaSupletoriaFinal,
             raw_data: partidaToSave
         }]).select('id').single();
 
@@ -466,7 +480,6 @@ const ConfirmationCorrectionNewPage = () => {
                   <UserPlus className="w-4 h-4 text-green-600" />
                   <h3 className="text-xs font-black text-green-600 uppercase tracking-widest">02. Datos Corregidos para Libro Supletorio</h3>
                 </div>
-                {/* 🚀 BOTÓN AÑADIDO: Buscar Partida Origen */}
                 <Button type="button" variant="outline" onClick={() => setIsSearchModalOpen(true)} className="border-red-600 text-red-600 hover:bg-red-50 h-8 text-xs font-bold uppercase tracking-widest px-4 rounded-xl shadow-sm">
                   <Search className="w-3.5 h-3.5 mr-2" /> Auto-Completar con Bautismo
                 </Button>
@@ -546,7 +559,6 @@ const ConfirmationCorrectionNewPage = () => {
         </Tabs>
       </div>
 
-      {/* 🚀 MODAL PARA AUTOCOMPLETAR DATOS DE BAUTISMO */}
       <SearchBaptismPartidaModal 
           isOpen={isSearchModalOpen}
           onClose={() => setIsSearchModalOpen(false)}
