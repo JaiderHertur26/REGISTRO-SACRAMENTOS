@@ -16,8 +16,8 @@ import { calculatePreviousConsecutive } from '@/services/sacramentParametersServ
 
 // 🚀 AÑADIDO: Librería de Impresión y Plantillas de Confirmación
 import { useReactToPrint } from 'react-to-print';
-import ConfirmationCorrectionPrintTemplate from '@/components/impresion/ConfirmationCorrectionPrintTemplate';
-import PrintCorrectionDecreeConfirmations from '@/components/impresion/PrintCorrectionDecreeConfirmations';
+import ConfirmationCorrectionPrintTemplate from '@/components/ConfirmationCorrectionPrintTemplate';
+import PrintCorrectionDecreeConfirmations from '@/components/PrintCorrectionDecreeConfirmations';
 
 const ConfirmationCorrectionListPage = () => {
     const { user } = useAuth();
