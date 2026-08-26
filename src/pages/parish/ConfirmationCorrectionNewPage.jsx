@@ -6,15 +6,21 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Save, ArrowLeft, FileText, UserPlus, AlertCircle, CheckCircle2, Search, Loader2, Fingerprint, Droplet, Calendar, Users, PenTool, Hash } from 'lucide-react';
+import { Save, ArrowLeft, FileText, UserPlus, AlertCircle, CheckCircle2, Search, Loader2, Droplet, Users, PenTool } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import { marginalNotesEngine } from '@/utils/marginalNotesEngine'; 
 import { calculateNextConsecutive } from '@/services/sacramentParametersService';
+import SearchBaptismPartidaModal from '@/components/modals/SearchBaptismPartidaModal'; // 🚀 AÑADIDO: Modal de Bautismo
 
 const cleanTitle = (nameStr) => {
     if (!nameStr) return '';
     return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|EXCMO\.?\s*|SACERDOTE\s*)/i, '').trim();
+};
+
+const formatDateForInput = (dateStr) => {
+    if (!dateStr) return '';
+    return String(dateStr).split('T')[0]; // Limpia la hora para que <input type="date"> no falle
 };
 
 const ConfirmationCorrectionNewPage = () => {
@@ -30,6 +36,9 @@ const ConfirmationCorrectionNewPage = () => {
   const [listaSacerdotes, setListaSacerdotes] = useState([]);
   const [sacerdotePorDefecto, setSacerdotePorDefecto] = useState('');
 
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [selectedBaptismId, setSelectedBaptismId] = useState(null);
+
   const [decreeData, setDecreeData] = useState({
     parroquia: '', numeroDeDecreto: '', fechaEmision: new Date().toISOString().split('T')[0],
     conceptoAnulacion: '', nombreConfirmado: '', Libro: '', folio: '', numero: ''
@@ -41,12 +50,11 @@ const ConfirmationCorrectionNewPage = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const wrapperRef = useRef(null);
 
-  // 🚀 CAMPOS EXCLUSIVOS DE CONFIRMACIÓN
+  // 🚀 CAMPOS ACTUALIZADOS (Mismos que ConfirmationCelebratedPage)
   const [newPartida, setNewPartida] = useState({
     fechaSacramento: '', lugarSacramento: '', apellidos: '', nombres: '', 
     sexo: '', fechaNacimiento: '', edad: '', nombrePadre: '', nombreMadre: '', 
-    lugarBautismo: '', libroBautismo: '', folioBautismo: '', numeroBautismo: '',
-    padrinos: '', ministro: '', daFe: '', observaciones: ''
+    lugarBautismo: '', padrinos: '', ministro: '', daFe: '', observaciones: ''
   });
 
   useEffect(() => {
@@ -68,7 +76,6 @@ const ConfirmationCorrectionNewPage = () => {
               setNewPartida(prev => ({ ...prev, daFe: defPriest }));
           }
 
-          // 🚀 BUSCAMOS LOS PARÁMETROS DE CONFIRMACIÓN
           const { data: paramsData } = await supabase.from('parish_parameters').select('confirmaciones_params').eq('parish_id', user.parishId).maybeSingle();
           if (paramsData && paramsData.confirmaciones_params) setCloudParams(paramsData.confirmaciones_params);
         }
@@ -145,7 +152,6 @@ const ConfirmationCorrectionNewPage = () => {
 
     if (['Libro', 'folio', 'numero'].includes(name)) { setFoundRecord(null); setSearchMessage(null); }
 
-    // Búsqueda en CONFIRMACIONES
     if (name === 'nombreConfirmado' && value.length > 2) {
         try {
           const { data } = await supabase.from('confirmations').select('*').eq('parish_id', user?.parishId).ilike('nombres', `%${value}%`).limit(5);
@@ -172,7 +178,6 @@ const ConfirmationCorrectionNewPage = () => {
     setIsLoading(true); setSearchMessage(null); setFoundRecord(null);
 
     try {
-      // 🚀 BUSCAMOS EN LA TABLA DE CONFIRMACIONES
       const { data: dbRecord, error } = await supabase.from('confirmations').select('*').eq('parish_id', user?.parishId)
         .eq('book_number', String(Libro).padStart(4, '0')).eq('folio', String(folio).padStart(4, '0')).eq('number', String(numero).padStart(4, '0')).maybeSingle();
 
@@ -188,29 +193,53 @@ const ConfirmationCorrectionNewPage = () => {
           setSearchMessage({ type: 'success', text: "Partida de confirmación encontrada exitosamente." });
           if (!decreeData.nombreConfirmado) setDecreeData(prev => ({ ...prev, nombreConfirmado: `${dbRecord.nombres} ${dbRecord.apellidos}` }));
           
+          // 🚀 SOLUCIÓN A LA FECHA DE NACIMIENTO: Usar formatDateForInput
           setNewPartida(prev => ({
             ...prev,
             nombres: dbRecord.nombres || raw.nombres || '', 
             apellidos: dbRecord.apellidos || raw.apellidos || '',
-            fechaSacramento: dbRecord.celebration_date || raw.fechaSacramento || '', 
+            fechaSacramento: formatDateForInput(dbRecord.celebration_date || raw.fechaSacramento), 
             lugarSacramento: raw.lugarSacramento || '',
             sexo: dbRecord.sexo || raw.sexo || '', 
-            fechaNacimiento: dbRecord.fecha_nacimiento || raw.fechaNacimiento || '',
+            fechaNacimiento: formatDateForInput(dbRecord.fecha_nacimiento || raw.fechaNacimiento || raw.birthDate),
             edad: raw.edad || '',
-            nombrePadre: dbRecord.nombre_padre || raw.nombrePadre || '', 
-            nombreMadre: dbRecord.nombre_madre || raw.nombreMadre || '',
-            lugarBautismo: dbRecord.lugar_bautismo || raw.lugarBautismo || '',
-            libroBautismo: raw.libroBautismo || '',
-            folioBautismo: raw.folioBautismo || '',
-            numeroBautismo: raw.numeroBautismo || '',
+            nombrePadre: dbRecord.nombre_padre || raw.nombrePadre || raw.PADRE || '', 
+            nombreMadre: dbRecord.nombre_madre || raw.nombreMadre || raw.MADRE || '',
+            lugarBautismo: dbRecord.lugar_bautismo || raw.lugarBautismo || raw.LUGBAU || '',
             padrinos: dbRecord.padrinos || raw.padrinos || '',
             ministro: dbRecord.ministro || raw.ministro || '',
-            // Se respeta el daFe de la máquina del tiempo
           }));
         }
       } else { setSearchMessage({ type: 'error', text: "No se encontró ninguna confirmación en la nube." }); }
     } catch (error) { setSearchMessage({ type: 'error', text: "Error conectando con la base de datos." }); } 
     finally { setIsLoading(false); }
+  };
+
+  // 🚀 AUTORELLENO DESDE LA BÚSQUEDA DEL MODAL
+  const handleSelectBaptismPartida = (partida) => {
+    let normalizedSex = '';
+    if (partida.sex || partida.sexo) {
+        const rawSex = String(partida.sex || partida.sexo).toUpperCase();
+        if (rawSex.startsWith('M')) normalizedSex = 'MASCULINO';
+        else if (rawSex.startsWith('F')) normalizedSex = 'FEMENINO';
+    }
+
+    const raw = partida.raw_data || partida || {};
+    setSelectedBaptismId(partida.id);
+
+    setNewPartida(prev => ({
+        ...prev,
+        nombres: partida.nombres || partida.firstName || raw.nombres || prev.nombres,
+        apellidos: partida.apellidos || partida.lastName || raw.apellidos || prev.apellidos,
+        fechaNacimiento: formatDateForInput(partida.fechaNacimiento || partida.birthDate || raw.fechaNacimiento) || prev.fechaNacimiento,
+        sexo: normalizedSex || prev.sexo,
+        nombrePadre: partida.nombrePadre || partida.fatherName || raw.nombrePadre || raw.PADRE || prev.nombrePadre,
+        nombreMadre: partida.nombreMadre || partida.motherName || raw.nombreMadre || raw.MADRE || prev.nombreMadre,
+        lugarBautismo: partida.lugarBautismo || partida.baptismPlace || raw.lugarBautismo || raw.LUGBAU || prev.lugarBautismo
+    }));
+    
+    toast({ title: "Bautismo Enlazado", description: `Datos cargados y vinculados para corrección.`, className: "bg-red-50 border-red-200 text-red-900" });
+    setIsSearchModalOpen(false);
   };
 
   const validateForm = () => {
@@ -235,7 +264,6 @@ const ConfirmationCorrectionNewPage = () => {
         const supletorioFolio = cloudParams.suplementarioFolio || 1;
         const supletorioNumero = cloudParams.suplementarioNumero || 1;
 
-        // Limpieza de Prefijos
         let finalDaFe = cleanTitle(newPartida.daFe);
         finalDaFe = finalDaFe !== 'EL PÁRROCO' ? `PBRO. ${finalDaFe}` : finalDaFe;
 
@@ -276,6 +304,7 @@ const ConfirmationCorrectionNewPage = () => {
           dafe: finalDaFe,
           da_fe: finalDaFe,
           ministerFaith: finalDaFe,
+          linkedBaptismId: selectedBaptismId, // Guardamos referencia por si se auto-completó
 
           originalPartidaId: foundRecord.id,
           originalPartidaSummary: { 
@@ -290,7 +319,7 @@ const ConfirmationCorrectionNewPage = () => {
           }
         };
 
-        // 3. Marcar original como anulada en Supabase (Tabla de Confirmaciones)
+        // 3. Marcar original como anulada en Supabase
         await supabase.from('confirmations').update({ 
             status: 'anulada', nota_marginal: noteAnulada, da_fe: finalDaFe,
             raw_data: { ...foundRecord, notaMarginal: noteAnulada, anulado: true, status: 'anulada', daFe: finalDaFe, dafe: finalDaFe } 
@@ -316,7 +345,7 @@ const ConfirmationCorrectionNewPage = () => {
             confirmaciones_params: newParams 
         }, { onConflict: 'parish_id' });
 
-        // 5. Crear Nueva Partida Supletoria de Confirmación
+        // 5. Crear Nueva Partida Supletoria
         const { data: newConf, error: errConf } = await supabase.from('confirmations').insert([{
             parish_id: user.parishId,
             book_number: String(supletorioLibro).padStart(4, '0'), folio: String(supletorioFolio).padStart(4, '0'), number: String(supletorioNumero).padStart(4, '0'),
@@ -336,7 +365,7 @@ const ConfirmationCorrectionNewPage = () => {
 
         setIsLoading(false);
         toast({ title: "Éxito", description: "Decreto guardado y partida de confirmación supletoria creada.", className: "bg-green-50 text-green-900 border-green-200" });
-        navigate('/parroquia/decretos/ver-correcciones');
+        navigate('/parroquia/decretos/ver-correcciones-confirmacion');
         
     } catch (error) {
         setIsLoading(false); console.error("Error al guardar:", error);
@@ -360,7 +389,6 @@ const ConfirmationCorrectionNewPage = () => {
           </div>
         </div>
 
-        {/* 🚀 MAGIA DE PESTAÑAS: Redirige al cambiar */}
         <Tabs 
           value="confirmaciones" 
           onValueChange={(val) => {
@@ -369,7 +397,6 @@ const ConfirmationCorrectionNewPage = () => {
           className="w-full"
         >
           <TabsList className="grid w-full grid-cols-3 mb-10 bg-gray-100 p-1 rounded-2xl h-14">
-            {/* Quitamos el 'disabled' para que se pueda hacer clic e ir a Bautizo */}
             <TabsTrigger value="bautizos" className="rounded-xl font-bold uppercase text-[10px] tracking-widest cursor-pointer text-gray-500 hover:bg-gray-200/50 transition-all">
               Bautizos
             </TabsTrigger>
@@ -434,9 +461,17 @@ const ConfirmationCorrectionNewPage = () => {
             </div>
 
             <div className={`bg-white rounded-3xl border border-gray-200 shadow-sm transition-all duration-500 ${!foundRecord ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
-              <div className="bg-gray-50 px-8 py-4 border-b border-gray-200 flex items-center gap-2">
-                <UserPlus className="w-4 h-4 text-green-600" /><h3 className="text-xs font-black text-green-600 uppercase tracking-widest">02. Datos Corregidos para Libro Supletorio</h3>
+              <div className="bg-gray-50 px-8 py-4 border-b border-gray-200 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-green-600" />
+                  <h3 className="text-xs font-black text-green-600 uppercase tracking-widest">02. Datos Corregidos para Libro Supletorio</h3>
+                </div>
+                {/* 🚀 BOTÓN AÑADIDO: Buscar Partida Origen */}
+                <Button type="button" variant="outline" onClick={() => setIsSearchModalOpen(true)} className="border-red-600 text-red-600 hover:bg-red-50 h-8 text-xs font-bold uppercase tracking-widest px-4 rounded-xl shadow-sm">
+                  <Search className="w-3.5 h-3.5 mr-2" /> Auto-Completar con Bautismo
+                </Button>
               </div>
+              
               <div className="p-10 space-y-10">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-2"><label className={labelClass}>Apellidos</label><Input name="apellidos" value={newPartida.apellidos} onChange={handleNewPartidaChangeUpper} className="py-6 font-bold" /></div>
@@ -483,11 +518,6 @@ const ConfirmationCorrectionNewPage = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div><label className={labelClass}>Lugar y Parroquia de Bautismo</label><Input name="lugarBautismo" value={newPartida.lugarBautismo} onChange={handleNewPartidaChangeUpper} className="py-6" placeholder="EJ: PARROQUIA SAN JUAN BAUTISTA" /></div>
                     </div>
-                    <div className="grid grid-cols-3 gap-6 bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                        <div><label className={labelClass}>Libro Baut.</label><Input name="libroBautismo" value={newPartida.libroBautismo} onChange={handleNewPartidaChangeRaw} className="text-center font-mono py-6" /></div>
-                        <div><label className={labelClass}>Folio Baut.</label><Input name="folioBautismo" value={newPartida.folioBautismo} onChange={handleNewPartidaChangeRaw} className="text-center font-mono py-6" /></div>
-                        <div><label className={labelClass}>Acta Baut.</label><Input name="numeroBautismo" value={newPartida.numeroBautismo} onChange={handleNewPartidaChangeRaw} className="text-center font-mono py-6" /></div>
-                    </div>
                 </div>
 
                 <div className="space-y-2 border-t pt-10">
@@ -515,6 +545,13 @@ const ConfirmationCorrectionNewPage = () => {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* 🚀 MODAL PARA AUTOCOMPLETAR DATOS DE BAUTISMO */}
+      <SearchBaptismPartidaModal 
+          isOpen={isSearchModalOpen}
+          onClose={() => setIsSearchModalOpen(false)}
+          onSelectPartida={handleSelectBaptismPartida}
+      />
     </DashboardLayout>
   );
 };
