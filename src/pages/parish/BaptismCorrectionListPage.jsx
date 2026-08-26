@@ -16,7 +16,7 @@ import { calculatePreviousConsecutive } from '@/services/sacramentParametersServ
 
 // Librería y Plantilla para Impresión Directa
 import { useReactToPrint } from 'react-to-print';
-import BaptismCorrectionPrintTemplate from '@/components/impresion/BaptismCorrectionPrintTemplate'; 
+import BaptismCorrectionPrintTemplate from '@/components/BaptismCorrectionPrintTemplate'; 
 
 const BaptismCorrectionListPage = () => {
     const { user } = useAuth();
