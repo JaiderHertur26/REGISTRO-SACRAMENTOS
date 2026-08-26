@@ -360,17 +360,31 @@ const ConfirmationCorrectionNewPage = () => {
           </div>
         </div>
 
-        <Tabs defaultValue="confirmaciones" className="w-full">
+        {/* 🚀 MAGIA DE PESTAÑAS: Redirige al cambiar */}
+        <Tabs 
+          value="confirmaciones" 
+          onValueChange={(val) => {
+            if (val === 'bautizos') navigate('/parroquia/decretos/nuevo-correccion');
+          }} 
+          className="w-full"
+        >
           <TabsList className="grid w-full grid-cols-3 mb-10 bg-gray-100 p-1 rounded-2xl h-14">
-            <TabsTrigger value="bautizos" disabled className="opacity-30 rounded-xl font-bold uppercase text-[10px] tracking-widest">Bautizos</TabsTrigger>
-            <TabsTrigger value="confirmaciones" className="rounded-xl font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-red-600 data-[state=active]:shadow-sm">Confirmaciones</TabsTrigger>
-            <TabsTrigger value="matrimonios" disabled className="opacity-30 rounded-xl font-bold uppercase text-[10px] tracking-widest">Matrimonios</TabsTrigger>
+            {/* Quitamos el 'disabled' para que se pueda hacer clic e ir a Bautizo */}
+            <TabsTrigger value="bautizos" className="rounded-xl font-bold uppercase text-[10px] tracking-widest cursor-pointer text-gray-500 hover:bg-gray-200/50 transition-all">
+              Bautizos
+            </TabsTrigger>
+            <TabsTrigger value="confirmaciones" className="rounded-xl font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-red-600 data-[state=active]:shadow-sm">
+              Confirmaciones
+            </TabsTrigger>
+            <TabsTrigger value="matrimonios" disabled className="opacity-30 rounded-xl font-bold uppercase text-[10px] tracking-widest">
+              Matrimonios
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="confirmaciones" className="space-y-8 animate-in fade-in duration-500">
             <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="bg-red-50 px-8 py-4 border-b border-red-100 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-red-600" /><h3 className="text-xs font-black text-red-700 uppercase tracking-widest">01. Información del Decreto</h3>
+                <FileText className="w-4 h-4 text-red-600" /><h3 className="text-xs font-black text-red-700 uppercase tracking-widest">01. Información del Decreto (Confirmación)</h3>
               </div>
               <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div className="space-y-2">
