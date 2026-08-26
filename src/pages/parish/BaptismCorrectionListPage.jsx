@@ -1,19 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
+import { useAppData } from '@/context/AppDataContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import Table from '@/components/ui/Table';
-import { Plus, Search, Eye, Edit, Trash2, FileText, ShieldAlert, BookOpen, ArrowRight, Loader2, Cloud } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/Tabs';
+import { Plus, Search, Eye, Edit, Trash2, FileText, ShieldAlert, BookOpen, ArrowRight, Loader2, Cloud, Printer } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import ViewCorrectionDecreeModal from '@/components/modals/ViewCorrectionDecreeModal';
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import { supabase } from '@/lib/supabaseClient';
 import { calculatePreviousConsecutive } from '@/services/sacramentParametersService';
 
+// Librería y Plantilla para Impresión Directa
+import { useReactToPrint } from 'react-to-print';
+import BaptismCorrectionPrintTemplate from '@/components/impresion/BaptismCorrectionPrintTemplate'; 
+
 const BaptismCorrectionListPage = () => {
     const { user } = useAuth();
+    const { getMisDatosList, getParrocos } = useAppData();
     const navigate = useNavigate();
     const { toast } = useToast();
 
@@ -25,6 +32,33 @@ const BaptismCorrectionListPage = () => {
     const [viewModalOpen, setViewModalOpen] = useState(false);
     const [selectedDecree, setSelectedDecree] = useState(null);
     const [deleteConfig, setDeleteConfig] = useState({ isOpen: false, id: null, name: '' });
+
+    // 🚀 LÓGICA DE IMPRESIÓN DIRECTA 1-CLIC
+    const printRef = useRef(null);
+    
+    const handlePrint = useReactToPrint({
+        content: () => printRef.current,
+        documentTitle: 'Decreto_Correccion_Bautismo'
+    });
+
+    const onPrintClick = (row) => {
+        setSelectedDecree(row);
+        setTimeout(() => handlePrint(), 300);
+    };
+
+    const misDatosList = user?.parishId ? getMisDatosList(user.parishId) : [];
+    const parrocos = user?.parishId ? getParrocos(user.parishId) : [];
+    const parrocoActivo = parrocos?.find(p => String(p.estado || p.Estado) === '1');
+    const parrocoNombre = parrocoActivo ? `${parrocoActivo.nombre} ${parrocoActivo.apellido || ''}`.trim() : '';
+    const parroquiaInfo = misDatosList?.[0] || {};
+    
+    const printData = selectedDecree ? {
+        ...selectedDecree,
+        parroquiaInfo,
+        parroquiaNombre: parroquiaInfo.nombre || user?.parishName,
+        ciudad: parroquiaInfo.ciudad || user?.city,
+        parrocoNombre
+    } : {};
 
     useEffect(() => { if (user?.parishId) loadParishCorrectionsFromCloud(); }, [user]);
 
@@ -105,7 +139,6 @@ const BaptismCorrectionListPage = () => {
                             cloudParams.suplementarioReiniciar || false
                         );
 
-                        // FIX: Comparamos como enteros. Si es seguro, inyectamos los folios exactos con ceros.
                         if (parseInt(newEntry, 10) === parseInt(previosSupletorios.numero, 10)) {
                             const newParamsObj = { 
                                 ...cloudParams, 
@@ -184,6 +217,10 @@ const BaptismCorrectionListPage = () => {
             render: (row) => (
                 <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-blue-600 hover:bg-blue-50 rounded-xl" onClick={() => { setSelectedDecree(row); setViewModalOpen(true); }}><Eye className="w-4 h-4" /></Button>
+                    
+                    {/* 🚀 Botón: IMPRIMIR DIRECTO */}
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-purple-600 hover:bg-purple-50 rounded-xl" onClick={() => onPrintClick(row)}><Printer className="w-4 h-4" /></Button>
+                    
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-amber-600 hover:bg-amber-50 rounded-xl" onClick={() => navigate(`/parroquia/decretos/editar-correccion?id=${row.id}`)}><Edit className="w-4 h-4" /></Button>
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-red-600 hover:bg-red-50 rounded-xl" onClick={() => setDeleteConfig({ isOpen: true, id: row.id, name: row.decreeNumber })}><Trash2 className="w-4 h-4" /></Button>
                 </div>
@@ -193,13 +230,22 @@ const BaptismCorrectionListPage = () => {
 
     return (
         <DashboardLayout entityName={user?.parishName || "Parroquia"}>
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                 <div className="flex items-center gap-4">
                     <div className="bg-amber-100 p-3 rounded-2xl text-amber-600 relative"><ShieldAlert className="w-7 h-7" /><div className="absolute -top-1 -right-1 bg-blue-500 rounded-full p-0.5"><Cloud className="w-3 h-3 text-white" /></div></div>
-                    <div><h1 className="text-3xl font-black text-gray-900 font-serif">Archivo de Decretos</h1><p className="text-gray-500 text-sm font-medium uppercase text-[10px] tracking-widest">Correcciones Sincronizadas (Nube)</p></div>
+                    <div><h1 className="text-3xl font-black text-gray-900 font-serif">Archivo de Decretos</h1><p className="text-gray-500 text-sm font-medium uppercase text-[10px] tracking-widest">Correcciones de Bautismo</p></div>
                 </div>
                 <Button className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white px-8 py-6 rounded-2xl font-black uppercase text-xs shadow-xl shadow-blue-900/20 active:scale-95 transition-all" onClick={() => navigate('/parroquia/decretos/nuevo-correccion')}><Plus className="w-4 h-4 mr-2" /> Nuevo Decreto</Button>
             </div>
+
+            {/* 🚀 AÑADIDO: PESTAÑAS TIPO CAPARAZÓN PARA NAVEGAR ENTRE SACRAMENTOS */}
+            <Tabs defaultValue="bautizos" className="w-full mb-8">
+                <TabsList className="grid w-full grid-cols-3 bg-gray-100 p-1 rounded-2xl h-14">
+                    <TabsTrigger value="bautizos" className="rounded-xl font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-[#4B7BA7] data-[state=active]:shadow-sm">Bautizos</TabsTrigger>
+                    <TabsTrigger value="confirmaciones" onClick={() => navigate('/parroquia/decretos/ver-correcciones-confirmacion')} className="rounded-xl font-bold uppercase text-[10px] tracking-widest cursor-pointer text-gray-500 hover:bg-gray-200/50 transition-all">Confirmaciones</TabsTrigger>
+                    <TabsTrigger value="matrimonios" disabled className="opacity-30 rounded-xl font-bold uppercase text-[10px] tracking-widest">Matrimonios</TabsTrigger>
+                </TabsList>
+            </Tabs>
 
             <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-8 bg-gray-50/50 border-b border-gray-100">
@@ -215,9 +261,8 @@ const BaptismCorrectionListPage = () => {
                 )}
             </div>
 
-            {viewModalOpen && <ViewCorrectionDecreeModal isOpen={viewModalOpen} onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }} decreeData={selectedDecree} />}
+            {viewModalOpen && <ViewCorrectionDecreeModal isOpen={viewModalOpen} onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }} decreeData={selectedDecree} sacrament="bautismo" />}
             
-            {/* Modal de Eliminación con advertencia de Rollback */}
             <ConfirmationDialog 
                 isOpen={deleteConfig.isOpen} 
                 title="Restaurar Partida y Eliminar Decreto" 
@@ -227,6 +272,14 @@ const BaptismCorrectionListPage = () => {
                 variant="destructive"
                 confirmText={isDeleting ? "Restaurando..." : "Confirmar Restauración"}
             />
+
+            {/* ========================================================= */}
+            {/* 🖨️ CONTENEDORES OCULTOS PARA IMPRESIÓN (BAUTISMO) */}
+            {/* ========================================================= */}
+            <div style={{ display: 'none' }}>
+                <BaptismCorrectionPrintTemplate ref={printRef} data={printData} />
+            </div>
+
         </DashboardLayout>
     );
 };
