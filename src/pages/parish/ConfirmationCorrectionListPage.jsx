@@ -1,20 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
+import { useAppData } from '@/context/AppDataContext'; // 🚀 AÑADIDO
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import Table from '@/components/ui/Table';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Plus, Search, Eye, Edit, Trash2, FileText, ShieldAlert, BookOpen, ArrowRight, Loader2, Cloud } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Trash2, FileText, ShieldAlert, BookOpen, ArrowRight, Loader2, Cloud, Printer } from 'lucide-react'; // 🚀 AÑADIDO: Printer
 import { useToast } from '@/components/ui/use-toast';
 import ViewCorrectionDecreeModal from '@/components/modals/ViewCorrectionDecreeModal';
 import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 import { supabase } from '@/lib/supabaseClient';
 import { calculatePreviousConsecutive } from '@/services/sacramentParametersService';
 
+// 🚀 AÑADIDO: Librería de Impresión y Plantillas de Confirmación
+import { useReactToPrint } from 'react-to-print';
+import ConfirmationCorrectionPrintTemplate from '@/components/impresion/ConfirmationCorrectionPrintTemplate';
+import PrintCorrectionDecreeConfirmations from '@/components/impresion/PrintCorrectionDecreeConfirmations';
+
 const ConfirmationCorrectionListPage = () => {
     const { user } = useAuth();
+    const { getMisDatosList, getParrocos } = useAppData(); // 🚀 AÑADIDO: Para extraer datos del Párroco
     const navigate = useNavigate();
     const { toast } = useToast();
 
@@ -27,13 +34,40 @@ const ConfirmationCorrectionListPage = () => {
     const [selectedDecree, setSelectedDecree] = useState(null);
     const [deleteConfig, setDeleteConfig] = useState({ isOpen: false, id: null, name: '' });
 
+    // 🚀 LÓGICA DE IMPRESIÓN DIRECTA 1-CLIC
+    const printRef = useRef(null);
+    
+    const handlePrint = useReactToPrint({
+        content: () => printRef.current,
+        documentTitle: 'Decreto_Correccion_Confirmacion'
+    });
+
+    const onPrintClick = (row) => {
+        setSelectedDecree(row);
+        // Damos un pequeño respiro para que React actualice el state en el componente oculto
+        setTimeout(() => handlePrint(), 300);
+    };
+
+    // Preparamos los datos de la parroquia para inyectar en la plantilla de impresión
+    const misDatosList = user?.parishId ? getMisDatosList(user.parishId) : [];
+    const parrocos = user?.parishId ? getParrocos(user.parishId) : [];
+    const parrocoActivo = parrocos?.find(p => String(p.estado || p.Estado) === '1');
+    const parrocoNombre = parrocoActivo ? `${parrocoActivo.nombre} ${parrocoActivo.apellido || ''}`.trim() : '';
+    const parroquiaInfo = misDatosList?.[0] || {};
+    
+    const printData = selectedDecree ? {
+        ...selectedDecree,
+        parroquiaInfo,
+        parroquiaNombre: parroquiaInfo.nombre || user?.parishName,
+        ciudad: parroquiaInfo.ciudad || user?.city,
+        parrocoNombre
+    } : {};
+
     useEffect(() => { if (user?.parishId) loadParishCorrectionsFromCloud(); }, [user]);
 
     const loadParishCorrectionsFromCloud = async () => {
         setLoading(true);
         try {
-            // 🚀 Filtrar decretos de corrección. Nota: Si manejas varios sacramentos, 
-            // asegúrate de que el payload diferencie entre bautismos y confirmaciones.
             const { data, error } = await supabase.from('decretos').select('*').eq('tipo', 'correccion')
                 .eq('parish_id', user.parishId).order('created_at', { ascending: false });
 
@@ -183,8 +217,16 @@ const ConfirmationCorrectionListPage = () => {
             header: 'Acciones', className: "text-right",
             render: (row) => (
                 <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-9 w-9 text-red-600 hover:bg-red-50 rounded-xl" onClick={() => { setSelectedDecree(row); setViewModalOpen(true); }}><Eye className="w-4 h-4" /></Button>
+                    {/* Botón 1: Ojo (Ver en Modal) */}
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-blue-600 hover:bg-blue-50 rounded-xl" onClick={() => { setSelectedDecree(row); setViewModalOpen(true); }}><Eye className="w-4 h-4" /></Button>
+                    
+                    {/* 🚀 Botón 2: IMPRIMIR DIRECTO (Nuevo) */}
+                    <Button variant="ghost" size="icon" className="h-9 w-9 text-purple-600 hover:bg-purple-50 rounded-xl" onClick={() => onPrintClick(row)}><Printer className="w-4 h-4" /></Button>
+                    
+                    {/* Botón 3: Editar */}
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-amber-600 hover:bg-amber-50 rounded-xl" onClick={() => navigate(`/parroquia/decretos/editar-correccion-confirmacion?id=${row.id}`)}><Edit className="w-4 h-4" /></Button>
+                    
+                    {/* Botón 4: Eliminar */}
                     <Button variant="ghost" size="icon" className="h-9 w-9 text-red-600 hover:bg-red-50 rounded-xl" onClick={() => setDeleteConfig({ isOpen: true, id: row.id, name: row.decreeNumber })}><Trash2 className="w-4 h-4" /></Button>
                 </div>
             )
@@ -224,7 +266,8 @@ const ConfirmationCorrectionListPage = () => {
                 )}
             </div>
 
-            {viewModalOpen && <ViewCorrectionDecreeModal isOpen={viewModalOpen} onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }} decreeData={selectedDecree} />}
+            {/* Inyectamos "sacrament" para que el modal sepa cómo comportarse si lo llegaras a editar luego */}
+            {viewModalOpen && <ViewCorrectionDecreeModal isOpen={viewModalOpen} onClose={() => { setViewModalOpen(false); setSelectedDecree(null); }} decreeData={selectedDecree} sacrament="confirmacion" />}
             
             <ConfirmationDialog 
                 isOpen={deleteConfig.isOpen} 
@@ -235,6 +278,18 @@ const ConfirmationCorrectionListPage = () => {
                 variant="destructive"
                 confirmText={isDeleting ? "Restaurando..." : "Confirmar Restauración"}
             />
+
+            {/* ========================================================= */}
+            {/* 🖨️ CONTENEDORES OCULTOS PARA IMPRESIÓN (CONFIRMACIÓN) */}
+            {/* ========================================================= */}
+            <div style={{ display: 'none' }}>
+                <ConfirmationCorrectionPrintTemplate ref={printRef} data={printData} />
+                
+                {/* Dejo la versión de Cancillería comentada por si alguna vez quieres 
+                    crear un segundo botón que imprima el formato del obispado */}
+                {/* <PrintCorrectionDecreeConfirmations ref={chanceryPrintRef} decreeData={selectedDecree} /> */}
+            </div>
+
         </DashboardLayout>
     );
 };
