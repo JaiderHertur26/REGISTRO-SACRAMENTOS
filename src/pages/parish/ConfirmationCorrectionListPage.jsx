@@ -72,10 +72,12 @@ const ConfirmationCorrectionListPage = () => {
                 .eq('parish_id', user.parishId).order('created_at', { ascending: false });
 
             if (error) throw error;
+            
+            // 🚀 FILTRO APLICADO: Solo los que NO tengan abuelos (Confirmaciones)
             const formattedData = data.map(item => ({
                 id: item.id, parish_id: item.parish_id, created_at: item.created_at,
                 ...(typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload)
-            }));
+            })).filter(item => item.abuelosPaternos === undefined || item.sacramento === 'confirmacion');
             
             setCorrections(formattedData);
         } catch (error) { toast({ title: "Error", description: "No se descargaron los decretos.", variant: "destructive" }); } 

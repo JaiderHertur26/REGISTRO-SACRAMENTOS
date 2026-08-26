@@ -1,9 +1,11 @@
 import React, { useRef } from 'react';
 import { X, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import PrintCorrectionDecree from '@/components/PrintCorrectionDecree';
+import PrintCorrectionDecree from '@/components/PrintCorrectionDecree'; 
+// Asegúrate de que la ruta coincida con donde guardaste el archivo
+import PrintCorrectionDecreeConfirmations from '@/components/PrintCorrectionDecreeConfirmations'; 
 
-const ViewCorrectionDecreeModal = ({ isOpen, onClose, decreeData }) => {
+const ViewCorrectionDecreeModal = ({ isOpen, onClose, decreeData, sacrament = 'bautismo' }) => {
     const printComponentRef = useRef();
 
     if (!isOpen || !decreeData) return null;
@@ -30,10 +32,12 @@ const ViewCorrectionDecreeModal = ({ isOpen, onClose, decreeData }) => {
                 {/* Content - Scrollable Preview Area */}
                 <div className="flex-1 overflow-auto bg-gray-100 p-8 flex justify-center">
                     <div className="shadow-2xl print:shadow-none">
-                        <PrintCorrectionDecree 
-                            ref={printComponentRef} 
-                            decreeData={decreeData} 
-                        />
+                        {/* 🚀 CONDICIONAL INTELIGENTE PARA EL FORMATO DE IMPRESIÓN */}
+                        {sacrament === 'confirmacion' ? (
+                            <PrintCorrectionDecreeConfirmations ref={printComponentRef} decreeData={decreeData} />
+                        ) : (
+                            <PrintCorrectionDecree ref={printComponentRef} decreeData={decreeData} />
+                        )}
                     </div>
                 </div>
 
