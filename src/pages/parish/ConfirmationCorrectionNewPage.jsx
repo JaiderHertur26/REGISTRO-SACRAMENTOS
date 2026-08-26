@@ -195,7 +195,6 @@ const ConfirmationCorrectionNewPage = () => {
           setSearchMessage({ type: 'success', text: "Partida de confirmación encontrada exitosamente." });
           if (!decreeData.nombreConfirmado) setDecreeData(prev => ({ ...prev, nombreConfirmado: `${dbRecord.nombres} ${dbRecord.apellidos}` }));
           
-          // 🚀 SE USA formatDateForInput PARA EVITAR QUE SE QUEDEN EN BLANCO
           setNewPartida(prev => ({
             ...prev,
             nombres: dbRecord.nombres || raw.nombres || '', 
@@ -287,6 +286,7 @@ const ConfirmationCorrectionNewPage = () => {
           anulado: false, estado: 'permanente', status: 'seated', notaMarginal: notaSupletoriaFinal
         };
 
+        // 🚀 AQUI SE AGREGAN LOS CAMPOS FALTANTES PARA QUE EL DECRETO LOS PUEDA LEER AL IMPRIMIR
         const payloadDecree = {
           decreeNumber: decreeData.numeroDeDecreto, 
           decreeDate: decreeData.fechaEmision,
@@ -294,10 +294,14 @@ const ConfirmationCorrectionNewPage = () => {
           observaciones: newPartida.observaciones,
           targetName: decreeData.nombreConfirmado, 
           newTargetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(), 
+          sacramento: 'confirmacion', // 🚀 Etiqueta adicional para asegurar que es Confirmación
           
           fechaSacramento: newPartida.fechaSacramento,
+          lugarSacramento: newPartida.lugarSacramento,
           sexo: newPartida.sexo,
           fechaNacimiento: newPartida.fechaNacimiento,
+          edad: newPartida.edad,
+          lugarBautismo: newPartida.lugarBautismo, // 🚀 CAMPO AÑADIDO PARA IMPRESIÓN
           nombrePadre: newPartida.nombrePadre,
           nombreMadre: newPartida.nombreMadre,
           padrinos: newPartida.padrinos,
@@ -317,6 +321,7 @@ const ConfirmationCorrectionNewPage = () => {
           newPartidaSummary: { 
               book: supletorioLibro, page: supletorioFolio, entry: supletorioNumero,
               nombres: newPartida.nombres, apellidos: newPartida.apellidos,
+              lugarBautismo: newPartida.lugarBautismo, // 🚀 CAMPO AÑADIDO POR SEGURIDAD
               daFe: finalDaFe, dafe: finalDaFe
           }
         };
