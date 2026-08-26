@@ -6,7 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Save, ArrowLeft, FileText, UserPlus, AlertCircle, CheckCircle2, Search, Loader2 } from 'lucide-react';
+import { 
+  Save, ArrowLeft, FileText, UserPlus, AlertCircle, CheckCircle2, 
+  Search, Loader2, Droplet, Users, PenTool
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import { marginalNotesEngine } from '@/utils/marginalNotesEngine'; 
@@ -14,27 +17,42 @@ import { calculateNextConsecutive } from '@/services/sacramentParametersService'
 
 const cleanTitle = (nameStr) => {
     if (!nameStr) return '';
-    return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|SACERDOTE\s*)/i, '').trim();
+    return String(nameStr).replace(/^(PBRO\.?\s*|PADRE\s*|FRAY\s*|MONS\.?\s*|EXCMO\.?\s*|SACERDOTE\s*)/i, '').trim();
 };
 
-const BaptismCorrectionNewPage = () => {
+const initialDecreeData = {
+    parroquia: '', numeroDeDecreto: '', fechaEmision: new Date().toISOString().split('T')[0],
+    conceptoAnulacion: '', targetName: '', Libro: '', folio: '', numero: ''
+};
+
+const initialPartida = {
+    // Comunes
+    fechaSacramento: '', apellidos: '', nombres: '', sexo: '', fechaNacimiento: '', 
+    nombrePadre: '', nombreMadre: '', padrinos: '', ministro: '', daFe: '', observaciones: '', lugarBautismo: '',
+    // Exclusivos Bautizo
+    lugarNacimiento: '', tipoUnionPadres: '', abuelosPaternos: '', abuelosMaternos: '',
+    // Exclusivos Confirmación
+    lugarSacramento: '', edad: '', libroBautismo: '', folioBautismo: '', numeroBautismo: ''
+};
+
+const CorreccionDecretosPage = () => {
   const { user } = useAuth();
-  // 🚀 EXTRAEMOS getParrocos PARA VIAJAR EN EL TIEMPO
   const { getParrocoActual, getMisDatosList, getParrocos } = useAppData();
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  const [activeTab, setActiveTab] = useState('bautizos'); // Controla la pestaña activa
   const [isLoading, setIsLoading] = useState(false);
-  const [cloudParams, setCloudParams] = useState({});
+  
+  // Parámetros de la nube separados
+  const [cloudParams, setCloudParams] = useState({ bautizos: {}, confirmaciones: {} });
   const [conceptos, setConceptos] = useState([]);
   
   const [listaSacerdotes, setListaSacerdotes] = useState([]);
   const [sacerdotePorDefecto, setSacerdotePorDefecto] = useState('');
 
-  const [decreeData, setDecreeData] = useState({
-    parroquia: '', numeroDeDecreto: '', fechaEmision: new Date().toISOString().split('T')[0],
-    conceptoAnulacion: '', nombreBautizado: '', Libro: '', folio: '', numero: ''
-  });
+  const [decreeData, setDecreeData] = useState(initialDecreeData);
+  const [newPartida, setNewPartida] = useState(initialPartida);
 
   const [foundRecord, setFoundRecord] = useState(null);
   const [searchMessage, setSearchMessage] = useState(null);
@@ -42,13 +60,7 @@ const BaptismCorrectionNewPage = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const wrapperRef = useRef(null);
 
-  const [newPartida, setNewPartida] = useState({
-    lugarBautismo: '', fechaSacramento: '', apellidos: '', nombres: '',
-    fechaNacimiento: '', lugarNacimiento: '', sexo: '', nombrePadre: '',
-    nombreMadre: '', tipoUnionPadres: '', abuelosPaternos: '', abuelosMaternos: '',
-    padrinos: '', ministro: '', daFe: '', observaciones: ''
-  });
-
+  // 🚀 INICIALIZACIÓN DE DATOS (Carga ambas configuraciones)
   useEffect(() => {
     const initializeData = async () => {
       if (!user) return;
@@ -58,7 +70,6 @@ const BaptismCorrectionNewPage = () => {
           let parishLabel = misDatos?.length > 0 ? `${misDatos[0].nombre} - ${misDatos[0].ciudad}` : `${user.parishName} - ${user.city}`;
           setDecreeData(prev => ({ ...prev, parroquia: parishLabel }));
 
-          // 🚀 CARGAMOS LA LISTA HISTÓRICA DE PÁRROCOS
           const parrocos = getParrocos(user.parishId) || [];
           setListaSacerdotes(parrocos);
 
@@ -69,8 +80,13 @@ const BaptismCorrectionNewPage = () => {
               setNewPartida(prev => ({ ...prev, daFe: defPriest }));
           }
 
-          const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params').eq('parish_id', user.parishId).maybeSingle();
-          if (paramsData && paramsData.bautizos_params) setCloudParams(paramsData.bautizos_params);
+          const { data: paramsData } = await supabase.from('parish_parameters').select('bautizos_params, confirmaciones_params').eq('parish_id', user.parishId).maybeSingle();
+          if (paramsData) {
+            setCloudParams({
+                bautizos: paramsData.bautizos_params || {},
+                confirmaciones: paramsData.confirmaciones_params || {}
+            });
+          }
         }
 
         let targetDioceseId = user.dioceseId || user.diocese_id;
@@ -88,7 +104,7 @@ const BaptismCorrectionNewPage = () => {
     initializeData();
   }, [user, getParrocoActual, getMisDatosList, getParrocos]);
 
-  // 🚀 MÁQUINA DEL TIEMPO: VIGILA LA FECHA DEL DECRETO PARA ASIGNAR EL "DA FE" CORRECTO
+  // 🚀 MÁQUINA DEL TIEMPO: DA FE
   useEffect(() => {
       if (decreeData.fechaEmision && listaSacerdotes.length > 0) {
           const dStr = decreeData.fechaEmision.includes('T') ? decreeData.fechaEmision : `${decreeData.fechaEmision}T12:00:00`;
@@ -113,6 +129,24 @@ const BaptismCorrectionNewPage = () => {
       }
   }, [decreeData.fechaEmision, listaSacerdotes, sacerdotePorDefecto]);
 
+  // 🚀 CÁLCULO DE EDAD AUTOMÁTICO (Solo para Confirmaciones)
+  useEffect(() => {
+      if (activeTab === 'confirmaciones' && newPartida.fechaNacimiento && newPartida.fechaSacramento) {
+          const birthStr = newPartida.fechaNacimiento.includes('T') ? newPartida.fechaNacimiento : `${newPartida.fechaNacimiento}T12:00:00`;
+          const confStr = newPartida.fechaSacramento.includes('T') ? newPartida.fechaSacramento : `${newPartida.fechaSacramento}T12:00:00`;
+          const birth = new Date(birthStr);
+          const conf = new Date(confStr);
+          if (!isNaN(birth.getTime()) && !isNaN(conf.getTime())) {
+              let age = conf.getFullYear() - birth.getFullYear();
+              const m = conf.getMonth() - birth.getMonth();
+              if (m < 0 || (m === 0 && conf.getDate() < birth.getDate())) age--;
+              if (age >= 0 && newPartida.edad !== age.toString()) {
+                  setNewPartida(prev => ({ ...prev, edad: age.toString() }));
+              }
+          }
+      }
+  }, [newPartida.fechaNacimiento, newPartida.fechaSacramento, activeTab]);
+
   useEffect(() => {
     function handleClickOutside(event) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setShowSuggestions(false);
@@ -121,30 +155,40 @@ const BaptismCorrectionNewPage = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [wrapperRef]);
 
+  // 🚀 MANEJO DE CAMBIO DE PESTAÑAS (Limpia el formulario para evitar cruce de datos)
+  const handleTabChange = (val) => {
+    if(val === 'matrimonios') return;
+    setActiveTab(val);
+    setFoundRecord(null);
+    setSearchMessage(null);
+    setDecreeData(prev => ({ ...initialDecreeData, parroquia: prev.parroquia, fechaEmision: prev.fechaEmision }));
+    setNewPartida({ ...initialPartida, daFe: sacerdotePorDefecto });
+  };
+
   const handleDecreeChange = async (e) => {
     const { name, value } = e.target;
     setDecreeData(prev => ({ ...prev, [name]: value }));
 
     if (['Libro', 'folio', 'numero'].includes(name)) { setFoundRecord(null); setSearchMessage(null); }
 
-    if (name === 'nombreBautizado' && value.length > 2) {
+    if (name === 'targetName' && value.length > 2) {
         try {
-          const { data } = await supabase.from('baptisms').select('*').eq('parish_id', user?.parishId).ilike('nombres', `%${value}%`).limit(5);
+          const tableName = activeTab === 'bautizos' ? 'baptisms' : 'confirmations';
+          const { data } = await supabase.from(tableName).select('*').eq('parish_id', user?.parishId).ilike('nombres', `%${value}%`).limit(5);
           if (data) {
             setSuggestions(data.map(d => ({ ...d.raw_data, id: d.id, firstName: d.nombres, lastName: d.apellidos })));
             setShowSuggestions(true);
           }
         } catch (error) { setSuggestions([]); setShowSuggestions(false); }
-    } else if (name === 'nombreBautizado') { setSuggestions([]); setShowSuggestions(false); }
+    } else if (name === 'targetName') { setSuggestions([]); setShowSuggestions(false); }
   };
 
   const handleSuggestionClick = (record) => {
-    setDecreeData(prev => ({ ...prev, nombreBautizado: `${record.firstName || record.nombres} ${record.lastName || record.apellidos}`.trim() }));
+    setDecreeData(prev => ({ ...prev, targetName: `${record.firstName || record.nombres} ${record.lastName || record.apellidos}`.trim() }));
     setShowSuggestions(false);
   };
 
   const handleNewPartidaChangeRaw = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
-  const handleNewPartidaChange = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value }));
   const handleNewPartidaChangeUpper = (e) => setNewPartida(prev => ({ ...prev, [e.target.name]: e.target.value.toUpperCase() }));
 
   const handleSearch = async () => {
@@ -154,7 +198,8 @@ const BaptismCorrectionNewPage = () => {
     setIsLoading(true); setSearchMessage(null); setFoundRecord(null);
 
     try {
-      const { data: dbRecord, error } = await supabase.from('baptisms').select('*').eq('parish_id', user?.parishId)
+      const tableName = activeTab === 'bautizos' ? 'baptisms' : 'confirmations';
+      const { data: dbRecord, error } = await supabase.from(tableName).select('*').eq('parish_id', user?.parishId)
         .eq('book_number', String(Libro).padStart(4, '0')).eq('folio', String(folio).padStart(4, '0')).eq('number', String(numero).padStart(4, '0')).maybeSingle();
 
       if (error) throw error;
@@ -163,21 +208,37 @@ const BaptismCorrectionNewPage = () => {
         if (dbRecord.status === 'anulada') {
           setSearchMessage({ type: 'error', text: "Esta partida ya se encuentra ANULADA." });
         } else {
-          const found = { ...dbRecord.raw_data, id: dbRecord.id, status: dbRecord.status };
+          const raw = dbRecord.raw_data || {};
+          const found = { ...raw, id: dbRecord.id, status: dbRecord.status };
           setFoundRecord(found);
           setSearchMessage({ type: 'success', text: "Partida encontrada exitosamente." });
-          if (!decreeData.nombreBautizado) setDecreeData(prev => ({ ...prev, nombreBautizado: `${dbRecord.nombres} ${dbRecord.apellidos}` }));
+          if (!decreeData.targetName) setDecreeData(prev => ({ ...prev, targetName: `${dbRecord.nombres} ${dbRecord.apellidos}` }));
           
           setNewPartida(prev => ({
             ...prev,
-            nombres: dbRecord.nombres || '', apellidos: dbRecord.apellidos || '',
-            fechaSacramento: dbRecord.celebration_date || '', fechaNacimiento: dbRecord.fecha_nacimiento || '',
-            lugarNacimiento: dbRecord.lugar_nacimiento || '', lugarBautismo: dbRecord.lugar_bautismo || '',
-            sexo: dbRecord.sexo || '', nombrePadre: dbRecord.nombre_padre || '', nombreMadre: dbRecord.nombre_madre || '',
-            tipoUnionPadres: dbRecord.tipo_union_padres || '', abuelosPaternos: dbRecord.abuelos_paternos || '',
-            abuelosMaternos: dbRecord.abuelos_maternos || '', padrinos: dbRecord.padrinos || '',
-            ministro: dbRecord.ministro || '',
-            // No sobreescribimos daFe aquí para respetar la máquina del tiempo
+            nombres: dbRecord.nombres || raw.nombres || '',
+            apellidos: dbRecord.apellidos || raw.apellidos || '',
+            fechaSacramento: dbRecord.celebration_date || raw.fechaSacramento || '',
+            sexo: dbRecord.sexo || raw.sexo || '',
+            fechaNacimiento: dbRecord.fecha_nacimiento || raw.fechaNacimiento || '',
+            nombrePadre: dbRecord.nombre_padre || raw.nombrePadre || '', 
+            nombreMadre: dbRecord.nombre_madre || raw.nombreMadre || '',
+            lugarBautismo: dbRecord.lugar_bautismo || raw.lugarBautismo || '',
+            padrinos: dbRecord.padrinos || raw.padrinos || '',
+            ministro: dbRecord.ministro || raw.ministro || '',
+            // Datos condicionales según pestaña
+            ...(activeTab === 'bautizos' ? {
+               lugarNacimiento: dbRecord.lugar_nacimiento || raw.lugarNacimiento || '',
+               tipoUnionPadres: dbRecord.tipo_union_padres || raw.tipoUnionPadres || '',
+               abuelosPaternos: dbRecord.abuelos_paternos || raw.abuelosPaternos || '',
+               abuelosMaternos: dbRecord.abuelos_maternos || raw.abuelosMaternos || ''
+            } : {
+               lugarSacramento: raw.lugarSacramento || '',
+               edad: raw.edad || '',
+               libroBautismo: raw.libroBautismo || '',
+               folioBautismo: raw.folioBautismo || '',
+               numeroBautismo: raw.numeroBautismo || ''
+            })
           }));
         }
       } else { setSearchMessage({ type: 'error', text: "No se encontró ninguna partida en la nube." }); }
@@ -190,6 +251,7 @@ const BaptismCorrectionNewPage = () => {
     return ['fechaSacramento', 'nombres', 'apellidos'].every(field => newPartida[field]);
   };
 
+  // 🚀 GUARDAR DATOS DINÁMICAMENTE
   const handleSave = async () => {
     if (!validateForm()) { toast({ title: "Validación", description: "Complete todos los campos requeridos.", variant: "destructive" }); return; }
     setIsLoading(true);
@@ -203,11 +265,13 @@ const BaptismCorrectionNewPage = () => {
             toast({ title: "Decreto Duplicado", description: `El decreto ${decreeData.numeroDeDecreto} ya existe.`, variant: "destructive" }); return;
         }
 
-        const supletorioLibro = cloudParams.suplementarioLibro || 1;
-        const supletorioFolio = cloudParams.suplementarioFolio || 1;
-        const supletorioNumero = cloudParams.suplementarioNumero || 1;
+        const activeParams = activeTab === 'bautizos' ? cloudParams.bautizos : cloudParams.confirmaciones;
+        const tableName = activeTab === 'bautizos' ? 'baptisms' : 'confirmations';
 
-        // 🚀 LIMPIEZA DE PREFIJOS ANTES DE GUARDAR
+        const supletorioLibro = activeParams.suplementarioLibro || 1;
+        const supletorioFolio = activeParams.suplementarioFolio || 1;
+        const supletorioNumero = activeParams.suplementarioNumero || 1;
+
         let finalDaFe = cleanTitle(newPartida.daFe);
         finalDaFe = finalDaFe !== 'EL PÁRROCO' ? `PBRO. ${finalDaFe}` : finalDaFe;
 
@@ -223,7 +287,7 @@ const BaptismCorrectionNewPage = () => {
 
         const partidaToSave = {
           ...newPartida,
-          daFe: finalDaFe, // Inyección Directa
+          daFe: finalDaFe, 
           Libro: String(supletorioLibro).padStart(4, '0'), folio: String(supletorioFolio).padStart(4, '0'), numero: String(supletorioNumero).padStart(4, '0'),
           book_number: String(supletorioLibro).padStart(4, '0'), page_number: String(supletorioFolio).padStart(4, '0'), entry_number: String(supletorioNumero).padStart(4, '0'),
           anulado: false, estado: 'permanente', status: 'seated', notaMarginal: notaSupletoriaFinal
@@ -234,24 +298,25 @@ const BaptismCorrectionNewPage = () => {
           decreeDate: decreeData.fechaEmision,
           conceptoAnulacionId: decreeData.conceptoAnulacion, 
           observaciones: newPartida.observaciones,
-          targetName: decreeData.nombreBautizado, 
+          targetName: decreeData.targetName, 
           newTargetName: `${newPartida.nombres} ${newPartida.apellidos}`.trim(), 
           
           fechaSacramento: newPartida.fechaSacramento,
           sexo: newPartida.sexo,
           fechaNacimiento: newPartida.fechaNacimiento,
-          lugarNacimiento: newPartida.lugarNacimiento,
           nombrePadre: newPartida.nombrePadre,
           nombreMadre: newPartida.nombreMadre,
-          tipoUnionPadres: newPartida.tipoUnionPadres,
-          abuelosPaternos: newPartida.abuelosPaternos,
-          abuelosMaternos: newPartida.abuelosMaternos,
           padrinos: newPartida.padrinos,
           ministro: newPartida.ministro,
-          daFe: finalDaFe, // 🚀 MULTILLAVE PARA EL DECRETO
-          dafe: finalDaFe,
-          da_fe: finalDaFe,
-          ministerFaith: finalDaFe,
+          daFe: finalDaFe, dafe: finalDaFe, da_fe: finalDaFe, ministerFaith: finalDaFe,
+
+          // Inyecciones específicas
+          ...(activeTab === 'bautizos' && {
+             lugarNacimiento: newPartida.lugarNacimiento,
+             tipoUnionPadres: newPartida.tipoUnionPadres,
+             abuelosPaternos: newPartida.abuelosPaternos,
+             abuelosMaternos: newPartida.abuelosMaternos,
+          }),
 
           originalPartidaId: foundRecord.id,
           originalPartidaSummary: { 
@@ -266,52 +331,51 @@ const BaptismCorrectionNewPage = () => {
           }
         };
 
-        // 3. Marcar original como anulada en Supabase (Inyectamos el daFe histórico)
-        await supabase.from('baptisms').update({ 
+        // 3. Anular partida original
+        await supabase.from(tableName).update({ 
             status: 'anulada', nota_marginal: noteAnulada, da_fe: finalDaFe,
             raw_data: { ...foundRecord, notaMarginal: noteAnulada, anulado: true, status: 'anulada', daFe: finalDaFe, dafe: finalDaFe } 
         }).eq('id', foundRecord.id);
 
         const siguientesSupletorios = calculateNextConsecutive(
-            cloudParams.suplementarioNumero,
-            cloudParams.suplementarioFolio,
-            cloudParams.suplementarioLibro,
-            cloudParams.suplementarioPartidas,
-            cloudParams.suplementarioReiniciar
+            activeParams.suplementarioNumero, activeParams.suplementarioFolio,
+            activeParams.suplementarioLibro, activeParams.suplementarioPartidas, activeParams.suplementarioReiniciar
         );
 
-        const newParams = { 
-            ...cloudParams, 
-            suplementarioNumero: siguientesSupletorios.numero,
-            suplementarioFolio: siguientesSupletorios.folio,
-            suplementarioLibro: siguientesSupletorios.libro
-        };
+        const newParamsConfig = { ...activeParams, suplementarioNumero: siguientesSupletorios.numero, suplementarioFolio: siguientesSupletorios.folio, suplementarioLibro: siguientesSupletorios.libro };
 
         await supabase.from('parish_parameters').upsert({ 
             parish_id: user.parishId,
-            bautizos_params: newParams 
+            ...(activeTab === 'bautizos' ? { bautizos_params: newParamsConfig } : { confirmaciones_params: newParamsConfig })
         }, { onConflict: 'parish_id' });
 
         // 5. Crear Nueva Partida Supletoria
-        const { data: newBap, error: errBap } = await supabase.from('baptisms').insert([{
+        let dbInsertPayload = {
             parish_id: user.parishId,
             book_number: String(supletorioLibro).padStart(4, '0'), folio: String(supletorioFolio).padStart(4, '0'), number: String(supletorioNumero).padStart(4, '0'),
             celebration_date: newPartida.fechaSacramento || null, nombres: newPartida.nombres, apellidos: newPartida.apellidos, sexo: newPartida.sexo,
-            fecha_nacimiento: newPartida.fechaNacimiento || null, lugar_nacimiento: newPartida.lugarNacimiento, lugar_bautismo: newPartida.lugarBautismo,
-            nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre, tipo_union_padres: newPartida.tipoUnionPadres, 
-            abuelos_paternos: newPartida.abuelosPaternos, abuelos_maternos: newPartida.abuelosMaternos, padrinos: newPartida.padrinos,
-            ministro: newPartida.ministro, da_fe: finalDaFe, status: 'seated', nota_marginal: notaSupletoriaFinal,
+            fecha_nacimiento: newPartida.fechaNacimiento || null, lugar_bautismo: newPartida.lugarBautismo,
+            nombre_padre: newPartida.nombrePadre, nombre_madre: newPartida.nombreMadre, 
+            padrinos: newPartida.padrinos, ministro: newPartida.ministro, da_fe: finalDaFe, status: 'seated', nota_marginal: notaSupletoriaFinal,
             raw_data: partidaToSave
-        }]).select('id').single();
+        };
 
-        if (errBap) throw errBap;
+        if (activeTab === 'bautizos') {
+           dbInsertPayload.lugar_nacimiento = newPartida.lugarNacimiento;
+           dbInsertPayload.tipo_union_padres = newPartida.tipoUnionPadres;
+           dbInsertPayload.abuelos_paternos = newPartida.abuelosPaternos;
+           dbInsertPayload.abuelos_maternos = newPartida.abuelosMaternos;
+        }
+
+        const { data: newRecord, error: errRecord } = await supabase.from(tableName).insert([dbInsertPayload]).select('id').single();
+        if (errRecord) throw errRecord;
 
         // 6. Crear Decreto Final
-        payloadDecree.newPartidaId = newBap.id;
+        payloadDecree.newPartidaId = newRecord.id;
         await supabase.from('decretos').insert([{ parish_id: user.parishId, tipo: 'correccion', payload: payloadDecree }]);
 
         setIsLoading(false);
-        toast({ title: "Éxito", description: "Decreto guardado y partida supletoria creada.", className: "bg-green-50 text-green-900 border-green-200" });
+        toast({ title: "Éxito", description: `Decreto guardado y partida supletoria de ${activeTab} creada.`, className: "bg-green-50 text-green-900 border-green-200" });
         navigate('/parroquia/decretos/ver-correcciones');
         
     } catch (error) {
@@ -319,6 +383,10 @@ const BaptismCorrectionNewPage = () => {
         toast({ title: "Error", description: error.message, variant: "destructive" });
     }
   };
+
+  // Clases compartidas para consistencia
+  const confLabelClass = "block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1";
+  const confInputClass = "h-11 w-full px-4 py-2 text-sm text-gray-900 font-bold border border-gray-200 rounded-xl focus:ring-4 focus:ring-red-600/10 focus:border-red-600 outline-none transition-all bg-gray-50/50 focus:bg-white uppercase shadow-sm";
 
   return (
     <DashboardLayout entityName={user?.parishName || "Parroquia"}>
@@ -333,17 +401,20 @@ const BaptismCorrectionNewPage = () => {
           </div>
         </div>
 
-        <Tabs defaultValue="bautizos" className="w-full">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
           <TabsList className="grid w-full grid-cols-3 mb-10 bg-gray-100 p-1 rounded-2xl h-14">
-            <TabsTrigger value="bautizos" className="rounded-xl font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-sm">Bautizos</TabsTrigger>
-            <TabsTrigger value="confirmaciones" disabled className="opacity-30 rounded-xl font-bold uppercase text-[10px] tracking-widest">Confirmaciones</TabsTrigger>
+            <TabsTrigger value="bautizos" className="rounded-xl font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-[#4B7BA7] data-[state=active]:shadow-sm transition-all">Bautizos</TabsTrigger>
+            <TabsTrigger value="confirmaciones" className="rounded-xl font-bold uppercase text-[10px] tracking-widest data-[state=active]:bg-white data-[state=active]:text-red-600 data-[state=active]:shadow-sm transition-all">Confirmaciones</TabsTrigger>
             <TabsTrigger value="matrimonios" disabled className="opacity-30 rounded-xl font-bold uppercase text-[10px] tracking-widest">Matrimonios</TabsTrigger>
           </TabsList>
 
+          {/* ========================================================= */}
+          {/* ================= PESTAÑA DE BAUTIZOS ==================== */}
+          {/* ========================================================= */}
           <TabsContent value="bautizos" className="space-y-8 animate-in fade-in duration-500">
             <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="bg-gray-50 px-8 py-4 border-b border-gray-200 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-gray-400" /><h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">01. Información del Decreto</h3>
+                <FileText className="w-4 h-4 text-[#4B7BA7]" /><h3 className="text-xs font-black text-[#4B7BA7] uppercase tracking-widest">01. Información del Decreto (Bautizo)</h3>
               </div>
               <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div className="space-y-2">
@@ -364,11 +435,11 @@ const BaptismCorrectionNewPage = () => {
               </div>
 
               <div className="mx-8 mb-8 p-8 bg-[#4B7BA7]/5 rounded-3xl border border-[#4B7BA7]/10">
-                <h4 className="text-[10px] font-black text-[#4B7BA7] uppercase tracking-widest mb-6">Localizar Partida Original para Anulación</h4>
+                <h4 className="text-[10px] font-black text-[#4B7BA7] uppercase tracking-widest mb-6 flex items-center gap-2"><Search className="w-3 h-3" /> Localizar Partida Original para Anulación</h4>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
                   <div className="md:col-span-2 relative" ref={wrapperRef}>
                     <label className="block text-[10px] font-black text-gray-400 uppercase mb-1">Nombre Bautizado</label>
-                    <Input name="nombreBautizado" value={decreeData.nombreBautizado} onChange={handleDecreeChange} autoComplete="off" />
+                    <Input name="targetName" value={decreeData.targetName} onChange={handleDecreeChange} autoComplete="off" />
                     {showSuggestions && suggestions.length > 0 && (
                       <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-md shadow-lg mt-1 max-h-48 overflow-auto">
                         {suggestions.map((r, i) => <div key={i} className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm font-bold text-gray-700" onClick={() => handleSuggestionClick(r)}>{r.firstName} {r.lastName}</div>)}
@@ -381,7 +452,7 @@ const BaptismCorrectionNewPage = () => {
                 </div>
                 <div className="mt-4 flex justify-end">
                   <Button onClick={handleSearch} disabled={isLoading} className="bg-[#4B7BA7] hover:bg-[#3A6286] text-white rounded-xl font-bold uppercase tracking-widest text-[10px] px-8">
-                    {isLoading ? <Loader2 className="animate-spin w-4 h-4" /> : <><Search className="w-4 h-4 mr-2" /> Buscar en Nube</>}
+                    {isLoading ? <Loader2 className="animate-spin w-4 h-4" /> : <><Search className="w-4 h-4 mr-2" /> Buscar Bautizo</>}
                   </Button>
                 </div>
                 {searchMessage && (
@@ -451,17 +522,150 @@ const BaptismCorrectionNewPage = () => {
                 </div>
               </div>
             </div>
+          </TabsContent>
 
-            <div className="fixed bottom-8 right-8 z-50">
-              <Button onClick={handleSave} disabled={!foundRecord || isLoading} className="bg-gradient-to-r from-green-600 to-green-700 hover:shadow-2xl text-white px-12 py-8 rounded-full font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-all">
-                {isLoading ? <Loader2 className="animate-spin w-5 h-5 mr-3" /> : <Save className="w-6 h-6 mr-3" />} Ejecutar Decreto en la Nube
-              </Button>
+          {/* ========================================================= */}
+          {/* ============== PESTAÑA DE CONFIRMACIONES ================= */}
+          {/* ========================================================= */}
+          <TabsContent value="confirmaciones" className="space-y-8 animate-in fade-in duration-500">
+            <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="bg-red-50 px-8 py-4 border-b border-red-100 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-red-600" /><h3 className="text-xs font-black text-red-700 uppercase tracking-widest">01. Información del Decreto (Confirmación)</h3>
+              </div>
+              <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Número de Decreto</label>
+                  <Input name="numeroDeDecreto" value={decreeData.numeroDeDecreto} onChange={handleDecreeChange} placeholder="Ej: 024-2025" className="py-6 font-bold focus:border-red-500 focus:ring-red-500/20" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Fecha de Emisión</label>
+                  <Input type="date" name="fechaEmision" value={decreeData.fechaEmision} onChange={handleDecreeChange} className="py-6 focus:border-red-500 focus:ring-red-500/20" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase">Concepto</label>
+                  <select name="conceptoAnulacion" value={decreeData.conceptoAnulacion} onChange={handleDecreeChange} className="w-full h-[50px] px-4 border border-gray-200 rounded-xl text-sm font-bold uppercase outline-none focus:ring-2 focus:ring-red-500/20 bg-white text-gray-700">
+                    <option value="">SELECCIONE...</option>
+                    {conceptos.map(c => <option key={c.id} value={c.id}>{c.codigo} - {c.concepto}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="mx-8 mb-8 p-8 bg-red-50/50 rounded-3xl border border-red-100">
+                <h4 className="text-[10px] font-black text-red-600 uppercase tracking-widest mb-6 flex items-center gap-2"><Search className="w-3 h-3" /> Localizar Partida Original para Anulación</h4>
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                  <div className="md:col-span-2 relative" ref={wrapperRef}>
+                    <label className="block text-[10px] font-black text-gray-400 uppercase mb-1">Nombre Confirmado</label>
+                    <Input name="targetName" value={decreeData.targetName} onChange={handleDecreeChange} autoComplete="off" className="focus:border-red-500 focus:ring-red-500/20" />
+                    {showSuggestions && suggestions.length > 0 && (
+                      <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-md shadow-lg mt-1 max-h-48 overflow-auto">
+                        {suggestions.map((r, i) => <div key={i} className="px-4 py-2 hover:bg-red-50 cursor-pointer text-sm font-bold text-gray-700" onClick={() => handleSuggestionClick(r)}>{r.firstName} {r.lastName}</div>)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1"><label className="text-[9px] font-bold text-gray-400 uppercase">Libro</label><Input name="Libro" value={decreeData.Libro} onChange={handleDecreeChange} className="text-center font-mono font-bold focus:border-red-500 focus:ring-red-500/20" /></div>
+                  <div className="space-y-1"><label className="text-[9px] font-bold text-gray-400 uppercase">Folio</label><Input name="folio" value={decreeData.folio} onChange={handleDecreeChange} className="text-center font-mono font-bold focus:border-red-500 focus:ring-red-500/20" /></div>
+                  <div className="space-y-1"><label className="text-[9px] font-bold text-gray-400 uppercase">Número</label><Input name="numero" value={decreeData.numero} onChange={handleDecreeChange} className="text-center font-mono font-bold focus:border-red-500 focus:ring-red-500/20" /></div>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <Button onClick={handleSearch} disabled={isLoading} className="bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold uppercase tracking-widest text-[10px] px-8 shadow-lg shadow-red-900/20">
+                    {isLoading ? <Loader2 className="animate-spin w-4 h-4" /> : <><Search className="w-4 h-4 mr-2" /> Buscar Confirmación</>}
+                  </Button>
+                </div>
+                {searchMessage && (
+                  <div className={`mt-4 p-3 rounded-xl text-xs font-bold flex gap-2 ${searchMessage.type === 'error' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+                    {searchMessage.type === 'error' ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />} {searchMessage.text.toUpperCase()}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className={`bg-white rounded-3xl border border-gray-200 shadow-sm transition-all duration-500 ${!foundRecord ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+              <div className="bg-gray-50 px-8 py-4 border-b border-gray-200 flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-green-600" /><h3 className="text-xs font-black text-green-600 uppercase tracking-widest">02. Datos Corregidos para Libro Supletorio</h3>
+              </div>
+              <div className="p-10 space-y-10">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="space-y-2"><label className={confLabelClass}>Apellidos</label><Input name="apellidos" value={newPartida.apellidos} onChange={handleNewPartidaChangeUpper} className="py-6 font-bold" /></div>
+                  <div className="space-y-2"><label className={confLabelClass}>Nombres</label><Input name="nombres" value={newPartida.nombres} onChange={handleNewPartidaChangeUpper} className="py-6 font-bold" /></div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div>
+                        <label className={confLabelClass}>Sexo</label>
+                        <select name="sexo" required value={newPartida.sexo} onChange={handleNewPartidaChangeRaw} className={confInputClass}>
+                            <option value="">SELECCIONE...</option>
+                            <option value="MASCULINO">MASCULINO</option>
+                            <option value="FEMENINO">FEMENINO</option>
+                        </select>
+                    </div>
+                    <div><label className={confLabelClass}>Fecha de Nacimiento</label><Input type="date" name="fechaNacimiento" value={newPartida.fechaNacimiento} onChange={handleNewPartidaChangeRaw} className="py-6" /></div>
+                    <div>
+                        <label className={confLabelClass}>Edad Conf.</label>
+                        <div className="relative">
+                            <Input type="number" name="edad" value={newPartida.edad} onChange={handleNewPartidaChangeRaw} className="py-6 pr-12" />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">AÑOS</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t pt-10">
+                    <div className="space-y-2"><label className={confLabelClass}>Fecha Confirmación</label><Input type="date" name="fechaSacramento" value={newPartida.fechaSacramento} onChange={handleNewPartidaChangeRaw} className="py-6" /></div>
+                    <div className="space-y-2"><label className={confLabelClass}>Parroquia / Lugar de Celebración</label><Input name="lugarSacramento" value={newPartida.lugarSacramento} onChange={handleNewPartidaChangeUpper} className="py-6" /></div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t pt-10">
+                  <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100 space-y-4">
+                    <p className="text-[10px] font-black text-blue-700 uppercase tracking-widest">Información del Padre</p>
+                    <Input name="nombrePadre" value={newPartida.nombrePadre} onChange={handleNewPartidaChangeUpper} className="bg-white font-bold" />
+                  </div>
+                  <div className="bg-pink-50/50 p-6 rounded-3xl border border-pink-100 space-y-4">
+                    <p className="text-[10px] font-black text-pink-700 uppercase tracking-widest">Información de la Madre</p>
+                    <Input name="nombreMadre" value={newPartida.nombreMadre} onChange={handleNewPartidaChangeUpper} className="bg-white font-bold" />
+                  </div>
+                </div>
+
+                <div className="space-y-6 border-t pt-10">
+                    <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2"><Droplet className="w-3.5 h-3.5 text-[#D4AF37]"/> Registro de Bautismo Origen</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div><label className={confLabelClass}>Lugar y Parroquia de Bautismo</label><Input name="lugarBautismo" value={newPartida.lugarBautismo} onChange={handleNewPartidaChangeUpper} className="py-6" placeholder="EJ: PARROQUIA SAN JUAN BAUTISTA" /></div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-6 bg-slate-50 p-6 rounded-3xl border border-slate-100">
+                        <div><label className={confLabelClass}>Libro Baut.</label><Input name="libroBautismo" value={newPartida.libroBautismo} onChange={handleNewPartidaChangeRaw} className="text-center font-mono py-6" /></div>
+                        <div><label className={confLabelClass}>Folio Baut.</label><Input name="folioBautismo" value={newPartida.folioBautismo} onChange={handleNewPartidaChangeRaw} className="text-center font-mono py-6" /></div>
+                        <div><label className={confLabelClass}>Acta Baut.</label><Input name="numeroBautismo" value={newPartida.numeroBautismo} onChange={handleNewPartidaChangeRaw} className="text-center font-mono py-6" /></div>
+                    </div>
+                </div>
+
+                <div className="space-y-2 border-t pt-10">
+                    <label className={confLabelClass}><Users className="w-3.5 h-3.5 inline mb-0.5 text-gray-400 mr-1"/> Padrinos</label>
+                    <Input name="padrinos" value={newPartida.padrinos} onChange={handleNewPartidaChangeUpper} className="py-6 font-bold" placeholder="NOMBRES SEPARADOS POR COMAS" />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t pt-10">
+                  <div className="space-y-2"><label className={confLabelClass}><PenTool className="w-3.5 h-3.5 inline mb-0.5 text-red-400 mr-1"/> Ministro (Obispo / Delegado)</label><Input name="ministro" value={newPartida.ministro} onChange={handleNewPartidaChangeUpper} className="py-6 font-black text-red-900 border-l-8 border-l-red-600" /></div>
+                  <div className="space-y-2"><label className={confLabelClass}>Da Fe (Párroco)</label><Input name="daFe" value={newPartida.daFe} onChange={handleNewPartidaChangeUpper} className="py-6 font-bold text-gray-500 bg-gray-50" /></div>
+                </div>
+
+                <div className="space-y-2 border-t pt-10">
+                  <label className={confLabelClass}>Observaciones del Decreto (Opcional)</label>
+                  <textarea name="observaciones" value={newPartida.observaciones} onChange={handleNewPartidaChangeUpper} rows={4} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-red-500/20 uppercase font-bold text-gray-700 bg-amber-50" placeholder="OBSERVACIONES PARA EL DECRETO (ESTO NO SE IMPRIMIRÁ EN LA PARTIDA)..." />
+                </div>
+              </div>
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* ========================================================= */}
+        {/* ======================= BOTÓN FLOTANTE ================== */}
+        {/* ========================================================= */}
+        <div className="fixed bottom-8 right-8 z-50">
+          <Button onClick={handleSave} disabled={!foundRecord || isLoading} className="bg-gradient-to-r from-green-600 to-green-700 hover:shadow-2xl text-white px-12 py-8 rounded-full font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-all">
+            {isLoading ? <Loader2 className="animate-spin w-5 h-5 mr-3" /> : <Save className="w-6 h-6 mr-3" />} Ejecutar Decreto en la Nube
+          </Button>
+        </div>
       </div>
     </DashboardLayout>
   );
 };
 
-export default BaptismCorrectionNewPage;
+export default CorreccionDecretosPage;
